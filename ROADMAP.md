@@ -16,8 +16,9 @@
 - ✅ Дисциплина слоёв (аналитика в `domain` без внешних зависимостей).
 - ✅ Контракты `data` (трейт `MarketData`, ошибки, `TimeFrame`), классификация секторов.
 - ✅ DDL схемы DuckDB в `storage::schema`.
+- ✅ § 0.1 gRPC-стабы: vendored proto `FinamWeb/finam-trade-api` (@3cec0896),
+  кодоген клиентов через `protox` + `tonic-prost-build` (без системного protoc).
 - ⏳ Сетевой каркас gRPC — открытые подзадачи:
-  - § 0.1 gRPC-стабы из `.proto` (`tonic-build`, vendored proto `FinamWeb`).
   - § 0.2 транспорт (`rustls`/HTTP-2), auth + refresh токена, `keyring` для ключа.
   - § 0.3 per-method rate-limiter (`governor`, ≤200/мин), reconnect стримов, `tracing`.
   - § 0.4 реализация трейта `MarketData` (`assets`/`bars`/`last_quote`/`latest_trades`).
@@ -52,8 +53,12 @@
 - ✅ § 3.4 Каркас фронта: Vite + Svelte 5 + TS, ECharts, тёмная тема, типизированный
   `invoke` с моками. Проверено: `svelte-check` (0 ошибок) + `vite build`.
 
-## Фаза 4 — Представление 1 (Акции / секторы)
-- treemap (размер = оборот, цвет = % изм), heatmap, breadth, топ-движения, RRG.
+## Фаза 4 — Представление 1 (Акции / секторы) ✅ (каркас)
+- ✅ Докуемые панели (dockview-core, тёмная тема) + реактивный стор.
+- ✅ treemap секторов, heatmap, breadth (gauge), топ-движения, RRG (квадранты).
+- ⏳ Данные breadth/RRG пока из моков — нужны команды `app::api` (§ 3.2);
+  виртуализация таблиц (TanStack), свечи (Lightweight Charts).
+- Проверено: `svelte-check` (0 ошибок) + `vite build`.
 
 ## Фаза 5 — Представления 2 и 3 (Фьючерсы, Облигации)
 - § 5.1 Фьючерсы: treemap по группам, базис, терм-структура, (open interest).

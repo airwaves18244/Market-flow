@@ -16,14 +16,16 @@
 > Workspace, дисциплина слоёв, контракты `data`, DDL и классификация секторов
 > уже сделаны. Остаётся сетевой каркас gRPC.
 
-### 0.1 gRPC-стабы из `.proto` (`finam-proto`)
-- [ ] Добавить `.proto` Finam (`FinamWeb/trade-api-docs`) в `crates/finam-proto/proto/`
-      (vendored, с фиксацией версии/коммита источника в README крейта).
-- [ ] Подключить `tonic` + `prost` в зависимости, `tonic-build` в `[build-dependencies]`.
-- [ ] Написать `build.rs`: компиляция `AuthService`, `AssetsService`,
-      `MarketDataService` (без `AccountsService`).
-- [ ] Реэкспортировать сгенерённых клиентов/сообщения через `tonic::include_proto!`.
-- [ ] **DoD:** `cargo build -p finam-proto` собирается, типы клиентов доступны из `data`.
+### 0.1 gRPC-стабы из `.proto` (`finam-proto`) ✅
+- [x] Vendored `.proto` нового API (`FinamWeb/finam-trade-api`) в
+      `crates/finam-proto/proto/`; коммит зафиксирован в `proto/VENDOR.md`.
+- [x] `tonic` + `tonic-prost` + `prost` в зависимостях; `tonic-prost-build` +
+      `protox` (чистый Rust, без системного protoc) в `[build-dependencies]`.
+- [x] `build.rs`: кодоген клиентов `AuthService`, `AssetsService`,
+      `MarketDataService` (только клиенты — терминал read-only).
+- [x] Реэкспорт клиентов и namespace'ов `auth`/`assets`/`marketdata` из `pb`.
+- [x] **DoD:** `cargo build -p finam-proto` собирается; тип-левел тесты на
+      наличие клиентов и сообщений; `cargo build -p data` зелёный.
 
 ### 0.2 Транспорт и авторизация (`data`)
 - [ ] TLS-канал через `rustls` к `ENDPOINT` (HTTP/2).
@@ -155,14 +157,19 @@
 
 ---
 
-## Фаза 4 — Представление 1: Акции / секторы (`frontend`)
-- [ ] Treemap: размер = оборот, цвет = % изменения.
-- [ ] Heatmap секторов/инструментов.
-- [ ] Индикатор breadth (A/D, % растущих).
-- [ ] Таблица топ-движений (TanStack Table, сортировка/виртуализация).
-- [ ] RRG-чарт (квадранты, хвосты ротации).
-- [ ] Подключение к IPC-командам Фазы 3.
-- [ ] **DoD:** представление показывает живые/сид данные без ошибок консоли.
+## Фаза 4 — Представление 1: Акции / секторы (`frontend`) ✅ (каркас)
+- [x] Докуемые панели (dockview-core, тёмная тема) + реактивный стор
+      (`store.svelte.ts`), данные текут в панели через общий стейт.
+- [x] Treemap секторов: размер = оборот, цвет = знак нетто-потока.
+- [x] Heatmap секторов (интенсивность нетто-поток/оборот).
+- [x] Индикатор breadth (gauge % растущих + счётчики A/D).
+- [x] RRG-чарт (scatter, квадранты с цветовой кодировкой).
+- [x] Таблица топ-движений.
+- [x] **DoD:** `svelte-check` (0 ошибок) + `vite build` зелёные; панели рендерят
+      данные (моки вне Tauri).
+- [ ] Виртуализация таблицы (TanStack Table), хвосты ротации RRG.
+- [ ] Реальные команды breadth/RRG вместо моков (зависит от § 3.2).
+- [ ] Подключение к живым IPC-командам в Tauri (десктоп-цель).
 
 ---
 

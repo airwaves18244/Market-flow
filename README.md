@@ -64,7 +64,8 @@ cargo run -p app
 - Лимит ~200 запросов/мин на метод; техокно 05:00–06:15 MSK; стрим обрывается
   ~раз в 24 ч (нужен авто-reconnect).
 - Документация: https://tradeapi.finam.ru/docs/ ,
-  proto: https://github.com/FinamWeb/trade-api-docs
+  proto (новый gRPC API): https://github.com/FinamWeb/finam-trade-api
+  (vendored в `crates/finam-proto/proto`, коммит — в `proto/VENDOR.md`).
 - API-ключ хранится в ОС-keyring, **не** в репозитории.
 
 См. также `ROADMAP.md` — пошаговый план развития.
