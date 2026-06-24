@@ -1,0 +1,27 @@
+{
+  "name": "market-terminal-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Веб-фронт терминала (Vite + Svelte + TS), подключается к Rust-ядру через Tauri",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1",
+    "dockview-core": "^4.2.0",
+    "echarts": "^5.5.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tsconfig/svelte": "^5.0.4",
+    "svelte": "^5.19.0",
+    "svelte-check": "^4.1.4",
+    "tslib": "^2.8.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}
