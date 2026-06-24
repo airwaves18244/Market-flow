@@ -4,10 +4,23 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Сгенерированные gRPC-стабы Finam Trade API (заполняется в фазе подключения API)"
+description = "Сгенерированные gRPC-стабы Finam Trade API (tonic + prost из vendored .proto)"
+build = "build.rs"
 
-# В фазе подключения API сюда добавляются:
-#   [dependencies] tonic, prost
-#   [build-dependencies] tonic-build
-# и build.rs, генерирующий код из vendored .proto (репо FinamWeb/trade-api-docs).
+# Vendored .proto: репозиторий FinamWeb/finam-trade-api, коммит зафиксирован в
+# proto/VENDOR.md. Код генерируется в build.rs через protox (чистый Rust, без
+# системного protoc) + tonic-prost-build.
 [dependencies]
+tonic = { version = "0.14", default-features = false, features = [
+    "codegen",
+    "channel",
+    "tls-ring",
+] }
+tonic-prost = "0.14"
+prost = "0.14"
+prost-types = "0.14"
+
+[build-dependencies]
+tonic-prost-build = "0.14"
+prost-build = "0.14"
+protox = "0.9"
