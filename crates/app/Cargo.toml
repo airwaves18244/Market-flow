@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 description = "Tauri-приложение: оркестрация, команды, события, планировщик ингеста"
 
+[lib]
+name = "app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "market-terminal"
 path = "src/main.rs"
@@ -16,6 +20,9 @@ data = { workspace = true }
 storage = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 
-# В фазе UI добавляются: tauri, tokio. Сейчас bin — это smoke-точка входа,
-# проверяющая, что слои связываются и собираются.
+# В фазе UI добавляется `tauri`. Асинхронный рантайм (`tokio`) пока нужен только
+# тестам оркестрации; в bin он подключится вместе с Tauri.
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
