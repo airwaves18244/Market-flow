@@ -1,15 +1,13 @@
 <script lang="ts">
-  import type { Mover } from "../types";
+  import { store } from "../store.svelte";
 
-  let { movers }: { movers: Mover[] } = $props();
-
+  const movers = $derived(store.equity?.top_movers ?? []);
   const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
   const money = (x: number) =>
     new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 }).format(x);
 </script>
 
-<section class="panel">
-  <h2>Топ-движения</h2>
+<div class="table-wrap">
   <table>
     <thead>
       <tr>
@@ -30,4 +28,4 @@
       {/each}
     </tbody>
   </table>
-</section>
+</div>

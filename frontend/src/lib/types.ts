@@ -30,3 +30,19 @@ export interface EquityDashboard {
   sectors: SectorTurnover[];
   top_movers: Mover[];
 }
+
+/** Ширина рынка (A/D) за период. */
+export interface Breadth {
+  advancers: number;
+  decliners: number;
+  unchanged: number;
+  /** Доля растущих от общего числа (0..1). */
+  pct_advancing: number;
+}
+
+/** Точка RRG: относительная сила сектора и её импульс (центр = 100). */
+export interface RrgPoint {
+  sector: string;
+  rs_ratio: number;
+  rs_momentum: number;
+}

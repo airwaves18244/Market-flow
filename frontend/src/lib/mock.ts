@@ -1,7 +1,7 @@
 // Демо-данные для запуска фронта вне Tauri (`npm run dev` без Rust-ядра).
 // Позволяют разрабатывать и проверять UI до подключения реальных IPC-команд.
 
-import type { EquityDashboard, FlowPoint } from "./types";
+import type { Breadth, EquityDashboard, FlowPoint, RrgPoint } from "./types";
 
 export function mockEquityDashboard(fromTs: number, toTs: number): EquityDashboard {
   return {
@@ -33,4 +33,26 @@ export function mockFlowSeries(): FlowPoint[] {
     out.push({ ts: start + i * day, net_flow: acc });
   }
   return out;
+}
+
+export function mockBreadth(): Breadth {
+  const advancers = 142;
+  const decliners = 88;
+  const unchanged = 20;
+  return {
+    advancers,
+    decliners,
+    unchanged,
+    pct_advancing: advancers / (advancers + decliners + unchanged),
+  };
+}
+
+export function mockRrg(): RrgPoint[] {
+  return [
+    { sector: "Нефтегаз", rs_ratio: 103.4, rs_momentum: 101.2 },
+    { sector: "Финансы", rs_ratio: 98.1, rs_momentum: 99.4 },
+    { sector: "Металлы", rs_ratio: 101.0, rs_momentum: 102.6 },
+    { sector: "Энергетика", rs_ratio: 97.2, rs_momentum: 98.1 },
+    { sector: "IT", rs_ratio: 99.6, rs_momentum: 100.9 },
+  ];
 }

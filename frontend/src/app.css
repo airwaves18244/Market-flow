@@ -49,51 +49,62 @@ header h1 {
   color: var(--muted);
 }
 
-.grid {
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-  grid-template-columns: 2fr 1fr;
-  grid-template-rows: 1fr 1fr;
-  grid-template-areas:
-    "sectors movers"
-    "flow movers";
+.badge {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  align-self: center;
+}
+
+.badge.error {
+  color: var(--down);
+}
+
+/* Док-контейнер занимает всё под шапкой; панели рендерит dockview. */
+.dock-host {
+  position: relative;
   height: calc(100vh - 54px);
 }
 
-.grid > :global(section:nth-child(1)) {
-  grid-area: sectors;
-}
-.grid > :global(section:nth-child(2)) {
-  grid-area: movers;
-}
-.grid > :global(section:nth-child(3)) {
-  grid-area: flow;
-}
-
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+/* Содержимое каждой докуемой панели. */
+:global(.dock-content) {
+  height: 100%;
+  width: 100%;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
 
-.panel h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .chart {
   flex: 1;
   min-height: 0;
+}
+
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.breadth {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.breadth .legend {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.breadth .muted {
+  color: var(--muted);
 }
 
 table {

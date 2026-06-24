@@ -1,4 +1,5 @@
 import { mount } from "svelte";
+import "dockview-core/dist/styles/dockview.css";
 import "./app.css";
 import App from "./App.svelte";
 
