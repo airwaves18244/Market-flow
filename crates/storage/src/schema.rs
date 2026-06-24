@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS sector_map (
     is_isin BOOLEAN NOT NULL
 );";
 
+/// Журнал применённых миграций (версионирование схемы).
+pub const DDL_SCHEMA_MIGRATIONS: &str = "\
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version     BIGINT PRIMARY KEY,
+    applied_at  BIGINT NOT NULL
+);";
+
 /// Полный набор DDL в порядке применения.
 pub const ALL_DDL: [&str; 4] = [
     DDL_INSTRUMENTS,
@@ -57,6 +64,25 @@ pub const ALL_DDL: [&str; 4] = [
     DDL_TURNOVER_SNAPSHOTS,
     DDL_SECTOR_MAP,
 ];
+
+/// Одна миграция схемы: номер версии и упорядоченный список DDL-операторов.
+pub struct Migration {
+    pub version: i64,
+    pub statements: &'static [&'static str],
+}
+
+/// Упорядоченные миграции. Накат идемпотентен: применяются только версии,
+/// которых ещё нет в `schema_migrations`. Новые изменения схемы добавляются
+/// следующими элементами с возрастающей версией (старые не редактируются).
+pub const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    statements: &ALL_DDL,
+}];
+
+/// Целевая (последняя) версия схемы.
+pub fn target_version() -> i64 {
+    MIGRATIONS.iter().map(|m| m.version).max().unwrap_or(0)
+}
 
 #[cfg(test)]
 mod tests {
@@ -69,5 +95,15 @@ mod tests {
             assert!(ddl.contains("CREATE TABLE IF NOT EXISTS"));
         }
         assert!(DDL_BARS.contains("PRIMARY KEY (symbol, timeframe, ts)"));
+    }
+
+    #[test]
+    fn migrations_are_monotonic_and_target_is_last() {
+        let mut prev = 0;
+        for m in MIGRATIONS {
+            assert!(m.version > prev, "версии миграций должны возрастать");
+            prev = m.version;
+        }
+        assert_eq!(target_version(), prev);
     }
 }

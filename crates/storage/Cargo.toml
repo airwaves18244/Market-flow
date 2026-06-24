@@ -11,5 +11,6 @@ domain = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
-# В фазе хранилища добавляется крейт `duckdb` (bundled). До этого здесь живут
-# схема (DDL) и контракты запросов, не требующие нативной библиотеки.
+# Встраиваемый DuckDB (bundled — компилируется из исходников амальгамации,
+# без системной библиотеки). Колоночный OLAP-движок для аналитических запросов.
+duckdb = { version = "1", features = ["bundled"] }

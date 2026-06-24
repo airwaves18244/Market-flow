@@ -10,6 +10,7 @@
 //! Сетевые реализации подключаются в фазе интеграции API; здесь определены
 //! контракты (трейты/типы), на которые опираются `storage` и `app`.
 
+pub mod backfill;
 pub mod classify;
 
 use domain::{Bar, Instrument, Quote, Trade};
