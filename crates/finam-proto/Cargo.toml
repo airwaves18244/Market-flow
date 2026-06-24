@@ -1,0 +1,13 @@
+[package]
+name = "finam-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Сгенерированные gRPC-стабы Finam Trade API (заполняется в фазе подключения API)"
+
+# В фазе подключения API сюда добавляются:
+#   [dependencies] tonic, prost
+#   [build-dependencies] tonic-build
+# и build.rs, генерирующий код из vendored .proto (репо FinamWeb/trade-api-docs).
+[dependencies]

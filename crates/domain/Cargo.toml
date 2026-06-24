@@ -1,0 +1,13 @@
+[package]
+name = "domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Доменная модель и аналитика рыночного терминала (без зависимостей от API/UI/БД)"
+
+[dependencies]
+serde = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

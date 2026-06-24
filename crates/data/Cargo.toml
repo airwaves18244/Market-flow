@@ -1,0 +1,16 @@
+[package]
+name = "data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Адаптер Finam Trade API: auth+refresh, fetch, стримы, rate-limit, классификация"
+
+[dependencies]
+domain = { workspace = true }
+finam-proto = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+# В фазе подключения API добавляются: tonic, prost, tokio, tokio-stream,
+# governor (rate-limit), keyring (секрет API).

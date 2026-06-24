@@ -1,0 +1,21 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Tauri-приложение: оркестрация, команды, события, планировщик ингеста"
+
+[[bin]]
+name = "market-terminal"
+path = "src/main.rs"
+
+[dependencies]
+domain = { workspace = true }
+data = { workspace = true }
+storage = { workspace = true }
+finam-proto = { workspace = true }
+serde = { workspace = true }
+
+# В фазе UI добавляются: tauri, tokio. Сейчас bin — это smoke-точка входа,
+# проверяющая, что слои связываются и собираются.

@@ -1,0 +1,33 @@
+name: market-terminal CI
+
+on:
+  push:
+    paths:
+      - "market-terminal/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "market-terminal/**"
+
+defaults:
+  run:
+    working-directory: market-terminal
+
+jobs:
+  core:
+    name: build + test + clippy (cross-platform core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: market-terminal
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace -- -D warnings
+      - name: test
+        run: cargo test --workspace

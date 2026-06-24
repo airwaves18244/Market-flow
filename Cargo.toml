@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/finam-proto",
+    "crates/domain",
+    "crates/data",
+    "crates/storage",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = ["airwaves18244"]
+
+[workspace.dependencies]
+# Internal crates
+finam-proto = { path = "crates/finam-proto" }
+domain = { path = "crates/domain" }
+data = { path = "crates/data" }
+storage = { path = "crates/storage" }
+
+# Shared third-party (used as crates wire up in later phases)
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

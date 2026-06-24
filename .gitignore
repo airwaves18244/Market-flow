@@ -1,0 +1,23 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# DuckDB / локальные данные
+*.duckdb
+*.duckdb.wal
+/data-local/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.svelte-kit/
+
+# Секреты (API-ключ хранится в ОС keyring, не в репозитории)
+.env
+*.local
+
+# IDE / OS
+/.idea/
+/.vscode/
+.DS_Store
