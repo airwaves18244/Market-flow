@@ -22,10 +22,13 @@ domain = { path = "crates/domain" }
 data = { path = "crates/data" }
 storage = { path = "crates/storage" }
 
-# Shared third-party (used as crates wire up in later phases)
+# Shared third-party
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+duckdb = { version = "1", features = ["bundled"] }
 
 [profile.release]
 opt-level = 3
