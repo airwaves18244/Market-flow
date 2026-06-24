@@ -38,6 +38,8 @@ pub use pb::grpc::tradeapi::v1::auth;
 pub use pb::grpc::tradeapi::v1::assets;
 /// Пространство имён сервиса рыночных данных.
 pub use pb::grpc::tradeapi::v1::marketdata;
+/// Сторона сделки (общий тип пакета `grpc.tradeapi.v1`).
+pub use pb::grpc::tradeapi::v1::Side;
 
 #[cfg(test)]
 mod tests {

@@ -5,12 +5,24 @@
 //! стримов (обрыв ~раз в 24 ч) и классификацию инструментов по секторам.
 //! Наружу он отдаёт уже доменные типы из крейта `domain`.
 //!
-//! ## Статус: интерфейсы (Фаза 0)
+//! ## Состав
 //!
-//! Сетевые реализации подключаются в фазе интеграции API; здесь определены
-//! контракты (трейты/типы), на которые опираются `storage` и `app`.
+//! - [`MarketData`] — контракт источника рыночных данных (трейт);
+//! - [`client::FinamClient`] — его gRPC-реализация (транспорт, auth+refresh,
+//!   rate-limit), переводящая ответы API в доменные типы;
+//! - [`convert`] — чистые преобразования protobuf → домен (приватный);
+//! - [`auth`], [`ratelimit`], [`resilience`], [`secret`] — поддерживающая логика;
+//! - [`classify`] — классификация инструментов по секторам.
 
+pub mod auth;
 pub mod classify;
+pub mod client;
+mod convert;
+pub mod ratelimit;
+pub mod resilience;
+pub mod secret;
+
+pub use client::FinamClient;
 
 use domain::{Bar, Instrument, Quote, Trade};
 

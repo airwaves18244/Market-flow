@@ -11,6 +11,19 @@ domain = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
-# В фазе подключения API добавляются: tonic, prost, tokio, tokio-stream,
-# governor (rate-limit), keyring (секрет API).
+# gRPC-транспорт и кодек (клиент). TLS — webpki-roots (без системных зависимостей).
+tonic = { version = "0.14", default-features = false, features = [
+    "channel",
+    "codegen",
+    "tls-ring",
+    "tls-webpki-roots",
+] }
+prost-types = "0.14"
+# Async-примитивы для кэша токена; полноценный рантайм поднимает слой `app`.
+tokio = { version = "1", default-features = false, features = ["sync", "time"] }
+# Per-method rate-limit (≤200 запросов/мин).
+governor = "0.8"
+# Хранение API-секрета в ОС-keyring.
+keyring = "3"
