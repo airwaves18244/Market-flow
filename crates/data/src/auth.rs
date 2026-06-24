@@ -1,7 +1,95 @@
-//! Состояние авторизации: кэш JWT и решение о его обновлении.
+//! Авторизация: кэш JWT, решение об обновлении и менеджер refresh.
 //!
-//! Сетевой вызов `AuthService` живёт в [`crate::client`]; здесь — чистая логика
-//! «пора ли обновлять токен», тестируемая с инъекцией времени.
+//! [`TokenCache`] — чистая логика «пора ли обновлять токен» (тестируется с
+//! инъекцией времени). [`AuthManager`] добавляет сетевой вызов `AuthService` и
+//! отдаёт актуальный токен; он разделяется (`Arc`) между унарными и стрим-
+//! методами клиента.
+
+use tokio::sync::RwLock;
+use tonic::transport::Channel;
+
+use finam_proto::{auth, AuthServiceClient};
+
+use crate::ratelimit::Limiter;
+use crate::{map_status, now_unix, DataError};
+
+/// Запас по времени до истечения JWT, при котором инициируется refresh.
+const REFRESH_MARGIN_SECS: i64 = 60;
+
+/// Менеджер авторизации: хранит секрет, кэширует JWT и обновляет его.
+pub struct AuthManager {
+    client: AuthServiceClient<Channel>,
+    secret: String,
+    source_app_id: String,
+    cache: RwLock<TokenCache>,
+    limiter: Limiter,
+}
+
+impl AuthManager {
+    /// Создать менеджер поверх клиента `AuthService`.
+    pub fn new(
+        client: AuthServiceClient<Channel>,
+        secret: impl Into<String>,
+        source_app_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            client,
+            secret: secret.into(),
+            source_app_id: source_app_id.into(),
+            cache: RwLock::new(TokenCache::new()),
+            limiter: Limiter::per_minute(200),
+        }
+    }
+
+    /// Обменять секрет на свежий JWT и узнать срок его действия.
+    pub async fn refresh(&self) -> Result<(), DataError> {
+        self.limiter.acquire().await;
+        let mut client = self.client.clone();
+        let token = client
+            .auth(auth::AuthRequest {
+                secret: self.secret.clone(),
+                source_app_id: self.source_app_id.clone(),
+            })
+            .await
+            .map_err(map_status)?
+            .into_inner()
+            .token;
+
+        let details = client
+            .token_details(auth::TokenDetailsRequest {
+                token: token.clone(),
+            })
+            .await
+            .map_err(map_status)?
+            .into_inner();
+        let expires_at = details
+            .expires_at
+            .map(|t| t.seconds)
+            .unwrap_or_else(|| now_unix() + 600);
+
+        tracing::debug!(expires_at, "обновлён JWT Finam");
+        self.cache.write().await.set(token, expires_at);
+        Ok(())
+    }
+
+    /// Вернуть актуальный токен, обновив его при необходимости.
+    pub async fn token(&self) -> Result<String, DataError> {
+        if self
+            .cache
+            .read()
+            .await
+            .needs_refresh(now_unix(), REFRESH_MARGIN_SECS)
+        {
+            self.refresh().await?;
+        }
+        self.cache
+            .read()
+            .await
+            .token()
+            .map(str::to_string)
+            .ok_or_else(|| DataError::Auth("нет токена после refresh".into()))
+    }
+}
 
 /// Кэш JWT-токена с моментом истечения (UNIX-секунды UTC).
 #[derive(Debug, Default, Clone)]

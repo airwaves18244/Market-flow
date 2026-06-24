@@ -21,10 +21,42 @@ mod convert;
 pub mod ratelimit;
 pub mod resilience;
 pub mod secret;
+pub mod stream;
 
 pub use client::FinamClient;
 
 use domain::{Bar, Instrument, Quote, Trade};
+
+/// Текущее время в UNIX-секундах UTC.
+pub(crate) fn now_unix() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Сопоставить gRPC-статус с доменной ошибкой слоя данных.
+pub(crate) fn map_status(status: tonic::Status) -> DataError {
+    use tonic::Code;
+    match status.code() {
+        Code::ResourceExhausted => DataError::RateLimited("grpc"),
+        Code::Unauthenticated => DataError::Auth(status.message().to_string()),
+        Code::Unavailable => DataError::Transport(status.message().to_string()),
+        other => DataError::Other(format!("{other:?}: {}", status.message())),
+    }
+}
+
+/// Завернуть сообщение в gRPC-запрос с заголовком авторизации.
+pub(crate) fn authorize<T>(token: &str, message: T) -> Result<tonic::Request<T>, DataError> {
+    use tonic::metadata::MetadataValue;
+    let mut request = tonic::Request::new(message);
+    let value: MetadataValue<_> = token
+        .parse()
+        .map_err(|_| DataError::Auth("некорректный токен для метаданных".into()))?;
+    request.metadata_mut().insert("authorization", value);
+    Ok(request)
+}
 
 /// Ошибки слоя данных.
 #[derive(Debug, thiserror::Error)]

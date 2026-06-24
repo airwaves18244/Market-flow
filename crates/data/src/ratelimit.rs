@@ -28,9 +28,8 @@ impl Limiter {
     }
 }
 
-/// Лимитеры на каждый используемый метод API (read-only набор).
+/// Лимитеры на методы рыночных данных (auth-лимитер живёт в `AuthManager`).
 pub struct Limiters {
-    pub auth: Limiter,
     pub assets: Limiter,
     pub bars: Limiter,
     pub quote: Limiter,
@@ -42,7 +41,6 @@ impl Default for Limiters {
         /// Лимит Finam Trade API на метод.
         const PER_METHOD: u32 = 200;
         Self {
-            auth: Limiter::per_minute(PER_METHOD),
             assets: Limiter::per_minute(PER_METHOD),
             bars: Limiter::per_minute(PER_METHOD),
             quote: Limiter::per_minute(PER_METHOD),

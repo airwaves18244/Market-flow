@@ -27,3 +27,14 @@ tokio = { version = "1", default-features = false, features = ["sync", "time"] }
 governor = "0.8"
 # Хранение API-секрета в ОС-keyring.
 keyring = "3"
+# Стримы рыночных данных + переподключение.
+tokio-stream = "0.1"
+async-stream = "0.3"
+
+[dev-dependencies]
+# Рантайм и виртуальное время для тестов переподключения стримов.
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "macros",
+    "test-util",
+] }

@@ -1,41 +1,34 @@
-//! gRPC-клиент Finam Trade API: транспорт, авторизация, rate-limit (§ 0.2–0.4).
+//! gRPC-клиент Finam Trade API: транспорт, авторизация, rate-limit, стримы
+//! (§ 0.2–0.4).
 //!
-//! [`FinamClient`] держит tonic-клиентов поверх общего TLS-канала, кэширует JWT
-//! (с авто-refresh перед истечением) и реализует трейт [`MarketData`], переводя
-//! ответы API в доменные типы через [`crate::convert`].
+//! [`FinamClient`] держит tonic-клиентов поверх общего TLS-канала, обновляет JWT
+//! через [`AuthManager`] и реализует трейт [`MarketData`] (унарные методы), а
+//! также отдаёт переподключаемые стримы рыночных данных.
 //!
-//! Сетевые методы здесь не покрываются юнит-тестами (нет ключа/доступа к API);
-//! проверяемая логика вынесена в `convert`, `auth`, `ratelimit`, `resilience`.
+//! Сетевые вызовы здесь не покрываются юнит-тестами (нет ключа/доступа к API);
+//! проверяемая логика вынесена в `convert`, `auth`, `ratelimit`, `resilience`,
+//! `stream`.
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use tokio::sync::RwLock;
-use tonic::metadata::MetadataValue;
+use tokio_stream::{Stream, StreamExt};
 use tonic::transport::{Channel, ClientTlsConfig};
-use tonic::{Code, Request, Status};
 
 use finam_proto::{
-    assets, auth, marketdata, AssetsServiceClient, AuthServiceClient, MarketDataServiceClient,
-    ENDPOINT,
+    assets, marketdata, AssetsServiceClient, AuthServiceClient, MarketDataServiceClient, ENDPOINT,
 };
 
-use crate::auth::TokenCache;
+use crate::auth::AuthManager;
 use crate::ratelimit::Limiters;
-use crate::{convert, DataError, MarketData, TimeFrame};
+use crate::stream::reconnecting;
+use crate::{authorize, convert, map_status, DataError, MarketData, TimeFrame};
 use domain::{Bar, Instrument, Quote, Trade};
-
-/// Запас по времени до истечения JWT, при котором инициируется refresh.
-const REFRESH_MARGIN_SECS: i64 = 60;
 
 /// Клиент Finam Trade API (read-only).
 pub struct FinamClient {
-    auth: AuthServiceClient<Channel>,
+    auth: Arc<AuthManager>,
     assets: AssetsServiceClient<Channel>,
     market: MarketDataServiceClient<Channel>,
-    secret: String,
-    source_app_id: String,
-    token: Arc<RwLock<TokenCache>>,
     limiters: Limiters,
 }
 
@@ -58,89 +51,120 @@ impl FinamClient {
             .await
             .map_err(|e| DataError::Transport(e.to_string()))?;
 
-        let client = Self {
-            auth: AuthServiceClient::new(channel.clone()),
+        let auth = Arc::new(AuthManager::new(
+            AuthServiceClient::new(channel.clone()),
+            secret,
+            source_app_id,
+        ));
+        // Первичная авторизация — наружу отдаём готовый к работе клиент.
+        auth.refresh().await?;
+
+        Ok(Self {
+            auth,
             assets: AssetsServiceClient::new(channel.clone()),
             market: MarketDataServiceClient::new(channel),
-            secret: secret.into(),
-            source_app_id: source_app_id.into(),
-            token: Arc::new(RwLock::new(TokenCache::new())),
             limiters: Limiters::default(),
-        };
-        client.refresh().await?;
-        Ok(client)
+        })
     }
 
-    /// Обменять секрет на свежий JWT и узнать его срок действия.
-    async fn refresh(&self) -> Result<(), DataError> {
-        self.limiters.auth.acquire().await;
-        let mut auth = self.auth.clone();
-        let token = auth
-            .auth(auth::AuthRequest {
-                secret: self.secret.clone(),
-                source_app_id: self.source_app_id.clone(),
-            })
-            .await
-            .map_err(map_status)?
-            .into_inner()
-            .token;
+    // --- Стримы рыночных данных (§ 0.3) с авто-reconnect -------------------
 
-        let details = auth
-            .token_details(auth::TokenDetailsRequest {
-                token: token.clone(),
-            })
-            .await
-            .map_err(map_status)?
-            .into_inner();
-        let expires_at = details
-            .expires_at
-            .map(|t| t.seconds)
-            .unwrap_or_else(|| now() + 600);
-
-        tracing::debug!(expires_at, "обновлён JWT Finam");
-        self.token.write().await.set(token, expires_at);
-        Ok(())
+    /// Подписка на сделки по инструменту. Стрим автоматически переподключается.
+    pub fn subscribe_trades(
+        &self,
+        symbol: &str,
+    ) -> impl Stream<Item = Result<Vec<Trade>, DataError>> + '_ {
+        let market = self.market.clone();
+        let auth = self.auth.clone();
+        let symbol = symbol.to_string();
+        reconnecting(move |_attempt| {
+            let mut market = market.clone();
+            let auth = auth.clone();
+            let symbol = symbol.clone();
+            async move {
+                let token = auth.token().await?;
+                let request =
+                    authorize(&token, marketdata::SubscribeLatestTradesRequest { symbol })?;
+                let inner = market
+                    .subscribe_latest_trades(request)
+                    .await
+                    .map_err(map_status)?
+                    .into_inner();
+                Ok(inner.map(|item| {
+                    item.map_err(map_status)
+                        .map(|resp| resp.trades.iter().map(convert::trade).collect())
+                }))
+            }
+        })
     }
 
-    /// Гарантировать актуальный токен и вернуть его строкой.
-    async fn ensure_token(&self) -> Result<String, DataError> {
-        if self.token.read().await.needs_refresh(now(), REFRESH_MARGIN_SECS) {
-            self.refresh().await?;
-        }
-        self.token
-            .read()
-            .await
-            .token()
-            .map(str::to_string)
-            .ok_or_else(|| DataError::Auth("нет токена после refresh".into()))
+    /// Подписка на агрегированные свечи по инструменту (с авто-reconnect).
+    pub fn subscribe_bars(
+        &self,
+        symbol: &str,
+        tf: TimeFrame,
+    ) -> impl Stream<Item = Result<Vec<Bar>, DataError>> + '_ {
+        let market = self.market.clone();
+        let auth = self.auth.clone();
+        let symbol = symbol.to_string();
+        reconnecting(move |_attempt| {
+            let mut market = market.clone();
+            let auth = auth.clone();
+            let symbol = symbol.clone();
+            async move {
+                let token = auth.token().await?;
+                let request = authorize(
+                    &token,
+                    marketdata::SubscribeBarsRequest {
+                        symbol,
+                        timeframe: convert::timeframe(tf) as i32,
+                    },
+                )?;
+                let inner = market
+                    .subscribe_bars(request)
+                    .await
+                    .map_err(map_status)?
+                    .into_inner();
+                Ok(inner.map(|item| {
+                    item.map_err(map_status)
+                        .map(|resp| resp.bars.iter().map(convert::bar).collect())
+                }))
+            }
+        })
     }
-}
 
-/// Завернуть сообщение в запрос с заголовком авторизации.
-fn authorize<T>(token: &str, message: T) -> Result<Request<T>, DataError> {
-    let mut request = Request::new(message);
-    let value: MetadataValue<_> = token
-        .parse()
-        .map_err(|_| DataError::Auth("некорректный токен для метаданных".into()))?;
-    request.metadata_mut().insert("authorization", value);
-    Ok(request)
-}
-
-/// Сопоставить gRPC-статус с доменной ошибкой слоя данных.
-fn map_status(status: Status) -> DataError {
-    match status.code() {
-        Code::ResourceExhausted => DataError::RateLimited("grpc"),
-        Code::Unauthenticated => DataError::Auth(status.message().to_string()),
-        Code::Unavailable => DataError::Transport(status.message().to_string()),
-        other => DataError::Other(format!("{other:?}: {}", status.message())),
+    /// Подписка на котировки по набору инструментов (с авто-reconnect).
+    /// Стрим-ошибка сервиса (`StreamError`) пробрасывается как [`DataError`].
+    pub fn subscribe_quotes(
+        &self,
+        symbols: &[String],
+    ) -> impl Stream<Item = Result<Vec<Quote>, DataError>> + '_ {
+        let market = self.market.clone();
+        let auth = self.auth.clone();
+        let symbols = symbols.to_vec();
+        reconnecting(move |_attempt| {
+            let mut market = market.clone();
+            let auth = auth.clone();
+            let symbols = symbols.clone();
+            async move {
+                let token = auth.token().await?;
+                let request = authorize(&token, marketdata::SubscribeQuoteRequest { symbols })?;
+                let inner = market
+                    .subscribe_quote(request)
+                    .await
+                    .map_err(map_status)?
+                    .into_inner();
+                Ok(inner.map(|item| {
+                    item.map_err(map_status).and_then(|resp| match resp.error {
+                        Some(e) if e.code != 0 => {
+                            Err(DataError::Other(format!("стрим {}: {}", e.code, e.description)))
+                        }
+                        _ => Ok(resp.quote.iter().map(convert::quote).collect()),
+                    })
+                }))
+            }
+        })
     }
-}
-
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
 
 impl MarketData for FinamClient {
@@ -150,7 +174,7 @@ impl MarketData for FinamClient {
         let mut cursor = 0i64;
         loop {
             self.limiters.assets.acquire().await;
-            let token = self.ensure_token().await?;
+            let token = self.auth.token().await?;
             let request = authorize(
                 &token,
                 assets::AllAssetsRequest {
@@ -173,7 +197,6 @@ impl MarketData for FinamClient {
                     .filter(|a| mic.is_empty() || a.mic.eq_ignore_ascii_case(mic))
                     .map(convert::instrument),
             );
-            // Конец: пустая страница, нулевой или неизменившийся курсор.
             if response.assets.is_empty()
                 || response.next_cursor == 0
                 || response.next_cursor == cursor
@@ -194,7 +217,7 @@ impl MarketData for FinamClient {
         to_ts: i64,
     ) -> Result<Vec<Bar>, DataError> {
         self.limiters.bars.acquire().await;
-        let token = self.ensure_token().await?;
+        let token = self.auth.token().await?;
         let request = authorize(
             &token,
             marketdata::BarsRequest {
@@ -215,7 +238,7 @@ impl MarketData for FinamClient {
 
     async fn last_quote(&self, symbol: &str) -> Result<Quote, DataError> {
         self.limiters.quote.acquire().await;
-        let token = self.ensure_token().await?;
+        let token = self.auth.token().await?;
         let request = authorize(
             &token,
             marketdata::QuoteRequest {
@@ -238,7 +261,7 @@ impl MarketData for FinamClient {
 
     async fn latest_trades(&self, symbol: &str) -> Result<Vec<Trade>, DataError> {
         self.limiters.trades.acquire().await;
-        let token = self.ensure_token().await?;
+        let token = self.auth.token().await?;
         let request = authorize(
             &token,
             marketdata::LatestTradesRequest {
