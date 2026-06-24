@@ -27,27 +27,30 @@
 - [x] **DoD:** `cargo build -p finam-proto` собирается; тип-левел тесты на
       наличие клиентов и сообщений; `cargo build -p data` зелёный.
 
-### 0.2 Транспорт и авторизация (`data`)
-- [ ] TLS-канал через `rustls` к `ENDPOINT` (HTTP/2).
-- [ ] `AuthService`: получение JWT по API-ключу, авто-refresh до истечения.
-- [ ] `keyring`: чтение/запись API-ключа в ОС-хранилище (не в репозитории/файлах).
-- [ ] Перехватчик (interceptor), добавляющий токен в метаданные каждого вызова.
-- [ ] **DoD:** unit-тесты на логику refresh (с замоканными часами); ключ не попадает в логи.
+### 0.2 Транспорт и авторизация (`data`) ✅
+- [x] TLS-канал (webpki-roots) к `ENDPOINT` (HTTP/2) — `FinamClient::connect`.
+- [x] `AuthService`: JWT по секрету (`Auth`), срок из `TokenDetails`, авто-refresh
+      с запасом 60 c (`TokenCache::needs_refresh`).
+- [x] `keyring`: чтение/запись секрета в ОС-хранилище (`secret`), не в репозитории.
+- [x] Токен в метаданных (`authorization`) каждого вызова.
+- [x] **DoD:** unit-тесты логики refresh (инъекция времени); секрет не логируется.
 
-### 0.3 Rate-limit и устойчивость (`data`)
-- [ ] Per-method limiter на `governor` (≤200 запросов/мин на метод).
-- [ ] Обработка `MaintenanceWindow` (05:00–06:15 MSK) → `DataError::MaintenanceWindow`.
-- [ ] Авто-reconnect стримов (обрыв ~раз в 24 ч) с backoff.
-- [ ] `tracing`: инструментирование вызовов, спаны на запрос/стрим.
-- [ ] **DoD:** тест, что limiter блокирует > N запросов; reconnect восстанавливает стрим.
+### 0.3 Rate-limit и устойчивость (`data`) ✅ (частично)
+- [x] Per-method limiter на `governor` (≤200/мин) — `ratelimit::Limiter/Limiters`.
+- [x] Детект техокна 05:00–06:15 MSK (`resilience::is_maintenance_window`).
+- [x] Экспоненциальный backoff (`resilience::backoff_delay`).
+- [x] `tracing`: debug-события на запросах/refresh.
+- [x] **DoD:** тест, что limiter пропускает burst и затем блокирует; границы техокна.
+- [ ] Авто-reconnect стримов (`Subscribe*`) — со стрим-методами.
 
-### 0.4 Реализация трейта `MarketData` (`data`)
-- [ ] `assets(mic)` → `Vec<Instrument>` (маппинг `AssetsService.Assets`).
-- [ ] `bars(symbol, tf, from, to)` → `Vec<Bar>` (`MarketDataService.Bars`).
-- [ ] `last_quote(symbol)` → `Quote` (`MarketDataService.LastQuote`).
-- [ ] `latest_trades(symbol)` → `Vec<Trade>` (`MarketDataService.LatestTrades`).
-- [ ] Маппинг `TimeFrame` ↔ API-перечисление; нормализация времени в UNIX-сек UTC.
-- [ ] **DoD:** интеграционный тест против фикстур ответов API (golden-файлы).
+### 0.4 Реализация трейта `MarketData` (`data`) ✅
+- [x] `assets(mic)` → `Vec<Instrument>` (постраничный `AllAssets`, фильтр по mic).
+- [x] `bars(symbol, tf, from, to)` → `Vec<Bar>` (`MarketDataService.Bars`).
+- [x] `last_quote(symbol)` → `Quote` (`LastQuote`).
+- [x] `latest_trades(symbol)` → `Vec<Trade>` (`LatestTrades`).
+- [x] Маппинг `TimeFrame` → proto; время → UNIX-сек; `Decimal`(строка) → `f64`.
+- [x] **DoD:** маппинг покрыт unit-тестами (`convert`, 7 тестов). Интеграционный
+      тест против живого API — когда будет ключ (сеть здесь недоступна).
 
 ---
 

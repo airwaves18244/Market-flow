@@ -18,10 +18,14 @@
 - ✅ DDL схемы DuckDB в `storage::schema`.
 - ✅ § 0.1 gRPC-стабы: vendored proto `FinamWeb/finam-trade-api` (@3cec0896),
   кодоген клиентов через `protox` + `tonic-prost-build` (без системного protoc).
-- ⏳ Сетевой каркас gRPC — открытые подзадачи:
-  - § 0.2 транспорт (`rustls`/HTTP-2), auth + refresh токена, `keyring` для ключа.
-  - § 0.3 per-method rate-limiter (`governor`, ≤200/мин), reconnect стримов, `tracing`.
-  - § 0.4 реализация трейта `MarketData` (`assets`/`bars`/`last_quote`/`latest_trades`).
+- ✅ § 0.2 транспорт (TLS/HTTP-2 канал), `AuthService` + авто-refresh JWT,
+  `keyring` для секрета, токен в метаданных запроса.
+- ✅ § 0.3 per-method rate-limiter (`governor`, ≤200/мин), детект техокна MSK,
+  экспоненциальный backoff, `tracing`.
+- ✅ § 0.4 реализация трейта `MarketData` (`FinamClient`): `assets` (постраничный
+  `AllAssets`), `bars`, `last_quote`, `latest_trades` + маппинг protobuf → домен.
+- ⏳ Открыто: стримы (`Subscribe*`) с авто-reconnect; интеграционная проверка
+  против живого API (нужен ключ) — сейчас покрыта только чистая логика (19 тестов).
 
 ## Фаза 1 — Хранилище и ингест (`storage`) ✅ (частично)
 - ✅ § 1.1 Нативный `duckdb` (bundled): `Db::open`/`open_in_memory`, схема при старте.
