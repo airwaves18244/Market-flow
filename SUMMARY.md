@@ -43,6 +43,8 @@
 
 ## Проверка
 ```bash
+cargo fmt --all --check                 # формат (как в CI)
+cargo clippy --workspace -- -D warnings # линт без предупреждений (как в CI)
 cargo test --workspace                  # ядро + хранилище + IPC (MemStore), без C++/Tauri
 cargo test -p storage --features duckdb # + нативный DuckDB (bundled)
 cargo run -p app                        # smoke: domain → storage → dto
