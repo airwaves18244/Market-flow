@@ -37,7 +37,9 @@ mod tests {
         let s = statements();
         assert_eq!(s.len(), schema::ALL_DDL.len() + 1);
         assert!(s[0].contains("schema_version"));
-        assert!(s[1..].iter().all(|q| q.contains("CREATE TABLE IF NOT EXISTS")));
+        assert!(s[1..]
+            .iter()
+            .all(|q| q.contains("CREATE TABLE IF NOT EXISTS")));
     }
 
     #[test]

@@ -184,8 +184,12 @@ mod tests {
     #[test]
     fn range_query_excludes_out_of_window() {
         let mut s = MemStore::new();
-        s.insert_bars("X", TimeFrame::M1, &[bar(10, 1.0), bar(20, 2.0), bar(30, 3.0)])
-            .unwrap();
+        s.insert_bars(
+            "X",
+            TimeFrame::M1,
+            &[bar(10, 1.0), bar(20, 2.0), bar(30, 3.0)],
+        )
+        .unwrap();
         let got = s.bars("X", TimeFrame::M1, 15, 25).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].ts, 20);

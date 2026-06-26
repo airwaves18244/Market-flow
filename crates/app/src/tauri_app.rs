@@ -12,7 +12,11 @@ use tauri::{Emitter, State};
 
 use domain::TimeFrame;
 
-use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint};
+use crate::dto::{
+    BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
+    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
+};
 use crate::state::AppState;
 
 type CmdResult<T> = Result<T, String>;
@@ -32,7 +36,9 @@ fn bars(
 ) -> CmdResult<Vec<BarPoint>> {
     let tf = TimeFrame::from_code(&timeframe)
         .ok_or_else(|| format!("неизвестный тайм-фрейм: {timeframe}"))?;
-    state.bars(&symbol, tf, from_ts, to_ts).map_err(|e| e.to_string())
+    state
+        .bars(&symbol, tf, from_ts, to_ts)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -49,7 +55,9 @@ fn turnover_series(
 
 #[tauri::command]
 fn sector_rollup(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Vec<SectorRow>> {
-    state.sector_rollup(from_ts, to_ts).map_err(|e| e.to_string())
+    state
+        .sector_rollup(from_ts, to_ts)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -59,7 +67,9 @@ fn sector_map(state: State<AppState>) -> CmdResult<Vec<SectorEntryDto>> {
 
 #[tauri::command]
 fn breadth_data(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<BreadthDto> {
-    state.breadth_data(from_ts, to_ts).map_err(|e| e.to_string())
+    state
+        .breadth_data(from_ts, to_ts)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -69,7 +79,9 @@ fn top_movers(
     to_ts: i64,
     limit: Option<usize>,
 ) -> CmdResult<Vec<TopMoverDto>> {
-    state.top_movers(from_ts, to_ts, limit).map_err(|e| e.to_string())
+    state
+        .top_movers(from_ts, to_ts, limit)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -78,13 +90,21 @@ fn rrg_sectors(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Ve
 }
 
 #[tauri::command]
-fn futures_rollup(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Vec<FutureGroupDto>> {
-    state.futures_rollup(from_ts, to_ts).map_err(|e| e.to_string())
+fn futures_rollup(
+    state: State<AppState>,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<FutureGroupDto>> {
+    state
+        .futures_rollup(from_ts, to_ts)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn bonds_rollup(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Vec<BondIssuerDto>> {
-    state.bonds_rollup(from_ts, to_ts).map_err(|e| e.to_string())
+    state
+        .bonds_rollup(from_ts, to_ts)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -98,7 +118,9 @@ fn cross_asset_summary(
     from_ts: i64,
     to_ts: i64,
 ) -> CmdResult<CrossAssetSummaryDto> {
-    state.cross_asset_summary(from_ts, to_ts).map_err(|e| e.to_string())
+    state
+        .cross_asset_summary(from_ts, to_ts)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -107,7 +129,9 @@ fn turnover_timeline(
     from_ts: i64,
     to_ts: i64,
 ) -> CmdResult<Vec<TurnoverByClassPoint>> {
-    state.turnover_timeline(from_ts, to_ts).map_err(|e| e.to_string())
+    state
+        .turnover_timeline(from_ts, to_ts)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -129,8 +153,8 @@ fn build_state() -> AppState {
 
     #[cfg(feature = "duckdb")]
     {
-        let mut store = storage::DuckStore::open("market.duckdb")
-            .expect("не удалось открыть БД DuckDB");
+        let mut store =
+            storage::DuckStore::open("market.duckdb").expect("не удалось открыть БД DuckDB");
         store.migrate().expect("миграция DuckDB не удалась");
         AppState::new(store)
     }

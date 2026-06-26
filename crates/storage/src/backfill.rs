@@ -87,7 +87,13 @@ mod tests {
     #[test]
     fn fresh_db_fetches_whole_range() {
         let r = plan_backfill(None, 0, 10 * DAY, TimeFrame::D1).unwrap();
-        assert_eq!(r, FetchRange { from_ts: 0, to_ts: 10 * DAY });
+        assert_eq!(
+            r,
+            FetchRange {
+                from_ts: 0,
+                to_ts: 10 * DAY
+            }
+        );
         assert_eq!(r.bar_count(DAY), 11);
     }
 
@@ -120,13 +126,34 @@ mod tests {
 
     #[test]
     fn chunk_splits_into_pages_without_overlap() {
-        let range = FetchRange { from_ts: 0, to_ts: 9 * DAY };
+        let range = FetchRange {
+            from_ts: 0,
+            to_ts: 9 * DAY,
+        };
         let pages = chunk_range(range, TimeFrame::D1, 4);
         // 10 баров по 4 на страницу → 4 + 4 + 2
         assert_eq!(pages.len(), 3);
-        assert_eq!(pages[0], FetchRange { from_ts: 0, to_ts: 3 * DAY });
-        assert_eq!(pages[1], FetchRange { from_ts: 4 * DAY, to_ts: 7 * DAY });
-        assert_eq!(pages[2], FetchRange { from_ts: 8 * DAY, to_ts: 9 * DAY });
+        assert_eq!(
+            pages[0],
+            FetchRange {
+                from_ts: 0,
+                to_ts: 3 * DAY
+            }
+        );
+        assert_eq!(
+            pages[1],
+            FetchRange {
+                from_ts: 4 * DAY,
+                to_ts: 7 * DAY
+            }
+        );
+        assert_eq!(
+            pages[2],
+            FetchRange {
+                from_ts: 8 * DAY,
+                to_ts: 9 * DAY
+            }
+        );
         // суммарно покрыто ровно 10 баров, без пересечений
         let total: i64 = pages.iter().map(|p| p.bar_count(DAY)).sum();
         assert_eq!(total, 10);
@@ -134,14 +161,20 @@ mod tests {
 
     #[test]
     fn chunk_single_page_when_fits() {
-        let range = FetchRange { from_ts: 0, to_ts: 2 * DAY };
+        let range = FetchRange {
+            from_ts: 0,
+            to_ts: 2 * DAY,
+        };
         let pages = chunk_range(range, TimeFrame::D1, 100);
         assert_eq!(pages, vec![range]);
     }
 
     #[test]
     fn chunk_zero_max_bars_is_empty() {
-        let range = FetchRange { from_ts: 0, to_ts: DAY };
+        let range = FetchRange {
+            from_ts: 0,
+            to_ts: DAY,
+        };
         assert!(chunk_range(range, TimeFrame::D1, 0).is_empty());
     }
 

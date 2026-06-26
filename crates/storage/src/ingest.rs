@@ -214,7 +214,10 @@ mod tests {
             assert_eq!(w.bars("SBER@MISX", TimeFrame::D1, &bars).unwrap(), 2);
             assert!(w.snapshot_from_bars("SBER@MISX", &bars, 2).unwrap());
         }
-        assert_eq!(store.bars("SBER@MISX", TimeFrame::D1, 0, 9).unwrap().len(), 2);
+        assert_eq!(
+            store.bars("SBER@MISX", TimeFrame::D1, 0, 9).unwrap().len(),
+            2
+        );
         assert_eq!(store.snapshots("SBER@MISX", 0, 9).unwrap().len(), 1);
     }
 

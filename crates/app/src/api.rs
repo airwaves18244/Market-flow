@@ -13,7 +13,11 @@ use domain::metrics::sector::{rollup_by_sector, InstrumentMetric};
 use domain::{AssetClass, TimeFrame};
 use storage::{StorageError, Store};
 
-use crate::dto::{AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint};
+use crate::dto::{
+    AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto,
+    FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto,
+    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+};
 
 /// Метка сектора для инструментов без классификации.
 const UNKNOWN_SECTOR: &str = "Прочее";
@@ -28,7 +32,11 @@ fn char_prefix(s: &str, n: usize) -> String {
 
 /// Справочник инструментов, отсортированный по символу.
 pub fn instruments(store: &dyn Store) -> Result<Vec<InstrumentDto>, StorageError> {
-    let mut out: Vec<InstrumentDto> = store.instruments()?.iter().map(InstrumentDto::from).collect();
+    let mut out: Vec<InstrumentDto> = store
+        .instruments()?
+        .iter()
+        .map(InstrumentDto::from)
+        .collect();
     out.sort_by(|a, b| a.symbol.cmp(&b.symbol));
     Ok(out)
 }
@@ -71,7 +79,11 @@ pub fn turnover_series(
 
 /// Записи таблицы классификации секторов.
 pub fn sector_map(store: &dyn Store) -> Result<Vec<SectorEntryDto>, StorageError> {
-    Ok(store.sector_map()?.iter().map(SectorEntryDto::from).collect())
+    Ok(store
+        .sector_map()?
+        .iter()
+        .map(SectorEntryDto::from)
+        .collect())
 }
 
 /// Секторный роллап для treemap/heatmap: по каждому инструменту берём
@@ -185,14 +197,16 @@ pub fn top_movers(
     Ok(movers
         .into_iter()
         .take(limit)
-        .map(|(symbol, ticker, name, sector, change, close)| TopMoverDto {
-            symbol,
-            ticker,
-            name,
-            sector,
-            change,
-            last_close: close,
-        })
+        .map(
+            |(symbol, ticker, name, sector, change, close)| TopMoverDto {
+                symbol,
+                ticker,
+                name,
+                sector,
+                change,
+                last_close: close,
+            },
+        )
         .collect())
 }
 
@@ -257,20 +271,18 @@ pub fn futures_rollup(
     let futures = store.instruments_by_asset_class("future")?;
 
     // Группируем по 2-символьному корню тикера: Si, RI, ED, GD и т.д.
-    let mut groups: std::collections::HashMap<String, Vec<InstrumentMetric>> = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<String, Vec<InstrumentMetric>> =
+        std::collections::HashMap::new();
 
     for fut in &futures {
         let group = char_prefix(&fut.ticker, 2);
 
         if let Some(last) = store.snapshots(&fut.symbol, from_ts, to_ts)?.last() {
-            groups
-                .entry(group)
-                .or_default()
-                .push(InstrumentMetric {
-                    turnover: last.turnover,
-                    net_flow: last.net_flow,
-                    change: last.change,
-                });
+            groups.entry(group).or_default().push(InstrumentMetric {
+                turnover: last.turnover,
+                net_flow: last.net_flow,
+                change: last.change,
+            });
         }
     }
 
@@ -280,11 +292,7 @@ pub fn futures_rollup(
             let total_turnover = metrics.iter().map(|m| m.turnover).sum::<f64>();
             let total_flow = metrics.iter().map(|m| m.net_flow).sum::<f64>();
             let weighted_change = if total_turnover > 0.0 {
-                metrics
-                    .iter()
-                    .map(|m| m.change * m.turnover)
-                    .sum::<f64>()
-                    / total_turnover
+                metrics.iter().map(|m| m.change * m.turnover).sum::<f64>() / total_turnover
             } else {
                 0.0
             };
@@ -319,20 +327,18 @@ pub fn bonds_rollup(
     let bonds = store.instruments_by_asset_class("bond")?;
 
     // Группируем по 3-символьному префиксу эмитента: OFZ, GAZ, LUK и т.д.
-    let mut issuers: std::collections::HashMap<String, Vec<InstrumentMetric>> = std::collections::HashMap::new();
+    let mut issuers: std::collections::HashMap<String, Vec<InstrumentMetric>> =
+        std::collections::HashMap::new();
 
     for bond in &bonds {
         let issuer = char_prefix(&bond.ticker, 3);
 
         if let Some(last) = store.snapshots(&bond.symbol, from_ts, to_ts)?.last() {
-            issuers
-                .entry(issuer)
-                .or_default()
-                .push(InstrumentMetric {
-                    turnover: last.turnover,
-                    net_flow: last.net_flow,
-                    change: last.change,
-                });
+            issuers.entry(issuer).or_default().push(InstrumentMetric {
+                turnover: last.turnover,
+                net_flow: last.net_flow,
+                change: last.change,
+            });
         }
     }
 
@@ -364,14 +370,38 @@ pub fn bonds_rollup(
 /// отдельную команду, чтобы фронт подключился к контракту до интеграции данных.
 pub fn yield_curve() -> Result<Vec<YieldCurvePoint>, StorageError> {
     Ok(vec![
-        YieldCurvePoint { maturity_years: 0.25, yield_pct: 4.5 },
-        YieldCurvePoint { maturity_years: 0.5, yield_pct: 4.7 },
-        YieldCurvePoint { maturity_years: 1.0, yield_pct: 5.1 },
-        YieldCurvePoint { maturity_years: 2.0, yield_pct: 5.6 },
-        YieldCurvePoint { maturity_years: 3.0, yield_pct: 5.9 },
-        YieldCurvePoint { maturity_years: 5.0, yield_pct: 6.2 },
-        YieldCurvePoint { maturity_years: 7.0, yield_pct: 6.4 },
-        YieldCurvePoint { maturity_years: 10.0, yield_pct: 6.5 },
+        YieldCurvePoint {
+            maturity_years: 0.25,
+            yield_pct: 4.5,
+        },
+        YieldCurvePoint {
+            maturity_years: 0.5,
+            yield_pct: 4.7,
+        },
+        YieldCurvePoint {
+            maturity_years: 1.0,
+            yield_pct: 5.1,
+        },
+        YieldCurvePoint {
+            maturity_years: 2.0,
+            yield_pct: 5.6,
+        },
+        YieldCurvePoint {
+            maturity_years: 3.0,
+            yield_pct: 5.9,
+        },
+        YieldCurvePoint {
+            maturity_years: 5.0,
+            yield_pct: 6.2,
+        },
+        YieldCurvePoint {
+            maturity_years: 7.0,
+            yield_pct: 6.4,
+        },
+        YieldCurvePoint {
+            maturity_years: 10.0,
+            yield_pct: 6.5,
+        },
     ])
 }
 
@@ -534,7 +564,11 @@ mod tests {
 
         let mut w = Writer::new(&mut store);
         // бары + снимок на ts=3 для каждого
-        for (sym, base) in [("SBER@MISX", 100.0), ("LKOH@MISX", 50.0), ("GAZP@MISX", 200.0)] {
+        for (sym, base) in [
+            ("SBER@MISX", 100.0),
+            ("LKOH@MISX", 50.0),
+            ("GAZP@MISX", 200.0),
+        ] {
             let bars = [
                 bar(1, base, base * 1.01, 1_000.0),
                 bar(2, base * 1.01, base * 1.02, 1_000.0),
@@ -593,7 +627,9 @@ mod tests {
     fn sector_rollup_uses_unknown_label_for_unclassified() {
         let mut store = MemStore::new();
         store.migrate().unwrap();
-        store.upsert_instruments(&[inst("ZZZZ@MISX", None)]).unwrap();
+        store
+            .upsert_instruments(&[inst("ZZZZ@MISX", None)])
+            .unwrap();
         let mut w = Writer::new(&mut store);
         let bars = [bar(1, 10.0, 11.0, 100.0)];
         w.bars("ZZZZ@MISX", TimeFrame::D1, &bars).unwrap();
@@ -640,8 +676,9 @@ mod tests {
         let rrg = rrg_sectors(&store, 0, 9).unwrap();
         assert!(!rrg.is_empty());
         for point in &rrg {
-            assert!(["leading", "weakening", "lagging", "improving"]
-                .contains(&point.quadrant.as_str()));
+            assert!(
+                ["leading", "weakening", "lagging", "improving"].contains(&point.quadrant.as_str())
+            );
         }
     }
 
@@ -672,7 +709,10 @@ mod tests {
             ("SiM5@RTSX", 91_000.0),
             ("SU26240@MISX", 800.0),
         ] {
-            let bars = [bar(1, base, base * 1.01, 1_000.0), bar(2, base * 1.01, base * 1.02, 1_000.0)];
+            let bars = [
+                bar(1, base, base * 1.01, 1_000.0),
+                bar(2, base * 1.01, base * 1.02, 1_000.0),
+            ];
             w.bars(sym, TimeFrame::D1, &bars).unwrap();
             w.snapshot_from_bars(sym, &bars, 2).unwrap();
         }
@@ -779,7 +819,12 @@ mod tests {
             ])
             .unwrap();
 
-        let snap = |ts, turnover| TurnoverSnapshot { ts, turnover, net_flow: 0.0, change: 0.0 };
+        let snap = |ts, turnover| TurnoverSnapshot {
+            ts,
+            turnover,
+            net_flow: 0.0,
+            change: 0.0,
+        };
         // Период 1 (ts=1): акции доминируют (0.9 доли).
         store.insert_snapshot("SBER@MISX", &snap(1, 900.0)).unwrap();
         store.insert_snapshot("SiH5@RTSX", &snap(1, 100.0)).unwrap();

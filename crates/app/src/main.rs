@@ -144,18 +144,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for m in &movers {
             println!("    {:<8} {:+.2}%", m.ticker, m.change * 100.0);
         }
-        println!("  rrg_sectors(): {} секторов", state.rrg_sectors(0, i64::MAX)?.len());
+        println!(
+            "  rrg_sectors(): {} секторов",
+            state.rrg_sectors(0, i64::MAX)?.len()
+        );
 
         // Фаза 5 — представления «Фьючерсы» и «Облигации».
         let futures = state.futures_rollup(0, i64::MAX)?;
         println!("  futures_rollup(): {} групп", futures.len());
         for f in &futures {
-            println!("    {:<4} contracts={} turnover={:.0}", f.group, f.contracts, f.turnover);
+            println!(
+                "    {:<4} contracts={} turnover={:.0}",
+                f.group, f.contracts, f.turnover
+            );
         }
         let bonds = state.bonds_rollup(0, i64::MAX)?;
         println!("  bonds_rollup(): {} эмитентов", bonds.len());
         for b in &bonds {
-            println!("    {:<6} bonds={} turnover={:.0}", b.issuer, b.bonds, b.turnover);
+            println!(
+                "    {:<6} bonds={} turnover={:.0}",
+                b.issuer, b.bonds, b.turnover
+            );
         }
         println!("  yield_curve(): {} точек", state.yield_curve()?.len());
 
@@ -169,7 +178,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "  turnover_timeline(): {} точек",
             state.turnover_timeline(0, i64::MAX)?.len()
         );
-        println!("  flow_sankey(): {} рёбер перетока", state.flow_sankey(0, i64::MAX)?.len());
+        println!(
+            "  flow_sankey(): {} рёбер перетока",
+            state.flow_sankey(0, i64::MAX)?.len()
+        );
 
         Ok(())
     }

@@ -117,8 +117,7 @@ impl Store for DuckStore {
                     symbol: row.get(0)?,
                     ticker: row.get(1)?,
                     name: row.get(2)?,
-                    asset_class: AssetClass::from_code(&asset_class)
-                        .unwrap_or(AssetClass::Equity),
+                    asset_class: AssetClass::from_code(&asset_class).unwrap_or(AssetClass::Equity),
                     sector: row.get(4)?,
                     lot_size: lot_size as u32,
                     isin: row.get(6)?,
@@ -323,8 +322,12 @@ mod tests {
     #[test]
     fn bars_roundtrip_ordered_and_upserted() {
         let mut s = store();
-        s.insert_bars("SBER@MISX", TimeFrame::D1, &[bar(3, 30.0, 31.0, 1.0), bar(1, 10.0, 11.0, 1.0)])
-            .unwrap();
+        s.insert_bars(
+            "SBER@MISX",
+            TimeFrame::D1,
+            &[bar(3, 30.0, 31.0, 1.0), bar(1, 10.0, 11.0, 1.0)],
+        )
+        .unwrap();
         // перезапись ts=1
         s.insert_bars("SBER@MISX", TimeFrame::D1, &[bar(1, 10.0, 99.0, 1.0)])
             .unwrap();
