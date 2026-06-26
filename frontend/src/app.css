@@ -65,18 +65,22 @@ body {
   font-size: 12px;
 }
 
-/* Сетка докуемых панелей (каркас; полноценный dockview — в Фазе 4). */
+/* Сетка докуемых панелей (каркас; полноценный dockview — позже).
+   Авто-поток адаптивных колонок: панели Фаз 3–5 раскладываются по ширине окна. */
 .grid {
   flex: 1;
   display: grid;
-  grid-template-columns: 2fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-auto-rows: minmax(280px, auto);
   gap: 8px;
   padding: 8px;
   min-height: 0;
+  overflow: auto;
 }
 
+/* Секторный treemap (первая панель) — крупнее остальных. */
 .grid > :nth-child(1) {
+  grid-column: span 2;
   grid-row: span 2;
 }
 

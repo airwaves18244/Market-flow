@@ -126,14 +126,6 @@ pub struct TopMoverDto {
     pub last_close: f64,
 }
 
-/// Точка RRG для сектора.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RrgPointDto {
-    pub rs_ratio: f64,
-    pub rs_momentum: f64,
-}
-
 /// Сектор на плоскости RRG.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

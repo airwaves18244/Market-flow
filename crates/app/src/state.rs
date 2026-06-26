@@ -93,8 +93,10 @@ impl AppState {
         self.read(|s| api::bonds_rollup(s, from_ts, to_ts))
     }
 
+    /// Кривая доходности не зависит от хранилища (статический scaffold),
+    /// поэтому блокировка стора не нужна.
     pub fn yield_curve(&self) -> Result<Vec<YieldCurvePoint>, StorageError> {
-        self.read(|_| api::yield_curve())
+        api::yield_curve()
     }
 }
 

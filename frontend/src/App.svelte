@@ -62,7 +62,7 @@
 <div class="app">
   <header class="app-header">
     <h1>Market Terminal</h1>
-    <span class="sub">Акции / секторы — оборот и денежные потоки</span>
+    <span class="sub">Акции · фьючерсы · облигации — оборот и денежные потоки</span>
     <span class="status">{instruments.length} инструментов · {sectors.length} секторов</span>
   </header>
 
@@ -84,39 +84,35 @@
     </Panel>
 
     {#if breadth}
-      <Panel title="Market Breadth">
+      <Panel title="Ширина рынка">
         <BreadthIndicator data={breadth} />
       </Panel>
     {/if}
 
-    <Panel title="Top Movers">
+    <Panel title="Топ-движения">
       <TopMoversTable movers={topMovers} />
     </Panel>
 
-    <Panel title="Heatmap">
+    <Panel title="Секторы — тепловая карта (%)">
       <HeatmapChart {sectors} />
     </Panel>
 
-    {#if rrgData.length > 0}
-      <Panel title="RRG — Sector Rotation">
-        <RrgChart sectors={rrgData} />
-      </Panel>
-    {/if}
+    <Panel title="RRG — ротация секторов">
+      <RrgChart sectors={rrgData} />
+    </Panel>
 
     {#if futures.length > 0}
-      <Panel title="Futures — Groups (Treemap)">
+      <Panel title="Фьючерсы — группы (treemap)">
         <FuturesTreemap {futures} />
       </Panel>
     {/if}
 
-    {#if yieldCurve.length > 0}
-      <Panel title="Bonds — Yield Curve">
-        <YieldCurve curve={yieldCurve} />
-      </Panel>
-    {/if}
+    <Panel title="Облигации — кривая доходности">
+      <YieldCurve curve={yieldCurve} />
+    </Panel>
 
     {#if bonds.length > 0}
-      <Panel title="Bonds — Issuers">
+      <Panel title="Облигации — эмитенты">
         <BondsTable issuers={bonds} />
       </Panel>
     {/if}

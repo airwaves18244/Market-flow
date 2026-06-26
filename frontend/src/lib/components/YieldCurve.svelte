@@ -1,76 +1,73 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import * as echarts from "echarts";
   import type { YieldCurvePoint } from "../types";
 
-  export let curve: YieldCurvePoint[];
+  let { curve = [] }: { curve: YieldCurvePoint[] } = $props();
 
-  let container: HTMLDivElement;
+  let el: HTMLDivElement;
+  let chart: echarts.ECharts | undefined;
+  let ro: ResizeObserver | undefined;
 
-  onMount(() => {
-    if (!container) return;
-
-    const chart = echarts.init(container);
-
-    const maturities = curve.map((c) => `${c.maturityYears}y`);
-    const yields = curve.map((c) => c.yieldPct);
-
-    const option = {
-      tooltip: { trigger: "axis" as const },
+  function render() {
+    if (!chart) return;
+    chart.setOption({
+      backgroundColor: "transparent",
+      tooltip: {
+        trigger: "axis",
+        formatter: (p: any) => `${p[0].axisValue}<br/>доходность: ${p[0].data}%`,
+      },
       grid: { left: 50, right: 20, top: 20, bottom: 30 },
       xAxis: {
-        type: "category" as const,
-        data: maturities,
-        axisLabel: { fontSize: 10 },
+        type: "category",
+        data: curve.map((c) => `${c.maturityYears}л`),
+        axisLabel: { fontSize: 10, color: "#8b949e" },
       },
       yAxis: {
-        type: "value" as const,
-        name: "Yield %",
-        axisLabel: { fontSize: 10 },
+        type: "value",
+        name: "Доходность %",
+        nameTextStyle: { color: "#8b949e", fontSize: 10 },
+        axisLabel: { fontSize: 10, color: "#8b949e" },
+        splitLine: { lineStyle: { color: "#21262d" } },
       },
       series: [
         {
-          name: "Yield",
-          type: "line" as const,
-          data: yields,
+          name: "Доходность",
+          type: "line",
           smooth: true,
-          areaStyle: {
-            color: "rgba(79, 156, 249, 0.3)",
-          },
-          lineStyle: {
-            color: "rgba(79, 156, 249, 0.8)",
-            width: 2,
-          },
-          itemStyle: {
-            color: "#4f9cf9",
-          },
+          data: curve.map((c) => c.yieldPct),
+          areaStyle: { color: "rgba(79,156,249,0.25)" },
+          lineStyle: { color: "#4f9cf9", width: 2 },
+          itemStyle: { color: "#4f9cf9" },
         },
       ],
-    };
+    });
+  }
 
-    chart.setOption(option);
+  $effect(() => {
+    void curve;
+    render();
+  });
 
-    return () => chart.dispose();
+  onMount(() => {
+    chart = echarts.init(el);
+    render();
+    ro = new ResizeObserver(() => chart?.resize());
+    ro.observe(el);
+  });
+
+  onDestroy(() => {
+    ro?.disconnect();
+    chart?.dispose();
   });
 </script>
 
-<div class="yield-curve">
-  <h3>Bond Yield Curve</h3>
-  <div bind:this={container} style="height: 200px;"></div>
-</div>
+<div class="yield" bind:this={el}></div>
 
 <style>
-  .yield-curve {
-    padding: 12px;
-    background: var(--bg-secondary, #161b22);
-    border-radius: 6px;
-    border: 1px solid var(--border, #30363d);
-  }
-
-  h3 {
-    margin: 0 0 12px 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary, #c9d1d9);
+  .yield {
+    width: 100%;
+    height: 100%;
+    min-height: 200px;
   }
 </style>

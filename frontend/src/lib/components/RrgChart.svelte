@@ -1,167 +1,128 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import * as echarts from "echarts";
   import type { RrgSectorDto } from "../types";
 
-  export let sectors: RrgSectorDto[];
+  let { sectors = [] }: { sectors: RrgSectorDto[] } = $props();
 
-  let container: HTMLDivElement;
+  let el: HTMLDivElement;
+  let chart: echarts.ECharts | undefined;
+  let ro: ResizeObserver | undefined;
 
-  onMount(() => {
-    if (!container) return;
+  const QUADRANT_COLOR: Record<RrgSectorDto["quadrant"], string> = {
+    leading: "#26a69a",
+    weakening: "#f5a623",
+    lagging: "#ef5350",
+    improving: "#4f9cf9",
+  };
 
-    const chart = echarts.init(container);
-
-    // RRG: scatter plot with RS-Ratio (x) vs RS-Momentum (y)
-    const data = sectors.map((s) => ({
-      name: s.sector,
-      value: [s.rsRatio, s.rsMomentum],
-      itemStyle: {
-        color:
-          s.quadrant === "leading"
-            ? "#26a69a"
-            : s.quadrant === "weakening"
-              ? "#f5a623"
-              : s.quadrant === "lagging"
-                ? "#ef5350"
-                : "#4f9cf9",
+  function render() {
+    if (!chart) return;
+    chart.setOption({
+      backgroundColor: "transparent",
+      tooltip: {
+        trigger: "item",
+        formatter: (p: any) =>
+          `${p.data.name}<br/>RS-Ratio: ${p.data.value[0].toFixed(1)}<br/>RS-Mom: ${p.data.value[1].toFixed(1)}`,
       },
-    }));
-
-    const option = {
-      tooltip: { trigger: "item" as const },
-      grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      grid: { left: 50, right: 20, top: 20, bottom: 40 },
       xAxis: {
-        type: "value" as const,
+        type: "value",
         name: "RS-Ratio",
+        nameTextStyle: { color: "#8b949e", fontSize: 10 },
         axisLine: { onZero: false },
         min: 80,
         max: 120,
-        axisLabel: { fontSize: 10 },
+        axisLabel: { fontSize: 10, color: "#8b949e" },
+        splitLine: { lineStyle: { color: "#21262d" } },
       },
       yAxis: {
-        type: "value" as const,
+        type: "value",
         name: "RS-Momentum",
+        nameTextStyle: { color: "#8b949e", fontSize: 10 },
         min: 80,
         max: 120,
-        axisLabel: { fontSize: 10 },
+        axisLabel: { fontSize: 10, color: "#8b949e" },
+        splitLine: { lineStyle: { color: "#21262d" } },
       },
+      // Линии-разделители квадрантов в центре (100, 100).
       series: [
         {
           name: "Sectors",
-          type: "scatter" as const,
-          symbolSize: 12,
-          data: data,
+          type: "scatter",
+          symbolSize: 14,
+          data: sectors.map((s) => ({
+            name: s.sector,
+            value: [s.rsRatio, s.rsMomentum],
+            itemStyle: { color: QUADRANT_COLOR[s.quadrant] },
+          })),
           label: {
             show: true,
-            formatter: (params: { name: string }) => params.name,
+            formatter: (p: any) => p.data.name,
             fontSize: 10,
-            offset: [5, 5],
+            color: "#e6edf3",
+            position: "right",
+          },
+          markLine: {
+            silent: true,
+            symbol: "none",
+            lineStyle: { color: "#484f58", type: "dashed" },
+            data: [{ xAxis: 100 }, { yAxis: 100 }],
           },
         },
       ],
-    };
+    });
+  }
 
-    // Add quadrant lines
-    const xSplitLine = {
-      show: true,
-      lineStyle: {
-        color: "#30363d",
-        type: [5, 5],
-      },
-    };
-    const ySplitLine = {
-      show: true,
-      lineStyle: {
-        color: "#30363d",
-        type: [5, 5],
-      },
-    };
+  $effect(() => {
+    void sectors;
+    render();
+  });
 
-    option.xAxis = { ...option.xAxis, splitLine: xSplitLine };
-    option.yAxis = { ...option.yAxis, splitLine: ySplitLine };
+  onMount(() => {
+    chart = echarts.init(el);
+    render();
+    ro = new ResizeObserver(() => chart?.resize());
+    ro.observe(el);
+  });
 
-    chart.setOption(option);
-
-    return () => chart.dispose();
+  onDestroy(() => {
+    ro?.disconnect();
+    chart?.dispose();
   });
 </script>
 
-<div class="rrg-chart">
-  <h3>RRG: Sector Rotation</h3>
-  <div bind:this={container} style="height: 220px;"></div>
-  <div class="legend">
-    <div class="legend-item leading">
-      <div class="dot"></div>
-      <span>Leading</span>
-    </div>
-    <div class="legend-item weakening">
-      <div class="dot"></div>
-      <span>Weakening</span>
-    </div>
-    <div class="legend-item lagging">
-      <div class="dot"></div>
-      <span>Lagging</span>
-    </div>
-    <div class="legend-item improving">
-      <div class="dot"></div>
-      <span>Improving</span>
-    </div>
-  </div>
+<div class="rrg" bind:this={el}></div>
+<div class="legend">
+  <span class="item"><i style="background:#26a69a"></i>Leading</span>
+  <span class="item"><i style="background:#f5a623"></i>Weakening</span>
+  <span class="item"><i style="background:#ef5350"></i>Lagging</span>
+  <span class="item"><i style="background:#4f9cf9"></i>Improving</span>
 </div>
 
 <style>
-  .rrg-chart {
-    padding: 12px;
-    background: var(--bg-secondary, #161b22);
-    border-radius: 6px;
-    border: 1px solid var(--border, #30363d);
+  .rrg {
+    width: 100%;
+    height: 100%;
+    min-height: 220px;
   }
-
-  h3 {
-    margin: 0 0 12px 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary, #c9d1d9);
-  }
-
   .legend {
     display: flex;
     gap: 12px;
-    margin-top: 8px;
     flex-wrap: wrap;
+    margin-top: 6px;
   }
-
-  .legend-item {
+  .item {
     display: flex;
     align-items: center;
     gap: 4px;
     font-size: 11px;
+    color: var(--text-secondary, #8b949e);
   }
-
-  .dot {
+  .item i {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-  }
-
-  .leading .dot {
-    background: #26a69a;
-  }
-
-  .weakening .dot {
-    background: #f5a623;
-  }
-
-  .lagging .dot {
-    background: #ef5350;
-  }
-
-  .improving .dot {
-    background: #4f9cf9;
-  }
-
-  .legend-item span {
-    color: var(--text-secondary, #8b949e);
+    display: inline-block;
   }
 </style>

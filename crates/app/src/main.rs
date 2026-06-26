@@ -57,11 +57,34 @@ fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
             lot_size: 1,
             isin: None,
         },
+        Instrument {
+            symbol: "SiH5@RTSX".into(),
+            ticker: "SiH5".into(),
+            name: "Si-3.25 (USD/RUB)".into(),
+            asset_class: AssetClass::Future,
+            sector: None,
+            lot_size: 1,
+            isin: None,
+        },
+        Instrument {
+            symbol: "SU26240@MISX".into(),
+            ticker: "SU26240".into(),
+            name: "ОФЗ 26240".into(),
+            asset_class: AssetClass::Bond,
+            sector: None,
+            lot_size: 1,
+            isin: None,
+        },
     ])?;
 
     let mut w = Writer::new(&mut store);
     w.load_sector_map([("SBER", "Финансы"), ("LKOH", "Нефтегаз")])?;
-    for (sym, base) in [("SBER@MISX", 300.0), ("LKOH@MISX", 7000.0)] {
+    for (sym, base) in [
+        ("SBER@MISX", 300.0),
+        ("LKOH@MISX", 7000.0),
+        ("SiH5@RTSX", 90_000.0),
+        ("SU26240@MISX", 800.0),
+    ] {
         let bars = [
             demo_bar(1, base, base * 1.01, 1_000.0),
             demo_bar(2, base * 1.01, base * 0.999, 900.0),
@@ -107,6 +130,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let candles = state.bars("SBER@MISX", TimeFrame::D1, 0, i64::MAX)?;
         println!("  bars(SBER@MISX, d1): {} свечей", candles.len());
         println!("  sector_map(): {} записей", state.sector_map()?.len());
+
+        // Фаза 4 — представление «Акции/секторы».
+        let breadth = state.breadth_data(0, i64::MAX)?;
+        println!(
+            "  breadth(): +{} / -{} (растущих {:.0}%)",
+            breadth.advancers,
+            breadth.decliners,
+            breadth.pct_advancing.unwrap_or(0.0) * 100.0
+        );
+        let movers = state.top_movers(0, i64::MAX, Some(3))?;
+        println!("  top_movers(3): {} строк", movers.len());
+        for m in &movers {
+            println!("    {:<8} {:+.2}%", m.ticker, m.change * 100.0);
+        }
+        println!("  rrg_sectors(): {} секторов", state.rrg_sectors(0, i64::MAX)?.len());
+
+        // Фаза 5 — представления «Фьючерсы» и «Облигации».
+        let futures = state.futures_rollup(0, i64::MAX)?;
+        println!("  futures_rollup(): {} групп", futures.len());
+        for f in &futures {
+            println!("    {:<4} contracts={} turnover={:.0}", f.group, f.contracts, f.turnover);
+        }
+        let bonds = state.bonds_rollup(0, i64::MAX)?;
+        println!("  bonds_rollup(): {} эмитентов", bonds.len());
+        for b in &bonds {
+            println!("    {:<6} bonds={} turnover={:.0}", b.issuer, b.bonds, b.turnover);
+        }
+        println!("  yield_curve(): {} точек", state.yield_curve()?.len());
 
         Ok(())
     }

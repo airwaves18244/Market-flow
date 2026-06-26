@@ -1,80 +1,84 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import * as echarts from "echarts";
   import type { SectorRow } from "../types";
 
-  export let sectors: SectorRow[];
+  let { sectors = [] }: { sectors: SectorRow[] } = $props();
 
-  let container: HTMLDivElement;
+  let el: HTMLDivElement;
+  let chart: echarts.ECharts | undefined;
+  let ro: ResizeObserver | undefined;
 
-  onMount(() => {
-    if (!container) return;
-
-    const chart = echarts.init(container);
-
-    // Sort by turnover for better visualization
+  function render() {
+    if (!chart) return;
+    // Сортируем по обороту: крупнейшие сектора слева.
     const sorted = [...sectors].sort((a, b) => b.turnover - a.turnover);
-
-    // Convert to heatmap-friendly format: columns are sectors, rows can be metrics
-    const data = sorted.map((s, i) => {
-      const changePercent = (s.weightedChange * 100).toFixed(1);
-      return [i, 0, changePercent]; // x=index, y=metric(0), value=change%
-    });
-
-    const option = {
-      tooltip: { trigger: "item" as const },
-      grid: { left: 60, right: 10, top: 30, bottom: 30 },
+    chart.setOption({
+      backgroundColor: "transparent",
+      tooltip: {
+        position: "top",
+        formatter: (p: any) => `${p.data[0]}<br/>изм: ${p.data[2]}%`,
+      },
+      grid: { left: 70, right: 12, top: 10, bottom: 60 },
       xAxis: {
-        type: "category" as const,
+        type: "category",
         data: sorted.map((s) => s.sector),
-        axisLabel: { interval: 0, rotate: 45, fontSize: 10 },
+        axisLabel: { interval: 0, rotate: 45, fontSize: 10, color: "#8b949e" },
       },
       yAxis: {
-        type: "category" as const,
-        data: ["Change %"],
+        type: "category",
+        data: ["Изм. %"],
+        axisLabel: { color: "#8b949e", fontSize: 10 },
       },
       visualMap: {
         min: -5,
         max: 5,
-        realtime: true,
-        inRange: {
-          color: ["#ef5350", "#f5f5f5", "#26a69a"],
-        },
+        calculable: true,
+        orient: "horizontal",
+        left: "center",
+        bottom: 0,
+        inRange: { color: ["#ef5350", "#30363d", "#26a69a"] },
         textStyle: { color: "#8b949e", fontSize: 10 },
       },
       series: [
         {
-          name: "Change %",
-          type: "heatmap" as const,
-          data: data.map((d, i) => [sorted[i].sector, "Change %", (sorted[i].weightedChange * 100).toFixed(2)]),
-          itemStyle: { borderColor: "#30363d", borderWidth: 0.5 },
+          name: "Изм. %",
+          type: "heatmap",
+          data: sorted.map((s) => [
+            s.sector,
+            "Изм. %",
+            Number((s.weightedChange * 100).toFixed(2)),
+          ]),
+          itemStyle: { borderColor: "#0d1117", borderWidth: 1 },
         },
       ],
-    };
+    });
+  }
 
-    chart.setOption(option);
+  $effect(() => {
+    void sectors;
+    render();
+  });
 
-    return () => chart.dispose();
+  onMount(() => {
+    chart = echarts.init(el);
+    render();
+    ro = new ResizeObserver(() => chart?.resize());
+    ro.observe(el);
+  });
+
+  onDestroy(() => {
+    ro?.disconnect();
+    chart?.dispose();
   });
 </script>
 
-<div class="heatmap-chart">
-  <h3>Sector Heatmap (% Change)</h3>
-  <div bind:this={container} style="height: 200px;"></div>
-</div>
+<div class="heatmap" bind:this={el}></div>
 
 <style>
-  .heatmap-chart {
-    padding: 12px;
-    background: var(--bg-secondary, #161b22);
-    border-radius: 6px;
-    border: 1px solid var(--border, #30363d);
-  }
-
-  h3 {
-    margin: 0 0 12px 0;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary, #c9d1d9);
+  .heatmap {
+    width: 100%;
+    height: 100%;
+    min-height: 220px;
   }
 </style>

@@ -15,6 +15,14 @@ use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, Instrument
 /// Метка сектора для инструментов без классификации.
 const UNKNOWN_SECTOR: &str = "Прочее";
 
+/// Префикс из первых `n` символов (не байт) в верхнем регистре.
+///
+/// Группировка по символам, а не байтам, важна для кириллических тикеров:
+/// байтовый срез `s[..n]` на UTF-8 паникует, если режет середину символа.
+fn char_prefix(s: &str, n: usize) -> String {
+    s.chars().take(n).collect::<String>().to_uppercase()
+}
+
 /// Справочник инструментов, отсортированный по символу.
 pub fn instruments(store: &dyn Store) -> Result<Vec<InstrumentDto>, StorageError> {
     let mut out: Vec<InstrumentDto> = store.instruments()?.iter().map(InstrumentDto::from).collect();
@@ -185,60 +193,59 @@ pub fn top_movers(
         .collect())
 }
 
-/// RRG для секторов: позиция каждого сектора относительно рынка по RS-Ratio и RS-Momentum.
-/// Требует, чтобы в окне `[from_ts, to_ts]` были свечи для расчёта индекса сектора.
+/// RRG для секторов: позиция каждого сектора на плоскости RS-Ratio / RS-Momentum.
+///
+/// Упрощённая реализация (scaffold): относительную силу оцениваем по доле оборота
+/// сектора (turnover / средний по секторам), а импульс — по средневзвешенному
+/// изменению. Полноценный RRG (`domain::metrics::rrg`) требует выровненных по
+/// времени ценовых серий сектор/бенчмарк — это задача фазы интеграции данных.
 pub fn rrg_sectors(
     store: &dyn Store,
     from_ts: i64,
     to_ts: i64,
 ) -> Result<Vec<RrgSectorDto>, StorageError> {
-    let instruments = store.instruments()?;
-
-    // Собираем инструменты по секторам.
-    let mut sector_instruments: std::collections::HashMap<String, Vec<&domain::Instrument>> = std::collections::HashMap::new();
-    for inst in &instruments {
-        let sec = inst.sector.clone().unwrap_or_else(|| UNKNOWN_SECTOR.to_string());
-        sector_instruments.entry(sec).or_insert_with(Vec::new).push(inst);
-    }
-
-    // Здесь можно было бы вычислить RRG для каждого сектора, но требует
-    // агрегации цен и индекса бенчмарка. Для scaffold показываем пример
-    // с заглушкой на основе sector_rollup данных.
     let rollups = sector_rollup(store, from_ts, to_ts)?;
-    let avg_turnover = rollups.iter().map(|r| r.turnover).sum::<f64>() / rollups.len().max(1) as f64;
-
-    let mut rrg_data: Vec<RrgSectorDto> = Vec::new();
-    for row in &rollups {
-        // Упрощённая метрика: RS-Ratio = (turnover / avg_turnover) * 100
-        // RS-Momentum = weighted_change направление
-        let rs_ratio = if avg_turnover > 0.0 {
-            (row.turnover / avg_turnover) * 100.0
-        } else {
-            100.0
-        };
-        let rs_momentum = (row.weighted_change + 1.0) * 100.0; // Shift к центру 100
-
-        let quadrant = match (rs_ratio >= 100.0, rs_momentum >= 100.0) {
-            (true, true) => "leading",
-            (true, false) => "weakening",
-            (false, false) => "lagging",
-            (false, true) => "improving",
-        };
-
-        rrg_data.push(RrgSectorDto {
-            sector: row.sector.clone(),
-            rs_ratio,
-            rs_momentum,
-            quadrant: quadrant.to_string(),
-        });
+    if rollups.is_empty() {
+        return Ok(Vec::new());
     }
+    let avg_turnover = rollups.iter().map(|r| r.turnover).sum::<f64>() / rollups.len() as f64;
+
+    let rrg_data = rollups
+        .iter()
+        .map(|row| {
+            // RS-Ratio: оборот сектора относительно среднего, масштаб к 100.
+            let rs_ratio = if avg_turnover > 0.0 {
+                (row.turnover / avg_turnover) * 100.0
+            } else {
+                100.0
+            };
+            // RS-Momentum: изменение в долях, сдвинутое к центру 100
+            // (+1% → 101, −1% → 99).
+            let rs_momentum = (row.weighted_change + 1.0) * 100.0;
+
+            let quadrant = match (rs_ratio >= 100.0, rs_momentum >= 100.0) {
+                (true, true) => "leading",
+                (true, false) => "weakening",
+                (false, false) => "lagging",
+                (false, true) => "improving",
+            };
+
+            RrgSectorDto {
+                sector: row.sector.clone(),
+                rs_ratio,
+                rs_momentum,
+                quadrant: quadrant.to_string(),
+            }
+        })
+        .collect();
 
     Ok(rrg_data)
 }
 
 /// Агрегация фьючерсов по группам (базовая):
-/// собираются инструменты класса "future", группируются по префиксу (первый символ
-/// корневого контракта), в каждой группе считаются обороты и потоки.
+/// собираются инструменты класса "future", группируются по 2-символьному
+/// префиксу тикера (корень контракта, напр. `Si`, `RI`), в каждой группе
+/// считаются обороты и потоки.
 pub fn futures_rollup(
     store: &dyn Store,
     from_ts: i64,
@@ -246,21 +253,16 @@ pub fn futures_rollup(
 ) -> Result<Vec<FutureGroupDto>, StorageError> {
     let futures = store.instruments_by_asset_class("future")?;
 
-    // Группируем по префиксу (первые 2 символа тикера): СИ, РИ, Si, Ri и т.д.
+    // Группируем по 2-символьному корню тикера: Si, RI, ED, GD и т.д.
     let mut groups: std::collections::HashMap<String, Vec<InstrumentMetric>> = std::collections::HashMap::new();
 
     for fut in &futures {
-        let ticker = &fut.ticker;
-        let group = if ticker.len() >= 2 {
-            ticker[..2].to_uppercase()
-        } else {
-            ticker.clone()
-        };
+        let group = char_prefix(&fut.ticker, 2);
 
         if let Some(last) = store.snapshots(&fut.symbol, from_ts, to_ts)?.last() {
             groups
                 .entry(group)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(InstrumentMetric {
                     turnover: last.turnover,
                     net_flow: last.net_flow,
@@ -300,8 +302,12 @@ pub fn futures_rollup(
 }
 
 /// Агрегация облигаций по эмитентам (базовая):
-/// собираются инструменты класса "bond", группируются по префиксу эмитента,
-/// в каждой группе считаются метрики оборотов и доходностей.
+/// собираются инструменты класса "bond", группируются по 3-символьному
+/// префиксу тикера (эмитент), в каждой группе считаются обороты и потоки.
+///
+/// `avg_yield`/`weighted_duration` сейчас 0.0: доходность и дюрация требуют
+/// отдельного источника данных (купоны/погашение), которого пока нет в
+/// хранилище — поля добавлены под интеграцию, чтобы не фабриковать значения.
 pub fn bonds_rollup(
     store: &dyn Store,
     from_ts: i64,
@@ -309,21 +315,16 @@ pub fn bonds_rollup(
 ) -> Result<Vec<BondIssuerDto>, StorageError> {
     let bonds = store.instruments_by_asset_class("bond")?;
 
-    // Группируем по префиксу: ОФЗ, ГАЗ, ЛУК и т.д.
+    // Группируем по 3-символьному префиксу эмитента: OFZ, GAZ, LUK и т.д.
     let mut issuers: std::collections::HashMap<String, Vec<InstrumentMetric>> = std::collections::HashMap::new();
 
     for bond in &bonds {
-        let ticker = &bond.ticker;
-        let issuer = if ticker.len() >= 3 {
-            ticker[..3].to_uppercase()
-        } else {
-            ticker.clone()
-        };
+        let issuer = char_prefix(&bond.ticker, 3);
 
         if let Some(last) = store.snapshots(&bond.symbol, from_ts, to_ts)?.last() {
             issuers
                 .entry(issuer)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(InstrumentMetric {
                     turnover: last.turnover,
                     net_flow: last.net_flow,
@@ -343,8 +344,8 @@ pub fn bonds_rollup(
                 bonds: metrics.len() as u32,
                 turnover: total_turnover,
                 net_flow: total_flow,
-                avg_yield: (5.0 + (metrics.len() as f64) * 0.1) % 8.0, // Placeholder
-                weighted_duration: (3.0 + (metrics.len() as f64) * 0.2) % 10.0, // Placeholder
+                avg_yield: 0.0,         // требует источника купонов/погашения
+                weighted_duration: 0.0, // требует источника купонов/погашения
             }
         })
         .collect();
@@ -353,11 +354,12 @@ pub fn bonds_rollup(
     Ok(rows)
 }
 
-/// Кривая доходности облигаций (упрощённо):
-/// возвращает примерную кривую по стандартным срокам.
-/// Полная реализация требует данных по йилду каждого выпуска.
+/// Кривая доходности облигаций.
+///
+/// Сейчас — статическая иллюстративная кривая (scaffold): реальная кривая
+/// строится по доходностям выпусков, которых пока нет в хранилище. Вынесена в
+/// отдельную команду, чтобы фронт подключился к контракту до интеграции данных.
 pub fn yield_curve() -> Result<Vec<YieldCurvePoint>, StorageError> {
-    // Упрощённо: имитируем нормальную кривую доходности для РФ
     Ok(vec![
         YieldCurvePoint { maturity_years: 0.25, yield_pct: 4.5 },
         YieldCurvePoint { maturity_years: 0.5, yield_pct: 4.7 },
@@ -378,11 +380,15 @@ mod tests {
     use storage::MemStore;
 
     fn inst(symbol: &str, sector: Option<&str>) -> Instrument {
+        inst_of(symbol, sector, AssetClass::Equity)
+    }
+
+    fn inst_of(symbol: &str, sector: Option<&str>, asset_class: AssetClass) -> Instrument {
         Instrument {
             symbol: symbol.into(),
             ticker: symbol.split('@').next().unwrap().into(),
             name: symbol.into(),
-            asset_class: AssetClass::Equity,
+            asset_class,
             sector: sector.map(str::to_string),
             lot_size: 1,
             isin: None,
@@ -496,24 +502,113 @@ mod tests {
     }
 
     #[test]
-    fn top_movers_sorts_by_absolute_change() {
+    fn top_movers_sorts_by_absolute_change_and_respects_limit() {
         let store = seeded();
-        let movers = top_movers(&store, 0, 9, Some(5)).unwrap();
-        assert!(movers.len() <= 5);
-        // Должны быть отсортированы по |изменению|
-        if movers.len() > 1 {
-            assert!(movers[0].change.abs() >= movers[1].change.abs());
+        let all = top_movers(&store, 0, 9, None).unwrap();
+        // 3 инструмента со снимками (XXXX без снимка не попадает).
+        assert_eq!(all.len(), 3);
+        // Отсортировано по убыванию |изменения|.
+        assert!(all
+            .windows(2)
+            .all(|w| w[0].change.abs() >= w[1].change.abs()));
+        // Цена закрытия проброшена из последнего бара.
+        assert!(all.iter().all(|m| m.last_close > 0.0));
+
+        // limit усекает выдачу.
+        let top1 = top_movers(&store, 0, 9, Some(1)).unwrap();
+        assert_eq!(top1.len(), 1);
+        assert_eq!(top1[0].symbol, all[0].symbol);
+    }
+
+    #[test]
+    fn rrg_sectors_assigns_valid_quadrants() {
+        let store = seeded();
+        let rrg = rrg_sectors(&store, 0, 9).unwrap();
+        assert!(!rrg.is_empty());
+        for point in &rrg {
+            assert!(["leading", "weakening", "lagging", "improving"]
+                .contains(&point.quadrant.as_str()));
         }
     }
 
     #[test]
-    fn rrg_sectors_returns_all_sectors() {
-        let store = seeded();
-        let rrg = rrg_sectors(&store, 0, 9).unwrap();
-        assert!(rrg.len() > 0);
-        // Должны быть в квадрантах
-        for point in &rrg {
-            assert!(["leading", "weakening", "lagging", "improving"].contains(&point.quadrant.as_str()));
+    fn rrg_sectors_empty_when_no_snapshots() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        assert!(rrg_sectors(&store, 0, 9).unwrap().is_empty());
+    }
+
+    /// Хранилище с одним фьючерсом и одной облигацией (плюс снимки).
+    fn seeded_mixed() -> MemStore {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .upsert_instruments(&[
+                inst("SBER@MISX", Some("Финансы")),
+                inst_of("SiH5@RTSX", None, AssetClass::Future),
+                inst_of("SiM5@RTSX", None, AssetClass::Future),
+                inst_of("SU26240@MISX", None, AssetClass::Bond),
+            ])
+            .unwrap();
+
+        let mut w = Writer::new(&mut store);
+        for (sym, base) in [
+            ("SBER@MISX", 100.0),
+            ("SiH5@RTSX", 90_000.0),
+            ("SiM5@RTSX", 91_000.0),
+            ("SU26240@MISX", 800.0),
+        ] {
+            let bars = [bar(1, base, base * 1.01, 1_000.0), bar(2, base * 1.01, base * 1.02, 1_000.0)];
+            w.bars(sym, TimeFrame::D1, &bars).unwrap();
+            w.snapshot_from_bars(sym, &bars, 2).unwrap();
         }
+        store
+    }
+
+    #[test]
+    fn instruments_by_asset_class_filters() {
+        let store = seeded_mixed();
+        assert_eq!(store.instruments_by_asset_class("future").unwrap().len(), 2);
+        assert_eq!(store.instruments_by_asset_class("bond").unwrap().len(), 1);
+        assert_eq!(store.instruments_by_asset_class("equity").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn futures_rollup_groups_by_prefix_and_excludes_other_classes() {
+        let store = seeded_mixed();
+        let rows = futures_rollup(&store, 0, 9).unwrap();
+        // SiH5 + SiM5 → одна группа "SI"; облигация/акция не попадают.
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].group, "SI");
+        assert_eq!(rows[0].contracts, 2);
+        assert!(rows[0].turnover > 0.0);
+    }
+
+    #[test]
+    fn bonds_rollup_groups_by_issuer_with_no_fabricated_yield() {
+        let store = seeded_mixed();
+        let rows = bonds_rollup(&store, 0, 9).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].issuer, "SU2"); // 3-символьный префикс SU26240
+        assert_eq!(rows[0].bonds, 1);
+        // Доходность/дюрация не фабрикуются (нет источника данных).
+        assert_eq!(rows[0].avg_yield, 0.0);
+        assert_eq!(rows[0].weighted_duration, 0.0);
+    }
+
+    #[test]
+    fn yield_curve_is_sorted_by_maturity() {
+        let curve = yield_curve().unwrap();
+        assert!(!curve.is_empty());
+        assert!(curve
+            .windows(2)
+            .all(|w| w[0].maturity_years < w[1].maturity_years));
+    }
+
+    #[test]
+    fn char_prefix_handles_multibyte_without_panic() {
+        // Кириллица: байтовый срез [..3] разрезал бы середину символа и паниковал.
+        assert_eq!(char_prefix("ОФЗ26240", 3), "ОФЗ");
+        assert_eq!(char_prefix("Si", 5), "SI"); // короче запрошенного — без паники
     }
 }

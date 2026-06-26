@@ -1,76 +1,72 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import * as echarts from "echarts";
   import type { FutureGroupDto } from "../types";
 
-  export let futures: FutureGroupDto[];
+  let { futures = [] }: { futures: FutureGroupDto[] } = $props();
 
-  let container: HTMLDivElement;
+  let el: HTMLDivElement;
+  let chart: echarts.ECharts | undefined;
+  let ro: ResizeObserver | undefined;
 
-  onMount(() => {
-    if (!container) return;
+  // Цвет: зелёный — рост, красный — падение (насыщенность ~ модуль изменения).
+  function colorFor(change: number): string {
+    const norm = Math.max(-0.03, Math.min(0.03, change)) / 0.03;
+    const a = 0.25 + 0.65 * Math.abs(norm);
+    return norm >= 0 ? `rgba(38,166,154,${a})` : `rgba(239,83,80,${a})`;
+  }
 
-    const chart = echarts.init(container);
-
-    const data = futures.map((f) => ({
-      name: f.group,
-      value: f.turnover,
-      itemStyle: {
-        color:
-          f.weightedChange > 0
-            ? `rgba(38, 166, 154, ${Math.min(1, 0.5 + f.weightedChange * 10)})`
-            : `rgba(239, 83, 80, ${Math.min(1, 0.5 + Math.abs(f.weightedChange) * 10)})`,
-      },
-      label: {
-        show: true,
-        formatter: `{b}\n${f.contracts} контрактов`,
-      },
-    }));
-
-    const option = {
+  function render() {
+    if (!chart) return;
+    chart.setOption({
+      backgroundColor: "transparent",
       tooltip: {
-        trigger: "item" as const,
-        formatter: (params: {
-          name: string;
-          value: number;
-          data: {
-            label: { show: boolean; formatter: string };
-          };
-        }) => {
-          const f = futures.find((x) => x.group === params.name)!;
-          return `
-            ${params.name}<br/>
-            Turnover: ${(params.value / 1_000_000).toFixed(1)}M<br/>
-            Contracts: ${f.contracts}<br/>
-            Change: ${(f.weightedChange * 100).toFixed(2)}%
-          `;
-        },
+        formatter: (p: any) =>
+          `${p.name}<br/>оборот: ${Math.round(p.value).toLocaleString("ru-RU")}<br/>контрактов: ${p.data.contracts}`,
       },
       series: [
         {
-          type: "treemap" as const,
-          label: { show: true, fontSize: 12, fontWeight: "bold" },
+          type: "treemap",
+          roam: false,
+          nodeClick: false,
           breadcrumb: { show: false },
-          data: data,
+          label: { show: true, formatter: "{b}", color: "#e6edf3", fontSize: 12 },
+          itemStyle: { borderColor: "#0d1117", borderWidth: 2, gapWidth: 2 },
+          data: futures.map((f) => ({
+            name: f.group,
+            value: f.turnover,
+            contracts: f.contracts,
+            itemStyle: { color: colorFor(f.weightedChange) },
+          })),
         },
       ],
-    };
+    });
+  }
 
-    chart.setOption(option);
+  $effect(() => {
+    void futures;
+    render();
+  });
 
-    return () => chart.dispose();
+  onMount(() => {
+    chart = echarts.init(el);
+    render();
+    ro = new ResizeObserver(() => chart?.resize());
+    ro.observe(el);
+  });
+
+  onDestroy(() => {
+    ro?.disconnect();
+    chart?.dispose();
   });
 </script>
 
-<div class="futures-treemap">
-  <div bind:this={container} style="height: 250px;"></div>
-</div>
+<div class="treemap" bind:this={el}></div>
 
 <style>
-  .futures-treemap {
-    padding: 12px;
-    background: var(--bg-secondary, #161b22);
-    border-radius: 6px;
-    border: 1px solid var(--border, #30363d);
+  .treemap {
+    width: 100%;
+    height: 100%;
+    min-height: 240px;
   }
 </style>
