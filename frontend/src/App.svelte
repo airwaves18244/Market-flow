@@ -8,8 +8,11 @@
   import TopMoversTable from "./lib/components/TopMoversTable.svelte";
   import HeatmapChart from "./lib/components/HeatmapChart.svelte";
   import RrgChart from "./lib/components/RrgChart.svelte";
+  import FuturesTreemap from "./lib/components/FuturesTreemap.svelte";
+  import YieldCurve from "./lib/components/YieldCurve.svelte";
+  import BondsTable from "./lib/components/BondsTable.svelte";
   import { ipc } from "./lib/ipc";
-  import type { BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorRow, TopMoverDto } from "./lib/types";
+  import type { BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorRow, TopMoverDto, YieldCurvePoint } from "./lib/types";
 
   const FULL_RANGE = Number.MAX_SAFE_INTEGER;
 
@@ -19,6 +22,9 @@
   let breadth = $state<BreadthDto | null>(null);
   let topMovers = $state<TopMoverDto[]>([]);
   let rrgData = $state<RrgSectorDto[]>([]);
+  let futures = $state<FutureGroupDto[]>([]);
+  let bonds = $state<BondIssuerDto[]>([]);
+  let yieldCurve = $state<YieldCurvePoint[]>([]);
   let selected = $state("SBER@MISX");
   let error = $state<string | null>(null);
 
@@ -42,6 +48,9 @@
       breadth = await ipc.breadthData(0, FULL_RANGE);
       topMovers = await ipc.topMovers(0, FULL_RANGE, 10);
       rrgData = await ipc.rrgSectors(0, FULL_RANGE);
+      futures = await ipc.futuresRollup(0, FULL_RANGE);
+      bonds = await ipc.bondsRollup(0, FULL_RANGE);
+      yieldCurve = await ipc.yieldCurve();
       if (instruments.length > 0) selected = instruments[0].symbol;
       await loadBars(selected);
     } catch (e) {
@@ -91,6 +100,24 @@
     {#if rrgData.length > 0}
       <Panel title="RRG — Sector Rotation">
         <RrgChart sectors={rrgData} />
+      </Panel>
+    {/if}
+
+    {#if futures.length > 0}
+      <Panel title="Futures — Groups (Treemap)">
+        <FuturesTreemap {futures} />
+      </Panel>
+    {/if}
+
+    {#if yieldCurve.length > 0}
+      <Panel title="Bonds — Yield Curve">
+        <YieldCurve curve={yieldCurve} />
+      </Panel>
+    {/if}
+
+    {#if bonds.length > 0}
+      <Panel title="Bonds — Issuers">
+        <BondsTable issuers={bonds} />
       </Panel>
     {/if}
   </main>

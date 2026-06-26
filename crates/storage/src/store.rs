@@ -103,4 +103,16 @@ pub trait Store {
 
     /// Все записи классификации секторов.
     fn sector_map(&self) -> Result<Vec<SectorEntry>, StorageError>;
+
+    /// Все инструменты заданного класса активов.
+    fn instruments_by_asset_class(
+        &self,
+        asset_class: &str,
+    ) -> Result<Vec<Instrument>, StorageError> {
+        let all = self.instruments()?;
+        Ok(all
+            .into_iter()
+            .filter(|i| i.asset_class.code() == asset_class)
+            .collect())
+    }
 }

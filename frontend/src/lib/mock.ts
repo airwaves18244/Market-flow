@@ -3,13 +3,16 @@
 
 import type {
   BarPoint,
+  BondIssuerDto,
   BreadthDto,
+  FutureGroupDto,
   InstrumentDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
   TopMoverDto,
   TurnoverPoint,
+  YieldCurvePoint,
 } from "./types";
 
 const instruments: InstrumentDto[] = [
@@ -53,6 +56,31 @@ const rrgSectors: RrgSectorDto[] = [
   { sector: "Финансы", rsRatio: 95, rsMomentum: 92, quadrant: "lagging" },
   { sector: "Металлы", rsRatio: 118, rsMomentum: 98, quadrant: "weakening" },
   { sector: "IT", rsRatio: 105, rsMomentum: 125, quadrant: "improving" },
+];
+
+const futureGroups: FutureGroupDto[] = [
+  { group: "Si", contracts: 12, turnover: 45_000_000, netFlow: 2_000_000, weightedChange: 0.012, openInterest: 280000 },
+  { group: "Ri", contracts: 8, turnover: 28_000_000, netFlow: 1_200_000, weightedChange: 0.018, openInterest: 150000 },
+  { group: "ED", contracts: 5, turnover: 15_000_000, netFlow: 500_000, weightedChange: -0.005, openInterest: 85000 },
+  { group: "Gd", contracts: 4, turnover: 12_000_000, netFlow: -300_000, weightedChange: -0.008, openInterest: 55000 },
+];
+
+const bondIssuers: BondIssuerDto[] = [
+  { issuer: "OFZ", bonds: 18, turnover: 8_500_000, netFlow: 200_000, avgYield: 5.2, weightedDuration: 3.5 },
+  { issuer: "Gaz", bonds: 12, turnover: 6_200_000, netFlow: -100_000, avgYield: 5.8, weightedDuration: 2.8 },
+  { issuer: "Luk", bonds: 9, turnover: 4_100_000, netFlow: 150_000, avgYield: 6.1, weightedDuration: 4.2 },
+  { issuer: "Ber", bonds: 6, turnover: 2_800_000, netFlow: 50_000, avgYield: 6.5, weightedDuration: 5.1 },
+];
+
+const yields: YieldCurvePoint[] = [
+  { maturityYears: 0.25, yieldPct: 4.5 },
+  { maturityYears: 0.5, yieldPct: 4.7 },
+  { maturityYears: 1.0, yieldPct: 5.1 },
+  { maturityYears: 2.0, yieldPct: 5.6 },
+  { maturityYears: 3.0, yieldPct: 5.9 },
+  { maturityYears: 5.0, yieldPct: 6.2 },
+  { maturityYears: 7.0, yieldPct: 6.4 },
+  { maturityYears: 10.0, yieldPct: 6.5 },
 ];
 
 function genBars(seed = 300): BarPoint[] {
@@ -108,6 +136,12 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return topMovers as unknown as T;
     case "rrg_sectors":
       return rrgSectors as unknown as T;
+    case "futures_rollup":
+      return futureGroups as unknown as T;
+    case "bonds_rollup":
+      return bondIssuers as unknown as T;
+    case "yield_curve":
+      return yields as unknown as T;
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
   }

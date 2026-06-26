@@ -12,7 +12,7 @@ use tauri::{Emitter, State};
 
 use domain::TimeFrame;
 
-use crate::dto::{BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint};
+use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint, YieldCurvePoint};
 use crate::state::AppState;
 
 type CmdResult<T> = Result<T, String>;
@@ -77,6 +77,21 @@ fn rrg_sectors(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Ve
     state.rrg_sectors(from_ts, to_ts).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn futures_rollup(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Vec<FutureGroupDto>> {
+    state.futures_rollup(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn bonds_rollup(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Vec<BondIssuerDto>> {
+    state.bonds_rollup(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn yield_curve(state: State<AppState>) -> CmdResult<Vec<YieldCurvePoint>> {
+    state.yield_curve().map_err(|e| e.to_string())
+}
+
 /// Отправить во фронт событие live-обновления оборота (канал `turnover:tick`).
 /// Точка интеграции для потокового ингеста (Фаза 7).
 #[allow(dead_code)]
@@ -116,7 +131,10 @@ pub fn run() {
             sector_map,
             breadth_data,
             top_movers,
-            rrg_sectors
+            rrg_sectors,
+            futures_rollup,
+            bonds_rollup,
+            yield_curve
         ])
         .run(tauri::generate_context!())
         .expect("ошибка запуска приложения Tauri");

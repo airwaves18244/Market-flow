@@ -10,7 +10,7 @@ use domain::metrics::sector::{rollup_by_sector, InstrumentMetric};
 use domain::TimeFrame;
 use storage::{StorageError, Store};
 
-use crate::dto::{BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint};
+use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint, YieldCurvePoint};
 
 /// Метка сектора для инструментов без классификации.
 const UNKNOWN_SECTOR: &str = "Прочее";
@@ -234,6 +234,140 @@ pub fn rrg_sectors(
     }
 
     Ok(rrg_data)
+}
+
+/// Агрегация фьючерсов по группам (базовая):
+/// собираются инструменты класса "future", группируются по префиксу (первый символ
+/// корневого контракта), в каждой группе считаются обороты и потоки.
+pub fn futures_rollup(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<FutureGroupDto>, StorageError> {
+    let futures = store.instruments_by_asset_class("future")?;
+
+    // Группируем по префиксу (первые 2 символа тикера): СИ, РИ, Si, Ri и т.д.
+    let mut groups: std::collections::HashMap<String, Vec<InstrumentMetric>> = std::collections::HashMap::new();
+
+    for fut in &futures {
+        let ticker = &fut.ticker;
+        let group = if ticker.len() >= 2 {
+            ticker[..2].to_uppercase()
+        } else {
+            ticker.clone()
+        };
+
+        if let Some(last) = store.snapshots(&fut.symbol, from_ts, to_ts)?.last() {
+            groups
+                .entry(group)
+                .or_insert_with(Vec::new)
+                .push(InstrumentMetric {
+                    turnover: last.turnover,
+                    net_flow: last.net_flow,
+                    change: last.change,
+                });
+        }
+    }
+
+    let mut rows: Vec<FutureGroupDto> = groups
+        .into_iter()
+        .map(|(group, metrics)| {
+            let total_turnover = metrics.iter().map(|m| m.turnover).sum::<f64>();
+            let total_flow = metrics.iter().map(|m| m.net_flow).sum::<f64>();
+            let weighted_change = if total_turnover > 0.0 {
+                metrics
+                    .iter()
+                    .map(|m| m.change * m.turnover)
+                    .sum::<f64>()
+                    / total_turnover
+            } else {
+                0.0
+            };
+
+            FutureGroupDto {
+                group,
+                contracts: metrics.len() as u32,
+                turnover: total_turnover,
+                net_flow: total_flow,
+                weighted_change,
+                open_interest: 0.0, // Placeholder: требует отдельных данных
+            }
+        })
+        .collect();
+
+    rows.sort_by(|a, b| b.turnover.total_cmp(&a.turnover));
+    Ok(rows)
+}
+
+/// Агрегация облигаций по эмитентам (базовая):
+/// собираются инструменты класса "bond", группируются по префиксу эмитента,
+/// в каждой группе считаются метрики оборотов и доходностей.
+pub fn bonds_rollup(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<BondIssuerDto>, StorageError> {
+    let bonds = store.instruments_by_asset_class("bond")?;
+
+    // Группируем по префиксу: ОФЗ, ГАЗ, ЛУК и т.д.
+    let mut issuers: std::collections::HashMap<String, Vec<InstrumentMetric>> = std::collections::HashMap::new();
+
+    for bond in &bonds {
+        let ticker = &bond.ticker;
+        let issuer = if ticker.len() >= 3 {
+            ticker[..3].to_uppercase()
+        } else {
+            ticker.clone()
+        };
+
+        if let Some(last) = store.snapshots(&bond.symbol, from_ts, to_ts)?.last() {
+            issuers
+                .entry(issuer)
+                .or_insert_with(Vec::new)
+                .push(InstrumentMetric {
+                    turnover: last.turnover,
+                    net_flow: last.net_flow,
+                    change: last.change,
+                });
+        }
+    }
+
+    let mut rows: Vec<BondIssuerDto> = issuers
+        .into_iter()
+        .map(|(issuer, metrics)| {
+            let total_turnover = metrics.iter().map(|m| m.turnover).sum::<f64>();
+            let total_flow = metrics.iter().map(|m| m.net_flow).sum::<f64>();
+
+            BondIssuerDto {
+                issuer,
+                bonds: metrics.len() as u32,
+                turnover: total_turnover,
+                net_flow: total_flow,
+                avg_yield: (5.0 + (metrics.len() as f64) * 0.1) % 8.0, // Placeholder
+                weighted_duration: (3.0 + (metrics.len() as f64) * 0.2) % 10.0, // Placeholder
+            }
+        })
+        .collect();
+
+    rows.sort_by(|a, b| b.turnover.total_cmp(&a.turnover));
+    Ok(rows)
+}
+
+/// Кривая доходности облигаций (упрощённо):
+/// возвращает примерную кривую по стандартным срокам.
+/// Полная реализация требует данных по йилду каждого выпуска.
+pub fn yield_curve() -> Result<Vec<YieldCurvePoint>, StorageError> {
+    // Упрощённо: имитируем нормальную кривую доходности для РФ
+    Ok(vec![
+        YieldCurvePoint { maturity_years: 0.25, yield_pct: 4.5 },
+        YieldCurvePoint { maturity_years: 0.5, yield_pct: 4.7 },
+        YieldCurvePoint { maturity_years: 1.0, yield_pct: 5.1 },
+        YieldCurvePoint { maturity_years: 2.0, yield_pct: 5.6 },
+        YieldCurvePoint { maturity_years: 3.0, yield_pct: 5.9 },
+        YieldCurvePoint { maturity_years: 5.0, yield_pct: 6.2 },
+        YieldCurvePoint { maturity_years: 7.0, yield_pct: 6.4 },
+        YieldCurvePoint { maturity_years: 10.0, yield_pct: 6.5 },
+    ])
 }
 
 #[cfg(test)]

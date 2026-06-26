@@ -6,7 +6,9 @@
 
 import type {
   BarPoint,
+  BondIssuerDto,
   BreadthDto,
+  FutureGroupDto,
   InstrumentDto,
   RrgSectorDto,
   SectorEntryDto,
@@ -14,6 +16,7 @@ import type {
   TimeFrame,
   TopMoverDto,
   TurnoverPoint,
+  YieldCurvePoint,
 } from "./types";
 import * as mock from "./mock";
 
@@ -51,4 +54,13 @@ export const ipc = {
 
   rrgSectors: (fromTs: number, toTs: number) =>
     invoke<RrgSectorDto[]>("rrg_sectors", { fromTs, toTs }),
+
+  futuresRollup: (fromTs: number, toTs: number) =>
+    invoke<FutureGroupDto[]>("futures_rollup", { fromTs, toTs }),
+
+  bondsRollup: (fromTs: number, toTs: number) =>
+    invoke<BondIssuerDto[]>("bonds_rollup", { fromTs, toTs }),
+
+  yieldCurve: () =>
+    invoke<YieldCurvePoint[]>("yield_curve"),
 };

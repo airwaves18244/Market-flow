@@ -65,3 +65,26 @@ export interface RrgSectorDto {
   rsMomentum: number;
   quadrant: "leading" | "weakening" | "lagging" | "improving";
 }
+
+export interface FutureGroupDto {
+  group: string;
+  contracts: number;
+  turnover: number;
+  netFlow: number;
+  weightedChange: number;
+  openInterest: number;
+}
+
+export interface BondIssuerDto {
+  issuer: string;
+  bonds: number;
+  turnover: number;
+  netFlow: number;
+  avgYield: number;
+  weightedDuration: number;
+}
+
+export interface YieldCurvePoint {
+  maturityYears: number;
+  yieldPct: number;
+}

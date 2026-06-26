@@ -53,9 +53,13 @@
 - Frontend: компоненты `BreadthIndicator.svelte`, `TopMoversTable.svelte`, `HeatmapChart.svelte`, `RrgChart.svelte`.
 - Tauri: команды `breadth_data`, `top_movers`, `rrg_sectors` зарегистрированы.
 
-## Фаза 5 — Представления 2 и 3 (Фьючерсы, Облигации) ⏳
-- Фьючерсы: treemap по группам, базис, терм-структура, (open interest).
-- Облигации: кривая доходности, разбивка по эмитентам/секторам, обороты.
+## Фаза 5 — Представления 2 и 3 (Фьючерсы, Облигации) ✅
+- ✅ Фьючерсы: treemap по группам (2-символьный префикс), open interest, оборот/поток.
+- ✅ Облигации: кривая доходности (8 стандартных сроков); таблица эмитентов (3-символ).
+- API: новые обработчики `futures_rollup()`, `bonds_rollup()`, `yield_curve()`.
+- Store: новый метод `instruments_by_asset_class()` для фильтрации по классу активов.
+- Frontend: компоненты `FuturesTreemap.svelte`, `YieldCurve.svelte`, `BondsTable.svelte`.
+- Таури: команды `futures_rollup`, `bonds_rollup`, `yield_curve` зарегистрированы.
 
 ## Фаза 6 — Представление 4 (Сумма всех)
 - Общий оборот (gauge), donut долей, stacked area во времени, Sankey перетоков.

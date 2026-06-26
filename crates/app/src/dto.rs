@@ -144,3 +144,35 @@ pub struct RrgSectorDto {
     /// Квадрант: `leading|weakening|lagging|improving`.
     pub quadrant: String,
 }
+
+/// Строка агрегации фьючерсов (по группам контрактов).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FutureGroupDto {
+    pub group: String,
+    pub contracts: u32,
+    pub turnover: f64,
+    pub net_flow: f64,
+    pub weighted_change: f64,
+    pub open_interest: f64,
+}
+
+/// Строка агрегации облигаций (по эмитентам/секторам).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BondIssuerDto {
+    pub issuer: String,
+    pub bonds: u32,
+    pub turnover: f64,
+    pub net_flow: f64,
+    pub avg_yield: f64,
+    pub weighted_duration: f64,
+}
+
+/// Точка кривой доходности (по срокам).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YieldCurvePoint {
+    pub maturity_years: f64,
+    pub yield_pct: f64,
+}

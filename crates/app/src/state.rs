@@ -10,7 +10,7 @@ use domain::TimeFrame;
 use storage::{StorageError, Store};
 
 use crate::api;
-use crate::dto::{BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint};
+use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint, YieldCurvePoint};
 
 /// Разделяемое состояние терминала.
 pub struct AppState {
@@ -83,6 +83,18 @@ impl AppState {
 
     pub fn rrg_sectors(&self, from_ts: i64, to_ts: i64) -> Result<Vec<RrgSectorDto>, StorageError> {
         self.read(|s| api::rrg_sectors(s, from_ts, to_ts))
+    }
+
+    pub fn futures_rollup(&self, from_ts: i64, to_ts: i64) -> Result<Vec<FutureGroupDto>, StorageError> {
+        self.read(|s| api::futures_rollup(s, from_ts, to_ts))
+    }
+
+    pub fn bonds_rollup(&self, from_ts: i64, to_ts: i64) -> Result<Vec<BondIssuerDto>, StorageError> {
+        self.read(|s| api::bonds_rollup(s, from_ts, to_ts))
+    }
+
+    pub fn yield_curve(&self) -> Result<Vec<YieldCurvePoint>, StorageError> {
+        self.read(|_| api::yield_curve())
     }
 }
 
