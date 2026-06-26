@@ -12,7 +12,7 @@ use tauri::{Emitter, State};
 
 use domain::TimeFrame;
 
-use crate::dto::{BarPoint, InstrumentDto, SectorEntryDto, SectorRow, TurnoverPoint};
+use crate::dto::{BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint};
 use crate::state::AppState;
 
 type CmdResult<T> = Result<T, String>;
@@ -57,6 +57,26 @@ fn sector_map(state: State<AppState>) -> CmdResult<Vec<SectorEntryDto>> {
     state.sector_map().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn breadth_data(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<BreadthDto> {
+    state.breadth_data(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn top_movers(
+    state: State<AppState>,
+    from_ts: i64,
+    to_ts: i64,
+    limit: Option<usize>,
+) -> CmdResult<Vec<TopMoverDto>> {
+    state.top_movers(from_ts, to_ts, limit).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rrg_sectors(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Vec<RrgSectorDto>> {
+    state.rrg_sectors(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
 /// Отправить во фронт событие live-обновления оборота (канал `turnover:tick`).
 /// Точка интеграции для потокового ингеста (Фаза 7).
 #[allow(dead_code)]
@@ -93,7 +113,10 @@ pub fn run() {
             bars,
             turnover_series,
             sector_rollup,
-            sector_map
+            sector_map,
+            breadth_data,
+            top_movers,
+            rrg_sectors
         ])
         .run(tauri::generate_context!())
         .expect("ошибка запуска приложения Tauri");

@@ -3,9 +3,12 @@
 
 import type {
   BarPoint,
+  BreadthDto,
   InstrumentDto,
+  RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  TopMoverDto,
   TurnoverPoint,
 } from "./types";
 
@@ -28,6 +31,28 @@ const sectorEntries: SectorEntryDto[] = [
   { key: "SBER", sector: "Финансы", isIsin: false },
   { key: "LKOH", sector: "Нефтегаз", isIsin: false },
   { key: "GAZP", sector: "Нефтегаз", isIsin: false },
+];
+
+const breadth: BreadthDto = {
+  advancers: 4,
+  decliners: 1,
+  unchanged: 0,
+  pctAdvancing: 0.8,
+  adRatio: 4.0,
+};
+
+const topMovers: TopMoverDto[] = [
+  { symbol: "YDEX@MISX", ticker: "YDEX", name: "Яндекс", sector: "IT", change: 0.045, lastClose: 3200 },
+  { symbol: "GAZP@MISX", ticker: "GAZP", name: "Газпром", sector: "Нефтегаз", change: 0.032, lastClose: 185 },
+  { symbol: "GMKN@MISX", ticker: "GMKN", name: "Норникель", sector: "Металлы", change: 0.025, lastClose: 175000 },
+  { symbol: "LKOH@MISX", ticker: "LKOH", name: "Лукойл", sector: "Нефтегаз", change: 0.018, lastClose: 6850 },
+];
+
+const rrgSectors: RrgSectorDto[] = [
+  { sector: "Нефтегаз", rsRatio: 126, rsMomentum: 115, quadrant: "leading" },
+  { sector: "Финансы", rsRatio: 95, rsMomentum: 92, quadrant: "lagging" },
+  { sector: "Металлы", rsRatio: 118, rsMomentum: 98, quadrant: "weakening" },
+  { sector: "IT", rsRatio: 105, rsMomentum: 125, quadrant: "improving" },
 ];
 
 function genBars(seed = 300): BarPoint[] {
@@ -77,6 +102,12 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
     }
     case "turnover_series":
       return genTurnover() as unknown as T;
+    case "breadth_data":
+      return breadth as unknown as T;
+    case "top_movers":
+      return topMovers as unknown as T;
+    case "rrg_sectors":
+      return rrgSectors as unknown as T;
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
   }

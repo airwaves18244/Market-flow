@@ -6,10 +6,13 @@
 
 import type {
   BarPoint,
+  BreadthDto,
   InstrumentDto,
+  RrgSectorDto,
   SectorEntryDto,
   SectorRow,
   TimeFrame,
+  TopMoverDto,
   TurnoverPoint,
 } from "./types";
 import * as mock from "./mock";
@@ -39,4 +42,13 @@ export const ipc = {
     invoke<SectorRow[]>("sector_rollup", { fromTs, toTs }),
 
   sectorMap: () => invoke<SectorEntryDto[]>("sector_map"),
+
+  breadthData: (fromTs: number, toTs: number) =>
+    invoke<BreadthDto>("breadth_data", { fromTs, toTs }),
+
+  topMovers: (fromTs: number, toTs: number, limit?: number) =>
+    invoke<TopMoverDto[]>("top_movers", { fromTs, toTs, limit }),
+
+  rrgSectors: (fromTs: number, toTs: number) =>
+    invoke<RrgSectorDto[]>("rrg_sectors", { fromTs, toTs }),
 };

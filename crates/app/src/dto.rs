@@ -98,3 +98,49 @@ impl From<&SectorEntry> for SectorEntryDto {
         }
     }
 }
+
+/// Ширина рынка: статистика по растущим/падающим бумагам.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BreadthDto {
+    pub advancers: u32,
+    pub decliners: u32,
+    pub unchanged: u32,
+    /// Доля растущих от всех (0..1), None если пусто.
+    pub pct_advancing: Option<f64>,
+    /// Ratio растущих к падающим, None если нет падающих.
+    pub ad_ratio: Option<f64>,
+}
+
+/// Инструмент с наибольшим изменением (для топ-движений).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopMoverDto {
+    pub symbol: String,
+    pub ticker: String,
+    pub name: String,
+    pub sector: Option<String>,
+    /// Изменение в долях: `0.05` = +5%, `-0.03` = -3%.
+    pub change: f64,
+    /// Последняя цена закрытия.
+    pub last_close: f64,
+}
+
+/// Точка RRG для сектора.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RrgPointDto {
+    pub rs_ratio: f64,
+    pub rs_momentum: f64,
+}
+
+/// Сектор на плоскости RRG.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RrgSectorDto {
+    pub sector: String,
+    pub rs_ratio: f64,
+    pub rs_momentum: f64,
+    /// Квадрант: `leading|weakening|lagging|improving`.
+    pub quadrant: String,
+}

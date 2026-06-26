@@ -10,7 +10,7 @@ use domain::TimeFrame;
 use storage::{StorageError, Store};
 
 use crate::api;
-use crate::dto::{BarPoint, InstrumentDto, SectorEntryDto, SectorRow, TurnoverPoint};
+use crate::dto::{BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint};
 
 /// Разделяемое состояние терминала.
 pub struct AppState {
@@ -66,6 +66,23 @@ impl AppState {
 
     pub fn sector_map(&self) -> Result<Vec<SectorEntryDto>, StorageError> {
         self.read(api::sector_map)
+    }
+
+    pub fn breadth_data(&self, from_ts: i64, to_ts: i64) -> Result<BreadthDto, StorageError> {
+        self.read(|s| api::breadth_data(s, from_ts, to_ts))
+    }
+
+    pub fn top_movers(
+        &self,
+        from_ts: i64,
+        to_ts: i64,
+        limit: Option<usize>,
+    ) -> Result<Vec<TopMoverDto>, StorageError> {
+        self.read(|s| api::top_movers(s, from_ts, to_ts, limit))
+    }
+
+    pub fn rrg_sectors(&self, from_ts: i64, to_ts: i64) -> Result<Vec<RrgSectorDto>, StorageError> {
+        self.read(|s| api::rrg_sectors(s, from_ts, to_ts))
     }
 }
 

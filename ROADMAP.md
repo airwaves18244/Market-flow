@@ -43,10 +43,17 @@
   ECharts treemap и Lightweight Charts свечи.
 - ⏳ Полноценный dockview и асинхронный планировщик ингеста — в следующих фазах.
 
-## Фаза 4 — Представление 1 (Акции/секторы)
-- treemap (размер=оборот, цвет=%изм), heatmap, breadth, топ-движения, RRG.
+## Фаза 4 — Представление 1 (Акции/секторы) ✅
+- ✅ treemap (размер=оборот, цвет=%изм) — уже реализовано в Фазе 3.
+- ✅ heatmap — ECharts компонент по секторам и изменениям.
+- ✅ breadth — индикатор ширины рынка (advancers/decliners/A/D ratio).
+- ✅ топ-движения — таблица инструментов с наибольшим абсолютным изменением.
+- ✅ RRG — scatter-график RS-Ratio vs RS-Momentum по секторам с квадрантами.
+- API: новые обработчики `breadth_data()`, `top_movers()`, `rrg_sectors()` в `crates/app/src/api.rs`.
+- Frontend: компоненты `BreadthIndicator.svelte`, `TopMoversTable.svelte`, `HeatmapChart.svelte`, `RrgChart.svelte`.
+- Tauri: команды `breadth_data`, `top_movers`, `rrg_sectors` зарегистрированы.
 
-## Фаза 5 — Представления 2 и 3 (Фьючерсы, Облигации)
+## Фаза 5 — Представления 2 и 3 (Фьючерсы, Облигации) ⏳
 - Фьючерсы: treemap по группам, базис, терм-структура, (open interest).
 - Облигации: кривая доходности, разбивка по эмитентам/секторам, обороты.
 

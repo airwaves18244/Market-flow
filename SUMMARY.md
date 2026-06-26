@@ -49,7 +49,24 @@ cargo run -p app                        # smoke: domain → storage → dto
 cd frontend && npm install && npm run build   # сборка фронта (мок-данные)
 ```
 
-## Следующее (Фаза 4)
-Представление «Акции/секторы»: treemap (размер=оборот, цвет=%изм), heatmap,
-breadth, топ-движения, RRG. Плюс асинхронный планировщик ингеста поверх
-`data::MarketData` и `storage::Store`, полноценный dockview.
+## Готово (продолжение)
+
+### Фаза 4 — Представление 1 (Акции/секторы) ✅
+- **API-обработчики** в `crates/app/src/api.rs`:
+  - `breadth_data()` — статистика advancers/decliners/A/D ratio из снимков оборота;
+  - `top_movers()` — инструменты с наибольшим |изменением|, отсортированы, limit;
+  - `rrg_sectors()` — позиция секторов на плоскости RS-Ratio vs RS-Momentum с квадрантами.
+- **DTO расширения** в `crates/app/src/dto.rs`:
+  - `BreadthDto`, `TopMoverDto`, `RrgSectorDto`.
+- **Tauri команды**: регистрация в `crates/app/src/tauri_app.rs`.
+- **Frontend компоненты**:
+  - `BreadthIndicator.svelte` — карточка с метриками ширины рынка;
+  - `TopMoversTable.svelte` — таблица топ-движений;
+  - `HeatmapChart.svelte` — ECharts heatmap по секторам (в %) и изменениям;
+  - `RrgChart.svelte` — scatter-RRG с квадрантами и легендой.
+- **Интеграция**: App.svelte загружает все новые данные и показывает панели в расширенной сетке.
+
+## Следующее (Фаза 5)
+Представления 2 и 3: Фьючерсы (treemap, базис, терм-структура) и Облигации
+(кривая доходности, разбивка по эмитентам/секторам). Плюс асинхронный планировщик
+ингеста поверх `data::MarketData` и `storage::Store`, полноценный dockview.

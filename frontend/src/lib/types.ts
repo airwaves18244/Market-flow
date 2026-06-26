@@ -41,3 +41,27 @@ export interface SectorEntryDto {
   sector: string;
   isIsin: boolean;
 }
+
+export interface BreadthDto {
+  advancers: number;
+  decliners: number;
+  unchanged: number;
+  pctAdvancing: number | null;
+  adRatio: number | null;
+}
+
+export interface TopMoverDto {
+  symbol: string;
+  ticker: string;
+  name: string;
+  sector: string | null;
+  change: number;
+  lastClose: number;
+}
+
+export interface RrgSectorDto {
+  sector: string;
+  rsRatio: number;
+  rsMomentum: number;
+  quadrant: "leading" | "weakening" | "lagging" | "improving";
+}

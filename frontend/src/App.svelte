@@ -4,14 +4,21 @@
   import SectorTreemap from "./lib/components/SectorTreemap.svelte";
   import CandleChart from "./lib/components/CandleChart.svelte";
   import InstrumentList from "./lib/components/InstrumentList.svelte";
+  import BreadthIndicator from "./lib/components/BreadthIndicator.svelte";
+  import TopMoversTable from "./lib/components/TopMoversTable.svelte";
+  import HeatmapChart from "./lib/components/HeatmapChart.svelte";
+  import RrgChart from "./lib/components/RrgChart.svelte";
   import { ipc } from "./lib/ipc";
-  import type { BarPoint, InstrumentDto, SectorRow } from "./lib/types";
+  import type { BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorRow, TopMoverDto } from "./lib/types";
 
   const FULL_RANGE = Number.MAX_SAFE_INTEGER;
 
   let instruments = $state<InstrumentDto[]>([]);
   let sectors = $state<SectorRow[]>([]);
   let bars = $state<BarPoint[]>([]);
+  let breadth = $state<BreadthDto | null>(null);
+  let topMovers = $state<TopMoverDto[]>([]);
+  let rrgData = $state<RrgSectorDto[]>([]);
   let selected = $state("SBER@MISX");
   let error = $state<string | null>(null);
 
@@ -32,6 +39,9 @@
     try {
       instruments = await ipc.instruments();
       sectors = await ipc.sectorRollup(0, FULL_RANGE);
+      breadth = await ipc.breadthData(0, FULL_RANGE);
+      topMovers = await ipc.topMovers(0, FULL_RANGE, 10);
+      rrgData = await ipc.rrgSectors(0, FULL_RANGE);
       if (instruments.length > 0) selected = instruments[0].symbol;
       await loadBars(selected);
     } catch (e) {
@@ -63,5 +73,25 @@
     <Panel title="Инструменты">
       <InstrumentList items={instruments} {selected} onSelect={select} />
     </Panel>
+
+    {#if breadth}
+      <Panel title="Market Breadth">
+        <BreadthIndicator data={breadth} />
+      </Panel>
+    {/if}
+
+    <Panel title="Top Movers">
+      <TopMoversTable movers={topMovers} />
+    </Panel>
+
+    <Panel title="Heatmap">
+      <HeatmapChart {sectors} />
+    </Panel>
+
+    {#if rrgData.length > 0}
+      <Panel title="RRG — Sector Rotation">
+        <RrgChart sectors={rrgData} />
+      </Panel>
+    {/if}
   </main>
 </div>

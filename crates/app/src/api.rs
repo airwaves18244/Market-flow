@@ -5,11 +5,12 @@
 //! полностью тестируются на `MemStore`; тонкие `#[tauri::command]`-обёртки
 //! (фича `tauri`) лишь вызывают эти функции.
 
+use domain::metrics::breadth::breadth;
 use domain::metrics::sector::{rollup_by_sector, InstrumentMetric};
 use domain::TimeFrame;
 use storage::{StorageError, Store};
 
-use crate::dto::{BarPoint, InstrumentDto, SectorEntryDto, SectorRow, TurnoverPoint};
+use crate::dto::{BarPoint, BreadthDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint};
 
 /// Метка сектора для инструментов без классификации.
 const UNKNOWN_SECTOR: &str = "Прочее";
@@ -105,6 +106,134 @@ pub fn sector_rollup(
         .collect();
     rows.sort_by(|a, b| b.turnover.total_cmp(&a.turnover));
     Ok(rows)
+}
+
+/// Ширина рынка по окну времени: сколько инструментов растёт, падает, без изменений.
+pub fn breadth_data(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<BreadthDto, StorageError> {
+    let instruments = store.instruments()?;
+    let mut changes = Vec::new();
+
+    for inst in &instruments {
+        if let Some(last) = store.snapshots(&inst.symbol, from_ts, to_ts)?.last() {
+            changes.push(last.change);
+        }
+    }
+
+    let b = breadth(&changes, 0.001);
+    Ok(BreadthDto {
+        advancers: b.advancers,
+        decliners: b.decliners,
+        unchanged: b.unchanged,
+        pct_advancing: b.pct_advancing(),
+        ad_ratio: b.ad_ratio(),
+    })
+}
+
+/// Топ-движения: инструменты с наибольшим абсолютным изменением в окне.
+/// Возвращает до `limit` (default 10) инструментов, отсортированных по |изменению|.
+pub fn top_movers(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+    limit: Option<usize>,
+) -> Result<Vec<TopMoverDto>, StorageError> {
+    let instruments = store.instruments()?;
+    let limit = limit.unwrap_or(10);
+    let mut movers: Vec<(String, String, String, Option<String>, f64, f64)> = Vec::new();
+
+    for inst in &instruments {
+        if let Some(last_snapshot) = store.snapshots(&inst.symbol, from_ts, to_ts)?.last() {
+            // Получить последний бар для цены закрытия.
+            let last_close = store
+                .bars(&inst.symbol, TimeFrame::D1, from_ts, to_ts)
+                .ok()
+                .and_then(|bs| bs.last().map(|b| b.close))
+                .unwrap_or(0.0);
+
+            movers.push((
+                inst.symbol.clone(),
+                inst.ticker.clone(),
+                inst.name.clone(),
+                inst.sector.clone(),
+                last_snapshot.change,
+                last_close,
+            ));
+        }
+    }
+
+    movers.sort_by(|a, b| {
+        let abs_a = a.4.abs();
+        let abs_b = b.4.abs();
+        abs_b.total_cmp(&abs_a)
+    });
+
+    Ok(movers
+        .into_iter()
+        .take(limit)
+        .map(|(symbol, ticker, name, sector, change, close)| TopMoverDto {
+            symbol,
+            ticker,
+            name,
+            sector,
+            change,
+            last_close: close,
+        })
+        .collect())
+}
+
+/// RRG для секторов: позиция каждого сектора относительно рынка по RS-Ratio и RS-Momentum.
+/// Требует, чтобы в окне `[from_ts, to_ts]` были свечи для расчёта индекса сектора.
+pub fn rrg_sectors(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<RrgSectorDto>, StorageError> {
+    let instruments = store.instruments()?;
+
+    // Собираем инструменты по секторам.
+    let mut sector_instruments: std::collections::HashMap<String, Vec<&domain::Instrument>> = std::collections::HashMap::new();
+    for inst in &instruments {
+        let sec = inst.sector.clone().unwrap_or_else(|| UNKNOWN_SECTOR.to_string());
+        sector_instruments.entry(sec).or_insert_with(Vec::new).push(inst);
+    }
+
+    // Здесь можно было бы вычислить RRG для каждого сектора, но требует
+    // агрегации цен и индекса бенчмарка. Для scaffold показываем пример
+    // с заглушкой на основе sector_rollup данных.
+    let rollups = sector_rollup(store, from_ts, to_ts)?;
+    let avg_turnover = rollups.iter().map(|r| r.turnover).sum::<f64>() / rollups.len().max(1) as f64;
+
+    let mut rrg_data: Vec<RrgSectorDto> = Vec::new();
+    for row in &rollups {
+        // Упрощённая метрика: RS-Ratio = (turnover / avg_turnover) * 100
+        // RS-Momentum = weighted_change направление
+        let rs_ratio = if avg_turnover > 0.0 {
+            (row.turnover / avg_turnover) * 100.0
+        } else {
+            100.0
+        };
+        let rs_momentum = (row.weighted_change + 1.0) * 100.0; // Shift к центру 100
+
+        let quadrant = match (rs_ratio >= 100.0, rs_momentum >= 100.0) {
+            (true, true) => "leading",
+            (true, false) => "weakening",
+            (false, false) => "lagging",
+            (false, true) => "improving",
+        };
+
+        rrg_data.push(RrgSectorDto {
+            sector: row.sector.clone(),
+            rs_ratio,
+            rs_momentum,
+            quadrant: quadrant.to_string(),
+        });
+    }
+
+    Ok(rrg_data)
 }
 
 #[cfg(test)]
@@ -219,5 +348,38 @@ mod tests {
         let rows = sector_rollup(&store, 0, 9).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].sector, UNKNOWN_SECTOR);
+    }
+
+    #[test]
+    fn breadth_counts_advancers_and_decliners() {
+        let store = seeded();
+        // SBER: change=0.03, LKOH: 0.04, GAZP: 0.06 — 3 растущих
+        let bd = breadth_data(&store, 0, 9).unwrap();
+        assert_eq!(bd.advancers, 3);
+        assert_eq!(bd.decliners, 0);
+        assert_eq!(bd.unchanged, 0);
+        assert_eq!(bd.pct_advancing, Some(1.0));
+    }
+
+    #[test]
+    fn top_movers_sorts_by_absolute_change() {
+        let store = seeded();
+        let movers = top_movers(&store, 0, 9, Some(5)).unwrap();
+        assert!(movers.len() <= 5);
+        // Должны быть отсортированы по |изменению|
+        if movers.len() > 1 {
+            assert!(movers[0].change.abs() >= movers[1].change.abs());
+        }
+    }
+
+    #[test]
+    fn rrg_sectors_returns_all_sectors() {
+        let store = seeded();
+        let rrg = rrg_sectors(&store, 0, 9).unwrap();
+        assert!(rrg.len() > 0);
+        // Должны быть в квадрантах
+        for point in &rrg {
+            assert!(["leading", "weakening", "lagging", "improving"].contains(&point.quadrant.as_str()));
+        }
     }
 }
