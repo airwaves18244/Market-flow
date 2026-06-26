@@ -5,12 +5,29 @@
 //! **DuckDB** (колоночный OLAP, читает/пишет Parquet), идеально подходящий для
 //! запросов вида «оборот по секторам по дням».
 //!
-//! ## Статус: схема и контракты (Фаза 0)
+//! ## Слои (Фаза 1)
 //!
-//! DDL ниже — это и есть «источник правды» по структуре БД; подключение
-//! нативного `duckdb` и реализация ингеста/запросов — следующая фаза.
+//! - [`schema`] / [`migrate`] — DDL («источник правды») и идемпотентные миграции;
+//! - [`store::Store`] — контракт записи/чтения, реализуемый бэкендами;
+//! - [`mem::MemStore`] — реализация в памяти (кросс-платформенно тестируемая);
+//! - [`duck::DuckStore`] — нативный DuckDB за фичей `duckdb`;
+//! - [`ingest`] — запись данных (бары/снимки/инструменты, классификация);
+//! - [`backfill`] — планирование дозагрузки исторических баров.
 
+pub mod backfill;
+#[cfg(feature = "duckdb")]
+pub mod duck;
+pub mod ingest;
+pub mod mem;
+pub mod migrate;
 pub mod schema;
+pub mod store;
+
+pub use mem::MemStore;
+pub use store::{SectorEntry, Store, TurnoverSnapshot};
+
+#[cfg(feature = "duckdb")]
+pub use duck::DuckStore;
 
 /// Ошибки хранилища.
 #[derive(Debug, thiserror::Error)]
