@@ -24,8 +24,10 @@
   экспоненциальный backoff, `tracing`.
 - ✅ § 0.4 реализация трейта `MarketData` (`FinamClient`): `assets` (постраничный
   `AllAssets`), `bars`, `last_quote`, `latest_trades` + маппинг protobuf → домен.
-- ⏳ Открыто: стримы (`Subscribe*`) с авто-reconnect; интеграционная проверка
-  против живого API (нужен ключ) — сейчас покрыта только чистая логика (19 тестов).
+- ✅ Стримы (`Subscribe*`: trades/bars/quotes) с авто-reconnect (backoff,
+  переподключение через `stream::reconnecting`).
+- ⏳ Открыто: интеграционная проверка против живого API (нужен ключ) — сейчас
+  покрыта только чистая логика (21 тест в `data`).
 
 ## Фаза 1 — Хранилище и ингест (`storage`) ✅ (частично)
 - ✅ § 1.1 Нативный `duckdb` (bundled): `Db::open`/`open_in_memory`, схема при старте.

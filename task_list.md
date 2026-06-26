@@ -41,7 +41,9 @@
 - [x] Экспоненциальный backoff (`resilience::backoff_delay`).
 - [x] `tracing`: debug-события на запросах/refresh.
 - [x] **DoD:** тест, что limiter пропускает burst и затем блокирует; границы техокна.
-- [ ] Авто-reconnect стримов (`Subscribe*`) — со стрим-методами.
+- [x] Авто-reconnect стримов (`stream::reconnecting`) + стрим-методы
+      `subscribe_trades`/`subscribe_bars`/`subscribe_quotes`; тесты на
+      переподключение (виртуальное время tokio).
 
 ### 0.4 Реализация трейта `MarketData` (`data`) ✅
 - [x] `assets(mic)` → `Vec<Instrument>` (постраничный `AllAssets`, фильтр по mic).
