@@ -97,15 +97,12 @@ FROM turnover_snapshots
 WHERE symbol = ? AND ts >= ? AND ts <= ?
 ORDER BY ts ASC;";
     let mut stmt = conn.prepare(SQL)?;
-    let rows = stmt.query_map(
-        duckdb::params![symbol, from_ts, to_ts],
-        |row| {
-            Ok(FlowPoint {
-                ts: row.get(0)?,
-                net_flow: row.get(1)?,
-            })
-        },
-    )?;
+    let rows = stmt.query_map(duckdb::params![symbol, from_ts, to_ts], |row| {
+        Ok(FlowPoint {
+            ts: row.get(0)?,
+            net_flow: row.get(1)?,
+        })
+    })?;
     collect(rows)
 }
 
@@ -113,9 +110,7 @@ fn params_limit(from_ts: i64, to_ts: i64, limit: usize) -> impl duckdb::Params {
     duckdb::params_from_iter([from_ts, to_ts, limit as i64])
 }
 
-fn collect<T>(
-    rows: impl Iterator<Item = std::result::Result<T, duckdb::Error>>,
-) -> Result<Vec<T>> {
+fn collect<T>(rows: impl Iterator<Item = std::result::Result<T, duckdb::Error>>) -> Result<Vec<T>> {
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);

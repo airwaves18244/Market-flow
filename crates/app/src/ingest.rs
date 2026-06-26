@@ -165,7 +165,10 @@ mod tests {
     async fn sync_instruments_writes_assets() {
         let db = Db::open_in_memory().unwrap();
         let src = MockSource {
-            instruments: vec![instrument("SBER@MISX", "SBER"), instrument("GAZP@MISX", "GAZP")],
+            instruments: vec![
+                instrument("SBER@MISX", "SBER"),
+                instrument("GAZP@MISX", "GAZP"),
+            ],
             ..Default::default()
         };
         let n = sync_instruments(&src, &db, "MISX").await.unwrap();

@@ -32,10 +32,10 @@ pub use pb::grpc::tradeapi::v1::assets::assets_service_client::AssetsServiceClie
 pub use pb::grpc::tradeapi::v1::auth::auth_service_client::AuthServiceClient;
 pub use pb::grpc::tradeapi::v1::marketdata::market_data_service_client::MarketDataServiceClient;
 
-/// Пространство имён сервиса авторизации.
-pub use pb::grpc::tradeapi::v1::auth;
 /// Пространство имён сервиса инструментов.
 pub use pb::grpc::tradeapi::v1::assets;
+/// Пространство имён сервиса авторизации.
+pub use pb::grpc::tradeapi::v1::auth;
 /// Пространство имён сервиса рыночных данных.
 pub use pb::grpc::tradeapi::v1::marketdata;
 /// Сторона сделки (общий тип пакета `grpc.tradeapi.v1`).

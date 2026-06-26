@@ -119,10 +119,15 @@ mod tests {
     use super::*;
 
     fn d(s: &str) -> Option<Decimal> {
-        Some(Decimal { value: s.to_string() })
+        Some(Decimal {
+            value: s.to_string(),
+        })
     }
     fn t(sec: i64) -> Option<Timestamp> {
-        Some(Timestamp { seconds: sec, nanos: 0 })
+        Some(Timestamp {
+            seconds: sec,
+            nanos: 0,
+        })
     }
 
     #[test]

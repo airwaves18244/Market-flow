@@ -60,10 +60,7 @@ impl Db {
     }
 
     /// Батч-вставка снимков оборота.
-    pub fn insert_turnover_snapshots(
-        &self,
-        snapshots: &[ingest::SymbolSnapshot],
-    ) -> Result<usize> {
+    pub fn insert_turnover_snapshots(&self, snapshots: &[ingest::SymbolSnapshot]) -> Result<usize> {
         ingest::insert_turnover_snapshots(&self.conn, snapshots)
     }
 

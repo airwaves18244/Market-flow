@@ -32,7 +32,12 @@ fn bar(ts: i64, close: f64, volume: f64) -> Bar {
 fn seed() -> Db {
     let db = Db::open_in_memory().unwrap();
     let instruments = [
-        instrument("SBER@MISX", "SBER", AssetClass::Equity, Some("RU0009029540")),
+        instrument(
+            "SBER@MISX",
+            "SBER",
+            AssetClass::Equity,
+            Some("RU0009029540"),
+        ),
         instrument("GAZP@MISX", "GAZP", AssetClass::Equity, None),
         instrument("SiM5@RTSX", "SiM5", AssetClass::Future, None),
     ];
@@ -61,7 +66,8 @@ fn bars_batch_insert_is_idempotent_on_pk() {
     // Повторная вставка тех же баров (PK symbol+timeframe+ts) — без дублей,
     // значения обновляются.
     let updated = [bar(1000, 150.0, 9.0), bar(2000, 101.0, 6.0)];
-    db.insert_bars("SBER@MISX", TimeFrame::D1, &updated).unwrap();
+    db.insert_bars("SBER@MISX", TimeFrame::D1, &updated)
+        .unwrap();
 
     let n: i64 = db
         .conn()
@@ -157,14 +163,14 @@ fn analytical_queries_aggregate_snapshots() {
     let fin = by_sector.iter().find(|s| s.sector == "Финансы").unwrap();
     assert_eq!(fin.turnover, 1300.0); // 500 + 800
     assert_eq!(fin.net_flow, 70.0); // 120 - 50
-    // Финансы (1300) идут раньше Нефтегаза (300) — сортировка по обороту.
+                                    // Финансы (1300) идут раньше Нефтегаза (300) — сортировка по обороту.
     assert_eq!(by_sector[0].sector, "Финансы");
 
     // Топ-движения: берётся последний снимок инструмента в периоде.
     let movers = db.top_movers(0, 10_000, 10).unwrap();
     let sber = movers.iter().find(|m| m.symbol == "SBER@MISX").unwrap();
     assert_eq!(sber.change, -0.004); // последний снимок (ts=2000)
-    // По модулю изменения GAZP (0.030) лидирует над SBER (0.004).
+                                     // По модулю изменения GAZP (0.030) лидирует над SBER (0.004).
     assert_eq!(movers[0].symbol, "GAZP@MISX");
 
     // Временной ряд нетто-потока SBER — по возрастанию времени.

@@ -2,20 +2,12 @@ name: market-terminal CI
 
 on:
   push:
-    paths:
-      - "market-terminal/**"
-      - ".github/workflows/ci.yml"
+    branches: ["**"]
   pull_request:
-    paths:
-      - "market-terminal/**"
-
-defaults:
-  run:
-    working-directory: market-terminal
 
 jobs:
-  core:
-    name: build + test + clippy (cross-platform core)
+  rust:
+    name: rust — fmt + clippy + test (workspace)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,11 +15,28 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: market-terminal
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+
+  frontend:
+    name: frontend — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: typecheck
+        run: npm run check
+      - name: build
+        run: npm run build

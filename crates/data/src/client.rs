@@ -156,9 +156,10 @@ impl FinamClient {
                     .into_inner();
                 Ok(inner.map(|item| {
                     item.map_err(map_status).and_then(|resp| match resp.error {
-                        Some(e) if e.code != 0 => {
-                            Err(DataError::Other(format!("стрим {}: {}", e.code, e.description)))
-                        }
+                        Some(e) if e.code != 0 => Err(DataError::Other(format!(
+                            "стрим {}: {}",
+                            e.code, e.description
+                        ))),
                         _ => Ok(resp.quote.iter().map(convert::quote).collect()),
                     })
                 }))
