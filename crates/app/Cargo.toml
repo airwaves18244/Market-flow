@@ -17,5 +17,18 @@ storage = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
 
-# В фазе UI добавляются: tauri, tokio. Сейчас bin — это smoke-точка входа,
-# проверяющая, что слои связываются и собираются.
+# UI-привязка Tauri. Выключена по умолчанию: её сборка требует десктопного
+# окружения (на Linux — webkit2gtk), поэтому базовый кросс-платформенный CI
+# собирает только ядро IPC (api/dto/state), которое тестируется на MemStore.
+tauri = { version = "2", features = [], optional = true }
+
+[build-dependencies]
+# Нужен только при сборке с фичей `tauri` (генерация контекста из
+# tauri.conf.json). Опциональный, чтобы не тянуться в обычной сборке.
+tauri-build = { version = "2", optional = true }
+
+[features]
+default = []
+tauri = ["dep:tauri", "dep:tauri-build"]
+# Продакшен-хранилище: нативный DuckDB вместо MemStore.
+duckdb = ["storage/duckdb"]

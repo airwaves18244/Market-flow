@@ -29,14 +29,27 @@
 - **Типы**: `TurnoverSnapshot`, `SectorEntry`; `TimeFrame` перенесён в `domain`
   (с `code`/`from_code`/`seconds`) и переэкспортирован из `data`.
 
+### Фаза 3 — Tauri-оболочка + каркас фронта
+- **Ядро IPC** (`crates/app`): `AppState` поверх `Store`; DTO (camelCase);
+  обработчики `instruments`, `bars`, `turnover_series`, `sector_rollup`,
+  `sector_map` — чистые, протестированы на `MemStore`.
+- **Привязка Tauri** за фичей `tauri`: `#[tauri::command]`-обёртки, заготовка
+  событий live-push, `tauri.conf.json` + capabilities + `build.rs`. Десктоп-
+  сборка требует webkit2gtk → вне кросс-платформенного CI.
+- **Фронт** (`frontend`): Vite + Svelte 5 + TS, тёмная тема, каркас докуемых
+  панелей, ECharts treemap + Lightweight Charts свечи, типизированный IPC-клиент
+  с мок-режимом (UI работает в браузере без бэкенда). `npm run build` и
+  `svelte-check` — зелёные.
+
 ## Проверка
 ```bash
-cargo test --workspace                 # ядро + хранилище (MemStore), без C++
+cargo test --workspace                  # ядро + хранилище + IPC (MemStore), без C++/Tauri
 cargo test -p storage --features duckdb # + нативный DuckDB (bundled)
-cargo run -p app                       # smoke: domain → storage сквозняком
+cargo run -p app                        # smoke: domain → storage → dto
+cd frontend && npm install && npm run build   # сборка фронта (мок-данные)
 ```
 
-## Следующее (Фаза 3)
-Tauri-оболочка + каркас фронта: app state, IPC-команды (снимки + временные
-ряды), события (live-push), асинхронный планировщик ингеста поверх
-`data::MarketData` и `storage::Store`; Vite + Svelte + ECharts/Lightweight Charts.
+## Следующее (Фаза 4)
+Представление «Акции/секторы»: treemap (размер=оборот, цвет=%изм), heatmap,
+breadth, топ-движения, RRG. Плюс асинхронный планировщик ингеста поверх
+`data::MarketData` и `storage::Store`, полноценный dockview.

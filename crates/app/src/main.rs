@@ -1,14 +1,23 @@
 //! Точка входа десктопного терминала.
 //!
-//! ## Статус: smoke-каркас (Фазы 0–2)
+//! ## Статус: каркас Tauri (Фаза 3)
 //!
-//! В фазе UI здесь поднимается Tauri-приложение: регистрируются IPC-команды
-//! (запрос снимков и временных рядов), события (live-push котировок во фронт) и
-//! асинхронный планировщик батч-ингеста под лимиты API. Пока это консольная
-//! точка входа, которая прогоняет реальный путь данных через слои
-//! `domain`/`storage`: миграция → ингест баров → снимок оборота → запрос.
+//! Ядро IPC ([`api`]/[`dto`]/[`state`]) реализовано и протестировано на
+//! `MemStore`. Привязка к Tauri (команды, события, билдер) живёт в модуле
+//! [`tauri_app`] за фичей `tauri` — её сборка требует десктопного окружения
+//! (webkit2gtk), поэтому по умолчанию выключена и не ломает кросс-платформенный
+//! CI. Без фичи `tauri` бинарь работает как консольный smoke, прогоняющий путь
+//! данных `domain` → `storage` → `dto`.
+
+mod api;
+mod dto;
+mod state;
+
+#[cfg(feature = "tauri")]
+mod tauri_app;
 
 use domain::{AssetClass, Bar, TimeFrame};
+use state::AppState;
 use storage::ingest::Writer;
 use storage::{schema, MemStore, Store};
 
@@ -23,40 +32,82 @@ fn demo_bar(ts: i64, open: f64, close: f64, volume: f64) -> Bar {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("market terminal — каркас (Фаза 1: хранилище и ингест)");
-    println!("Классы активов: {:?}", AssetClass::ALL);
-    println!("Эндпоинт API: {}", finam_proto::ENDPOINT);
-    println!("Таблиц в схеме DuckDB: {}", schema::ALL_DDL.len());
+/// Наполнить хранилище демонстрационными данными (для smoke без живого API).
+fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
+    use domain::Instrument;
 
-    // Демонстрация связности слоёв на in-memory хранилище. В продакшен-сборке
-    // вместо MemStore подключается storage::DuckStore (фича `duckdb`).
     let mut store = MemStore::new();
     store.migrate()?;
-    println!("Версия схемы: {:?}", store.schema_version()?);
+    store.upsert_instruments(&[
+        Instrument {
+            symbol: "SBER@MISX".into(),
+            ticker: "SBER".into(),
+            name: "Сбербанк".into(),
+            asset_class: AssetClass::Equity,
+            sector: Some("Финансы".into()),
+            lot_size: 10,
+            isin: Some("RU0009029540".into()),
+        },
+        Instrument {
+            symbol: "LKOH@MISX".into(),
+            ticker: "LKOH".into(),
+            name: "Лукойл".into(),
+            asset_class: AssetClass::Equity,
+            sector: Some("Нефтегаз".into()),
+            lot_size: 1,
+            isin: None,
+        },
+    ])?;
 
-    let symbol = "SBER@MISX";
-    let bars = [
-        demo_bar(1, 300.0, 305.0, 1_000.0),
-        demo_bar(2, 305.0, 303.0, 800.0),
-        demo_bar(3, 303.0, 310.0, 1_500.0),
-    ];
+    let mut w = Writer::new(&mut store);
+    w.load_sector_map([("SBER", "Финансы"), ("LKOH", "Нефтегаз")])?;
+    for (sym, base) in [("SBER@MISX", 300.0), ("LKOH@MISX", 7000.0)] {
+        let bars = [
+            demo_bar(1, base, base * 1.01, 1_000.0),
+            demo_bar(2, base * 1.01, base * 0.999, 900.0),
+            demo_bar(3, base * 0.999, base * 1.02, 1_500.0),
+        ];
+        w.bars(sym, TimeFrame::D1, &bars)?;
+        w.snapshot_from_bars(sym, &bars, 3)?;
+    }
+    Ok(store)
+}
 
-    let mut writer = Writer::new(&mut store);
-    let n = writer.bars(symbol, TimeFrame::D1, &bars)?;
-    writer.snapshot_from_bars(symbol, &bars, 3)?;
-
-    println!("Записано баров {symbol}: {n}");
-    let stored = store.bars(symbol, TimeFrame::D1, 0, i64::MAX)?;
-    println!("Прочитано баров из хранилища: {}", stored.len());
-    if let Some(snap) = store.snapshots(symbol, 0, i64::MAX)?.first() {
-        println!(
-            "Снимок оборота: turnover={:.0} net_flow={:.0} change={:+.2}%",
-            snap.turnover,
-            snap.net_flow,
-            snap.change * 100.0
-        );
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "tauri")]
+    {
+        tauri_app::run();
+        return Ok(());
     }
 
-    Ok(())
+    #[cfg(not(feature = "tauri"))]
+    {
+        println!("market terminal — каркас (Фаза 3: Tauri-оболочка + IPC)");
+        println!("Классы активов: {:?}", AssetClass::ALL);
+        println!("Эндпоинт API: {}", finam_proto::ENDPOINT);
+        println!("Таблиц в схеме DuckDB: {}", schema::ALL_DDL.len());
+
+        let store = seed_demo_store()?;
+        let state = AppState::new(store);
+
+        println!("\nIPC-команды (демо на MemStore):");
+        println!("  instruments(): {}", state.instruments()?.len());
+        let rows = state.sector_rollup(0, i64::MAX)?;
+        println!("  sector_rollup(): {} секторов", rows.len());
+        for r in &rows {
+            println!(
+                "    {:<10} turnover={:>12.0} change={:+.2}%",
+                r.sector,
+                r.turnover,
+                r.weighted_change * 100.0
+            );
+        }
+        let series = state.turnover_series("SBER@MISX", 0, i64::MAX)?;
+        println!("  turnover_series(SBER@MISX): {} точек", series.len());
+        let candles = state.bars("SBER@MISX", TimeFrame::D1, 0, i64::MAX)?;
+        println!("  bars(SBER@MISX, d1): {} свечей", candles.len());
+        println!("  sector_map(): {} записей", state.sector_map()?.len());
+
+        Ok(())
+    }
 }

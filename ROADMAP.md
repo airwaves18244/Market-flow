@@ -31,9 +31,17 @@
 - ✅ RRG (RS-Ratio / RS-Momentum, квадранты).
 - ✅ cross-asset shares + flow matrix (Sankey).
 
-## Фаза 3 — Tauri-оболочка + каркас фронта
-- App state, IPC-команды (снимки + временные ряды), события (live-push).
-- Vite + Svelte, ECharts/Lightweight Charts, докуемые панели, тёмная тема.
+## Фаза 3 — Tauri-оболочка + каркас фронта ✅
+- ✅ Ядро IPC: `AppState` поверх `Store`, DTO (camelCase) и обработчики
+  команд (`instruments`, `bars`, `turnover_series`, `sector_rollup`,
+  `sector_map`) — чистые, протестированные на `MemStore`.
+- ✅ Привязка Tauri за фичей `tauri`: `#[tauri::command]`-обёртки, заготовка
+  событий live-push, `tauri.conf.json` + capabilities + `build.rs`. Сборка
+  десктопа требует webkit2gtk, поэтому фича выключена в кросс-платформенном CI.
+- ✅ Фронт: Vite + Svelte 5 + TS, тёмная тема, каркас докуемых панелей,
+  типизированный IPC-клиент с мок-режимом (работает в браузере без бэкенда),
+  ECharts treemap и Lightweight Charts свечи.
+- ⏳ Полноценный dockview и асинхронный планировщик ингеста — в следующих фазах.
 
 ## Фаза 4 — Представление 1 (Акции/секторы)
 - treemap (размер=оборот, цвет=%изм), heatmap, breadth, топ-движения, RRG.

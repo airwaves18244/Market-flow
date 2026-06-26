@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Базовые разрешения окна терминала: ядро Tauri (вызов IPC-команд и приём событий).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

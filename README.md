@@ -30,7 +30,7 @@ frontend/       Vite + TS + Svelte + ECharts + Lightweight Charts
 gRPC/Tauri/DuckDB, поэтому собирается и тестируется кросс-платформенно (включая
 CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API и железу.
 
-## Что уже реализовано (Фазы 0–2)
+## Что уже реализовано (Фазы 0–3)
 
 - `domain` — аналитическое ядро, полностью покрыто тестами:
   - **turnover** — оборот, направленный оборот, скан «необычного объёма»;
@@ -46,24 +46,33 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
     классификации секторов; планировщик батч-поллинга и бэкфилл истории.
 - `data` — контракты адаптера Finam (трейт `MarketData`, `TimeFrame`, ошибки) и
   классификация секторов.
-- `app` — smoke-точка входа: прогоняет путь данных `domain` → `storage`
-  (миграция → ингест → снимок → запрос).
+- `app` — каркас Tauri (Фаза 3): ядро IPC (`AppState` + DTO + обработчики
+  `instruments`/`bars`/`turnover_series`/`sector_rollup`/`sector_map`),
+  протестированное на `MemStore`; привязка Tauri за фичей `tauri`.
+- `frontend` — каркас фронта (Фаза 3): Vite + Svelte 5 + TS, тёмная тема,
+  докуемые панели, ECharts treemap + Lightweight Charts свечи, типизированный
+  IPC-клиент с мок-режимом (работает в браузере без бэкенда).
 
-Сетевые реализации (tonic/gRPC) и Tauri-UI подключаются в следующих фазах
-(см. `ROADMAP`).
+Сетевые реализации (tonic/gRPC) подключаются в следующих фазах (см. `ROADMAP`).
 
 ## Сборка и тесты
 
 ```bash
-# Кросс-платформенно (работает в т.ч. в CI на Linux): без нативного DuckDB.
+# Кросс-платформенно (работает в т.ч. в CI на Linux): без нативного DuckDB/Tauri.
 cargo test --workspace
 cargo clippy --workspace
 
 # С нативным движком DuckDB (bundled, компиляция C++ из исходников):
 cargo test -p storage --features duckdb
 
-# Запуск smoke-точки входа:
+# Консольный smoke (путь domain → storage → dto на MemStore):
 cargo run -p app
+
+# Фронт (мок-данные вне Tauri):
+cd frontend && npm install && npm run build
+
+# Десктоп целиком (нужен webkit2gtk на Linux):
+cargo run -p app --features tauri
 ```
 
 ## Finam Trade API
