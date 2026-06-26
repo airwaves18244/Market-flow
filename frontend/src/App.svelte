@@ -11,8 +11,12 @@
   import FuturesTreemap from "./lib/components/FuturesTreemap.svelte";
   import YieldCurve from "./lib/components/YieldCurve.svelte";
   import BondsTable from "./lib/components/BondsTable.svelte";
+  import TotalTurnoverGauge from "./lib/components/TotalTurnoverGauge.svelte";
+  import SharesDonut from "./lib/components/SharesDonut.svelte";
+  import TurnoverStackedArea from "./lib/components/TurnoverStackedArea.svelte";
+  import FlowSankey from "./lib/components/FlowSankey.svelte";
   import { ipc } from "./lib/ipc";
-  import type { BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorRow, TopMoverDto, YieldCurvePoint } from "./lib/types";
+  import type { BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorRow, TopMoverDto, TurnoverByClassPoint, YieldCurvePoint } from "./lib/types";
 
   const FULL_RANGE = Number.MAX_SAFE_INTEGER;
 
@@ -25,6 +29,9 @@
   let futures = $state<FutureGroupDto[]>([]);
   let bonds = $state<BondIssuerDto[]>([]);
   let yieldCurve = $state<YieldCurvePoint[]>([]);
+  let summary = $state<CrossAssetSummaryDto | null>(null);
+  let timeline = $state<TurnoverByClassPoint[]>([]);
+  let flow = $state<FlowEdgeDto[]>([]);
   let selected = $state("SBER@MISX");
   let error = $state<string | null>(null);
 
@@ -51,6 +58,9 @@
       futures = await ipc.futuresRollup(0, FULL_RANGE);
       bonds = await ipc.bondsRollup(0, FULL_RANGE);
       yieldCurve = await ipc.yieldCurve();
+      summary = await ipc.crossAssetSummary(0, FULL_RANGE);
+      timeline = await ipc.turnoverTimeline(0, FULL_RANGE);
+      flow = await ipc.flowSankey(0, FULL_RANGE);
       if (instruments.length > 0) selected = instruments[0].symbol;
       await loadBars(selected);
     } catch (e) {
@@ -116,5 +126,23 @@
         <BondsTable issuers={bonds} />
       </Panel>
     {/if}
+
+    {#if summary}
+      <Panel title="Сумма всех — общий оборот">
+        <TotalTurnoverGauge total={summary.total} />
+      </Panel>
+
+      <Panel title="Сумма всех — доли классов">
+        <SharesDonut shares={summary.shares} />
+      </Panel>
+    {/if}
+
+    <Panel title="Сумма всех — оборот во времени">
+      <TurnoverStackedArea points={timeline} />
+    </Panel>
+
+    <Panel title="Сумма всех — перетоки (Sankey)">
+      <FlowSankey edges={flow} />
+    </Panel>
   </main>
 </div>

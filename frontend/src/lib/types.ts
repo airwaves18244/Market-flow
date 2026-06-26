@@ -88,3 +88,27 @@ export interface YieldCurvePoint {
   maturityYears: number;
   yieldPct: number;
 }
+
+export interface AssetClassShareDto {
+  assetClass: string;
+  turnover: number;
+  share: number;
+}
+
+export interface CrossAssetSummaryDto {
+  total: number;
+  shares: AssetClassShareDto[];
+}
+
+export interface TurnoverByClassPoint {
+  ts: number;
+  equity: number;
+  future: number;
+  bond: number;
+}
+
+export interface FlowEdgeDto {
+  from: string;
+  to: string;
+  weight: number;
+}

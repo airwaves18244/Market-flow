@@ -5,12 +5,15 @@ import type {
   BarPoint,
   BondIssuerDto,
   BreadthDto,
+  CrossAssetSummaryDto,
+  FlowEdgeDto,
   FutureGroupDto,
   InstrumentDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
   TopMoverDto,
+  TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
 } from "./types";
@@ -83,6 +86,37 @@ const yields: YieldCurvePoint[] = [
   { maturityYears: 10.0, yieldPct: 6.5 },
 ];
 
+const crossAssetSummary: CrossAssetSummaryDto = {
+  total: 142_800_000,
+  shares: [
+    { assetClass: "equity", turnover: 42_800_000, share: 0.3 },
+    { assetClass: "future", turnover: 85_700_000, share: 0.6 },
+    { assetClass: "bond", turnover: 14_300_000, share: 0.1 },
+  ],
+};
+
+function genTimeline(): TurnoverByClassPoint[] {
+  const out: TurnoverByClassPoint[] = [];
+  const start = Math.floor(Date.UTC(2026, 0, 1) / 1000);
+  const day = 86_400;
+  for (let i = 0; i < 60; i++) {
+    // Доля фьючерсов растёт со временем, акций — снижается (виден переток).
+    const t = i / 60;
+    out.push({
+      ts: start + i * day,
+      equity: 50_000_000 * (1 - 0.4 * t) + Math.random() * 4_000_000,
+      future: 60_000_000 * (1 + 0.5 * t) + Math.random() * 4_000_000,
+      bond: 14_000_000 + Math.random() * 2_000_000,
+    });
+  }
+  return out;
+}
+
+const flowSankey: FlowEdgeDto[] = [
+  { from: "equity", to: "future", weight: 0.12 },
+  { from: "bond", to: "future", weight: 0.03 },
+];
+
 function genBars(seed = 300): BarPoint[] {
   const out: BarPoint[] = [];
   let price = seed;
@@ -142,6 +176,12 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return bondIssuers as unknown as T;
     case "yield_curve":
       return yields as unknown as T;
+    case "cross_asset_summary":
+      return crossAssetSummary as unknown as T;
+    case "turnover_timeline":
+      return genTimeline() as unknown as T;
+    case "flow_sankey":
+      return flowSankey as unknown as T;
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
   }

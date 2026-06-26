@@ -10,7 +10,7 @@ use domain::TimeFrame;
 use storage::{StorageError, Store};
 
 use crate::api;
-use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint, YieldCurvePoint};
+use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint};
 
 /// Разделяемое состояние терминала.
 pub struct AppState {
@@ -97,6 +97,26 @@ impl AppState {
     /// поэтому блокировка стора не нужна.
     pub fn yield_curve(&self) -> Result<Vec<YieldCurvePoint>, StorageError> {
         api::yield_curve()
+    }
+
+    pub fn cross_asset_summary(
+        &self,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<CrossAssetSummaryDto, StorageError> {
+        self.read(|s| api::cross_asset_summary(s, from_ts, to_ts))
+    }
+
+    pub fn turnover_timeline(
+        &self,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<TurnoverByClassPoint>, StorageError> {
+        self.read(|s| api::turnover_timeline(s, from_ts, to_ts))
+    }
+
+    pub fn flow_sankey(&self, from_ts: i64, to_ts: i64) -> Result<Vec<FlowEdgeDto>, StorageError> {
+        self.read(|s| api::flow_sankey(s, from_ts, to_ts))
     }
 }
 

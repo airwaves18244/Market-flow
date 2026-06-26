@@ -168,3 +168,45 @@ pub struct YieldCurvePoint {
     pub maturity_years: f64,
     pub yield_pct: f64,
 }
+
+/// Доля одного класса активов в общем обороте (сектор donut'а).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetClassShareDto {
+    /// Код класса: `equity|future|bond`.
+    pub asset_class: String,
+    pub turnover: f64,
+    /// Доля в общем обороте (0..1).
+    pub share: f64,
+}
+
+/// Сводка «Сумма всех»: общий оборот + доли по классам (gauge + donut).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossAssetSummaryDto {
+    /// Суммарный оборот по всем классам.
+    pub total: f64,
+    pub shares: Vec<AssetClassShareDto>,
+}
+
+/// Точка оборота по классам активов во времени (stacked area).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnoverByClassPoint {
+    pub ts: i64,
+    pub equity: f64,
+    pub future: f64,
+    pub bond: f64,
+}
+
+/// Ребро перетока доли между классами активов (Sankey).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowEdgeDto {
+    /// Класс-источник (код).
+    pub from: String,
+    /// Класс-приёмник (код).
+    pub to: String,
+    /// Вес перетока — сдвиг доли (0..1).
+    pub weight: f64,
+}

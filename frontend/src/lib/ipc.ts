@@ -8,6 +8,8 @@ import type {
   BarPoint,
   BondIssuerDto,
   BreadthDto,
+  CrossAssetSummaryDto,
+  FlowEdgeDto,
   FutureGroupDto,
   InstrumentDto,
   RrgSectorDto,
@@ -15,6 +17,7 @@ import type {
   SectorRow,
   TimeFrame,
   TopMoverDto,
+  TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
 } from "./types";
@@ -63,4 +66,13 @@ export const ipc = {
 
   yieldCurve: () =>
     invoke<YieldCurvePoint[]>("yield_curve"),
+
+  crossAssetSummary: (fromTs: number, toTs: number) =>
+    invoke<CrossAssetSummaryDto>("cross_asset_summary", { fromTs, toTs }),
+
+  turnoverTimeline: (fromTs: number, toTs: number) =>
+    invoke<TurnoverByClassPoint[]>("turnover_timeline", { fromTs, toTs }),
+
+  flowSankey: (fromTs: number, toTs: number) =>
+    invoke<FlowEdgeDto[]>("flow_sankey", { fromTs, toTs }),
 };

@@ -61,8 +61,14 @@
 - Frontend: компоненты `FuturesTreemap.svelte`, `YieldCurve.svelte`, `BondsTable.svelte`.
 - Таури: команды `futures_rollup`, `bonds_rollup`, `yield_curve` зарегистрированы.
 
-## Фаза 6 — Представление 4 (Сумма всех)
-- Общий оборот (gauge), donut долей, stacked area во времени, Sankey перетоков.
+## Фаза 6 — Представление 4 (Сумма всех) ✅
+- ✅ Общий оборот (gauge), donut долей, stacked area во времени, Sankey перетоков.
+- API: `cross_asset_summary()` (gauge+donut), `turnover_timeline()` (stacked area),
+  `flow_sankey()` (перетоки долей) — поверх `domain::metrics::crossasset`.
+- DTO: `CrossAssetSummaryDto`, `AssetClassShareDto`, `TurnoverByClassPoint`, `FlowEdgeDto`.
+- Tauri: команды `cross_asset_summary`, `turnover_timeline`, `flow_sankey`.
+- Frontend: `TotalTurnoverGauge`, `SharesDonut`, `TurnoverStackedArea`, `FlowSankey`
+  (+ общий помощник `assetClass.ts` с подписями/цветами классов).
 
 ## Фаза 7 — Live-функции
 - Стрим вотчлиста (свечи/стакан/лента), Time&Sales, DOM, алёрты, replay-режим.

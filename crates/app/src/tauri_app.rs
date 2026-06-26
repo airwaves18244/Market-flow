@@ -12,7 +12,7 @@ use tauri::{Emitter, State};
 
 use domain::TimeFrame;
 
-use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint, YieldCurvePoint};
+use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint};
 use crate::state::AppState;
 
 type CmdResult<T> = Result<T, String>;
@@ -92,6 +92,29 @@ fn yield_curve(state: State<AppState>) -> CmdResult<Vec<YieldCurvePoint>> {
     state.yield_curve().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn cross_asset_summary(
+    state: State<AppState>,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<CrossAssetSummaryDto> {
+    state.cross_asset_summary(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn turnover_timeline(
+    state: State<AppState>,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<TurnoverByClassPoint>> {
+    state.turnover_timeline(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn flow_sankey(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Vec<FlowEdgeDto>> {
+    state.flow_sankey(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
 /// Отправить во фронт событие live-обновления оборота (канал `turnover:tick`).
 /// Точка интеграции для потокового ингеста (Фаза 7).
 #[allow(dead_code)]
@@ -134,7 +157,10 @@ pub fn run() {
             rrg_sectors,
             futures_rollup,
             bonds_rollup,
-            yield_curve
+            yield_curve,
+            cross_asset_summary,
+            turnover_timeline,
+            flow_sankey
         ])
         .run(tauri::generate_context!())
         .expect("ошибка запуска приложения Tauri");

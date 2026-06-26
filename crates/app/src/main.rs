@@ -159,6 +159,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("  yield_curve(): {} точек", state.yield_curve()?.len());
 
+        // Фаза 6 — представление «Сумма всех» (кросс-актив).
+        let summary = state.cross_asset_summary(0, i64::MAX)?;
+        println!("  cross_asset_summary(): итого {:.0}", summary.total);
+        for s in &summary.shares {
+            println!("    {:<8} доля={:.1}%", s.asset_class, s.share * 100.0);
+        }
+        println!(
+            "  turnover_timeline(): {} точек",
+            state.turnover_timeline(0, i64::MAX)?.len()
+        );
+        println!("  flow_sankey(): {} рёбер перетока", state.flow_sankey(0, i64::MAX)?.len());
+
         Ok(())
     }
 }

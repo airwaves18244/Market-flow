@@ -5,12 +5,15 @@
 //! полностью тестируются на `MemStore`; тонкие `#[tauri::command]`-обёртки
 //! (фича `tauri`) лишь вызывают эти функции.
 
+use std::collections::BTreeMap;
+
 use domain::metrics::breadth::breadth;
+use domain::metrics::crossasset::{flow_matrix, turnover_shares, TurnoverShares};
 use domain::metrics::sector::{rollup_by_sector, InstrumentMetric};
-use domain::TimeFrame;
+use domain::{AssetClass, TimeFrame};
 use storage::{StorageError, Store};
 
-use crate::dto::{BarPoint, BondIssuerDto, BreadthDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverPoint, YieldCurvePoint};
+use crate::dto::{AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint};
 
 /// Метка сектора для инструментов без классификации.
 const UNKNOWN_SECTOR: &str = "Прочее";
@@ -372,6 +375,117 @@ pub fn yield_curve() -> Result<Vec<YieldCurvePoint>, StorageError> {
     ])
 }
 
+// ── Фаза 6 — представление «Сумма всех» (кросс-актив) ──────────────────────
+
+/// Доли классов активов: оборот по классам из последних снимков в окне.
+///
+/// Берём последний снимок каждого инструмента (как `sector_rollup`/`breadth`),
+/// суммируем оборот по классам и считаем доли. Питает gauge общего оборота и
+/// donut долей.
+fn class_turnover(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<BTreeMap<AssetClass, f64>, StorageError> {
+    let mut by_class: BTreeMap<AssetClass, f64> = BTreeMap::new();
+    for inst in store.instruments()? {
+        if let Some(last) = store.snapshots(&inst.symbol, from_ts, to_ts)?.last() {
+            *by_class.entry(inst.asset_class).or_default() += last.turnover;
+        }
+    }
+    Ok(by_class)
+}
+
+/// Сводка по классам активов: общий оборот + доли (gauge + donut).
+pub fn cross_asset_summary(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<CrossAssetSummaryDto, StorageError> {
+    let by_class = class_turnover(store, from_ts, to_ts)?;
+    let shares = turnover_shares(&by_class);
+
+    let rows = AssetClass::ALL
+        .iter()
+        .map(|&c| AssetClassShareDto {
+            asset_class: c.code().to_string(),
+            turnover: by_class.get(&c).copied().unwrap_or(0.0),
+            share: shares.share_of(c),
+        })
+        .collect();
+
+    Ok(CrossAssetSummaryDto {
+        total: shares.total,
+        shares: rows,
+    })
+}
+
+/// Временной ряд оборота по классам активов (stacked area).
+///
+/// Группирует все снимки в окне по `ts` и классу актива, суммируя оборот.
+pub fn turnover_timeline(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<TurnoverByClassPoint>, StorageError> {
+    // ts → (класс → суммарный оборот)
+    let mut timeline: BTreeMap<i64, BTreeMap<AssetClass, f64>> = BTreeMap::new();
+    for inst in store.instruments()? {
+        for snap in store.snapshots(&inst.symbol, from_ts, to_ts)? {
+            *timeline
+                .entry(snap.ts)
+                .or_default()
+                .entry(inst.asset_class)
+                .or_default() += snap.turnover;
+        }
+    }
+
+    Ok(timeline
+        .into_iter()
+        .map(|(ts, m)| TurnoverByClassPoint {
+            ts,
+            equity: m.get(&AssetClass::Equity).copied().unwrap_or(0.0),
+            future: m.get(&AssetClass::Future).copied().unwrap_or(0.0),
+            bond: m.get(&AssetClass::Bond).copied().unwrap_or(0.0),
+        })
+        .collect())
+}
+
+/// Перетоки долей между классами активов (Sankey).
+///
+/// Сравнивает распределение долей оборота в первой и последней точках окна
+/// (`domain::metrics::crossasset::flow_matrix`). `< 2` точек → нет рёбер.
+pub fn flow_sankey(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<FlowEdgeDto>, StorageError> {
+    let timeline = turnover_timeline(store, from_ts, to_ts)?;
+    if timeline.len() < 2 {
+        return Ok(Vec::new());
+    }
+
+    let to_shares = |p: &TurnoverByClassPoint| -> TurnoverShares {
+        let mut m = BTreeMap::new();
+        m.insert(AssetClass::Equity, p.equity);
+        m.insert(AssetClass::Future, p.future);
+        m.insert(AssetClass::Bond, p.bond);
+        turnover_shares(&m)
+    };
+
+    let prev = to_shares(timeline.first().unwrap());
+    let curr = to_shares(timeline.last().unwrap());
+
+    Ok(flow_matrix(&prev, &curr, 1e-6)
+        .into_iter()
+        .map(|e| FlowEdgeDto {
+            from: e.from.code().to_string(),
+            to: e.to.code().to_string(),
+            weight: e.weight,
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -610,5 +724,74 @@ mod tests {
         // Кириллица: байтовый срез [..3] разрезал бы середину символа и паниковал.
         assert_eq!(char_prefix("ОФЗ26240", 3), "ОФЗ");
         assert_eq!(char_prefix("Si", 5), "SI"); // короче запрошенного — без паники
+    }
+
+    // ── Фаза 6 — «Сумма всех» ──────────────────────────────────────────────
+
+    #[test]
+    fn cross_asset_summary_aggregates_all_classes() {
+        let store = seeded_mixed();
+        let s = cross_asset_summary(&store, 0, 9).unwrap();
+        // Все три класса присутствуют (с нулевыми долями допустимо).
+        assert_eq!(s.shares.len(), 3);
+        let codes: Vec<&str> = s.shares.iter().map(|r| r.asset_class.as_str()).collect();
+        assert!(codes.contains(&"equity"));
+        assert!(codes.contains(&"future"));
+        assert!(codes.contains(&"bond"));
+        // Общий оборот = сумма оборотов классов; доли суммируются в 1.
+        assert!(s.total > 0.0);
+        let share_sum: f64 = s.shares.iter().map(|r| r.share).sum();
+        assert!((share_sum - 1.0).abs() < 1e-9);
+        // Фьючерсы (два контракта) дают наибольший оборот.
+        let fut = s.shares.iter().find(|r| r.asset_class == "future").unwrap();
+        assert!(fut.share > 0.0);
+    }
+
+    #[test]
+    fn turnover_timeline_groups_by_ts_and_class() {
+        let store = seeded_mixed();
+        let tl = turnover_timeline(&store, 0, 9).unwrap();
+        // Снимки только на ts=2 → одна точка.
+        assert_eq!(tl.len(), 1);
+        assert_eq!(tl[0].ts, 2);
+        assert!(tl[0].equity > 0.0);
+        assert!(tl[0].future > 0.0);
+        assert!(tl[0].bond > 0.0);
+    }
+
+    #[test]
+    fn flow_sankey_empty_with_single_period() {
+        let store = seeded_mixed();
+        assert!(flow_sankey(&store, 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn flow_sankey_detects_share_shift_between_periods() {
+        use storage::store::TurnoverSnapshot;
+
+        // Два периода: доля смещается из акций в фьючерсы.
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .upsert_instruments(&[
+                inst("SBER@MISX", Some("Финансы")),
+                inst_of("SiH5@RTSX", None, AssetClass::Future),
+            ])
+            .unwrap();
+
+        let snap = |ts, turnover| TurnoverSnapshot { ts, turnover, net_flow: 0.0, change: 0.0 };
+        // Период 1 (ts=1): акции доминируют (0.9 доли).
+        store.insert_snapshot("SBER@MISX", &snap(1, 900.0)).unwrap();
+        store.insert_snapshot("SiH5@RTSX", &snap(1, 100.0)).unwrap();
+        // Период 2 (ts=2): фьючерс перетянул долю (0.9).
+        store.insert_snapshot("SBER@MISX", &snap(2, 100.0)).unwrap();
+        store.insert_snapshot("SiH5@RTSX", &snap(2, 900.0)).unwrap();
+
+        let edges = flow_sankey(&store, 0, 9).unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].from, "equity");
+        assert_eq!(edges[0].to, "future");
+        // Доля сместилась на 0.8 (с 0.9 до 0.1 у акций).
+        assert!((edges[0].weight - 0.8).abs() < 1e-9);
     }
 }
