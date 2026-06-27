@@ -12,7 +12,11 @@
   Finam 200 req/min по умолчанию), без внешних зависимостей, покрыт тестами.
 - `data::TokenState` — учёт короткоживущего JWT и решение об упреждающем refresh
   (с запасом-skew); чистая, без сети, покрыта тестами.
-- ⏳ Осталось: gRPC-стабы из `.proto`, сетевой обмен auth, keyring, tracing.
+- `data::Backoff` — экспоненциальный backoff с потолком/джиттером и
+  `DataError::is_retryable`; чистый расчёт задержек, покрыт тестами.
+- `app::telemetry::init` — установка подписчика `tracing` (фильтр из `RUST_LOG`,
+  по умолчанию `info`), идемпотентна; стартовый структурированный лог в `main`.
+- ⏳ Осталось: gRPC-стабы из `.proto`, сетевой обмен auth, keyring.
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;

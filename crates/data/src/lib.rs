@@ -11,10 +11,12 @@
 //! контракты (трейты/типы), на которые опираются `storage` и `app`.
 
 pub mod auth;
+pub mod backoff;
 pub mod classify;
 pub mod rate;
 
 pub use auth::TokenState;
+pub use backoff::Backoff;
 pub use rate::RateLimiter;
 
 use domain::{Bar, Instrument, Quote, Trade};
