@@ -50,7 +50,18 @@ CREATE TABLE IF NOT EXISTS sector_map (
     is_isin BOOLEAN NOT NULL
 );";
 
-/// Полный набор DDL в порядке применения.
+/// Однострочная таблица версии схемы — основа идемпотентных миграций.
+pub const DDL_SCHEMA_VERSION: &str = "\
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER NOT NULL
+);";
+
+/// Текущая версия схемы. Повышается при изменении DDL, чтобы [`crate::migrate`]
+/// знал, нужно ли применять обновления к существующей БД.
+pub const SCHEMA_VERSION: i32 = 1;
+
+/// Полный набор DDL таблиц данных в порядке применения. Версия схемы
+/// (`schema_version`) применяется отдельно миграцией.
 pub const ALL_DDL: [&str; 4] = [
     DDL_INSTRUMENTS,
     DDL_BARS,
@@ -69,5 +80,11 @@ mod tests {
             assert!(ddl.contains("CREATE TABLE IF NOT EXISTS"));
         }
         assert!(DDL_BARS.contains("PRIMARY KEY (symbol, timeframe, ts)"));
+    }
+
+    #[test]
+    fn schema_version_ddl_present() {
+        assert!(DDL_SCHEMA_VERSION.contains("schema_version"));
+        assert!(DDL_SCHEMA_VERSION.contains("version"));
     }
 }

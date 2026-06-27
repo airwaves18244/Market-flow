@@ -11,5 +11,11 @@ domain = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
-# В фазе хранилища добавляется крейт `duckdb` (bundled). До этого здесь живут
-# схема (DDL) и контракты запросов, не требующие нативной библиотеки.
+# Нативный движок DuckDB (bundled = компиляция из исходников). Выключен по
+# умолчанию, чтобы базовая сборка и кросс-платформенный CI не тянули C++-движок;
+# включается фичей `duckdb` (продакшен-сборка терминала, см. crate `app`).
+duckdb = { version = "1", features = ["bundled"], optional = true }
+
+[features]
+default = []
+duckdb = ["dep:duckdb"]

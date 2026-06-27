@@ -1,0 +1,26 @@
+{
+  "name": "market-terminal-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "echarts": "^5.5.1",
+    "lightweight-charts": "^4.2.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "svelte": "^5.1.0",
+    "svelte-check": "^4.0.0",
+    "tslib": "^2.7.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.10"
+  }
+}

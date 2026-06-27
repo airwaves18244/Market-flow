@@ -31,6 +31,79 @@ impl AssetClass {
             AssetClass::Bond => "bond",
         }
     }
+
+    /// Разобрать класс актива из кода (`equity|future|bond`).
+    pub fn from_code(code: &str) -> Option<AssetClass> {
+        Some(match code {
+            "equity" => AssetClass::Equity,
+            "future" => AssetClass::Future,
+            "bond" => AssetClass::Bond,
+            _ => return None,
+        })
+    }
+}
+
+/// Тайм-фрейм бара. Соответствует `TimeFrame` в Finam Trade API.
+///
+/// Это чистый доменный тип: код для хранения (`code`/`from_code`, колонка
+/// `bars.timeframe`) и шаг в секундах (`seconds`) для бэкфилла и разбивки
+/// исторических диапазонов. Адаптер `data` переэкспортирует его как
+/// `data::TimeFrame`, чтобы сетевой слой и хранилище говорили на одном типе.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeFrame {
+    M1,
+    M5,
+    M15,
+    H1,
+    D1,
+}
+
+impl TimeFrame {
+    /// Все тайм-фреймы в порядке возрастания периода.
+    pub const ALL: [TimeFrame; 5] = [
+        TimeFrame::M1,
+        TimeFrame::M5,
+        TimeFrame::M15,
+        TimeFrame::H1,
+        TimeFrame::D1,
+    ];
+
+    /// Короткий машинный код (значение колонки `bars.timeframe`).
+    pub fn code(self) -> &'static str {
+        match self {
+            TimeFrame::M1 => "m1",
+            TimeFrame::M5 => "m5",
+            TimeFrame::M15 => "m15",
+            TimeFrame::H1 => "h1",
+            TimeFrame::D1 => "d1",
+        }
+    }
+
+    /// Разобрать тайм-фрейм из кода (`m1|m5|m15|h1|d1`).
+    pub fn from_code(code: &str) -> Option<TimeFrame> {
+        Some(match code {
+            "m1" => TimeFrame::M1,
+            "m5" => TimeFrame::M5,
+            "m15" => TimeFrame::M15,
+            "h1" => TimeFrame::H1,
+            "d1" => TimeFrame::D1,
+            _ => return None,
+        })
+    }
+
+    /// Длительность одного бара в секундах. Дневной бар считаем равным
+    /// календарным суткам (86 400 с) — этого достаточно для планирования
+    /// бэкфилла и пагинации запросов.
+    pub fn seconds(self) -> i64 {
+        match self {
+            TimeFrame::M1 => 60,
+            TimeFrame::M5 => 5 * 60,
+            TimeFrame::M15 => 15 * 60,
+            TimeFrame::H1 => 60 * 60,
+            TimeFrame::D1 => 24 * 60 * 60,
+        }
+    }
 }
 
 /// Описание торгового инструмента (из `AssetsService`).
@@ -108,5 +181,50 @@ impl Trade {
     /// Денежный оборот сделки.
     pub fn turnover(&self) -> f64 {
         self.price * self.size
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asset_class_code_roundtrips() {
+        for ac in AssetClass::ALL {
+            assert_eq!(AssetClass::from_code(ac.code()), Some(ac));
+        }
+        assert_eq!(AssetClass::from_code("bogus"), None);
+    }
+
+    #[test]
+    fn timeframe_code_roundtrips() {
+        for tf in TimeFrame::ALL {
+            assert_eq!(TimeFrame::from_code(tf.code()), Some(tf));
+        }
+        assert_eq!(TimeFrame::from_code("bogus"), None);
+    }
+
+    #[test]
+    fn timeframe_seconds_are_ordered() {
+        assert_eq!(TimeFrame::M1.seconds(), 60);
+        assert_eq!(TimeFrame::H1.seconds(), 3600);
+        assert_eq!(TimeFrame::D1.seconds(), 86_400);
+        // период строго возрастает по списку ALL
+        let secs: Vec<i64> = TimeFrame::ALL.iter().map(|t| t.seconds()).collect();
+        assert!(secs.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn bar_turnover_uses_typical_price() {
+        let b = Bar {
+            ts: 0,
+            open: 9.0,
+            high: 11.0,
+            low: 10.0,
+            close: 12.0,
+            volume: 2.0,
+        };
+        // typical = (11 + 10 + 12) / 3 = 11; turnover = 11 * 2 = 22
+        assert!((b.turnover() - 22.0).abs() < 1e-12);
     }
 }

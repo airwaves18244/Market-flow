@@ -14,6 +14,11 @@ pub mod classify;
 
 use domain::{Bar, Instrument, Quote, Trade};
 
+/// Тайм-фрейм бара. Тип живёт в `domain` (чистое доменное значение);
+/// здесь он переэкспортирован, чтобы сетевой слой Finam и хранилище
+/// пользовались одним и тем же типом.
+pub use domain::TimeFrame;
+
 /// Ошибки слоя данных.
 #[derive(Debug, thiserror::Error)]
 pub enum DataError {
@@ -27,16 +32,6 @@ pub enum DataError {
     MaintenanceWindow,
     #[error("прочее: {0}")]
     Other(String),
-}
-
-/// Тайм-фрейм бара (соответствует `TimeFrame` в API Finam).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TimeFrame {
-    M1,
-    M5,
-    M15,
-    H1,
-    D1,
 }
 
 /// Источник рыночных данных. Реальная реализация — gRPC-клиент Finam.

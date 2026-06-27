@@ -2,16 +2,8 @@ name: market-terminal CI
 
 on:
   push:
-    paths:
-      - "market-terminal/**"
-      - ".github/workflows/ci.yml"
+    branches: ["**"]
   pull_request:
-    paths:
-      - "market-terminal/**"
-
-defaults:
-  run:
-    working-directory: market-terminal
 
 jobs:
   core:
@@ -23,8 +15,6 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: market-terminal
       - name: fmt
         run: cargo fmt --all --check
       - name: clippy
