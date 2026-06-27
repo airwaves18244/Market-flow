@@ -11,6 +11,9 @@
 //! контракты (трейты/типы), на которые опираются `storage` и `app`.
 
 pub mod classify;
+pub mod rate;
+
+pub use rate::RateLimiter;
 
 use domain::{Bar, Instrument, Quote, Trade};
 

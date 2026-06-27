@@ -8,7 +8,9 @@
 - Cargo workspace: `finam-proto`, `domain`, `data`, `storage`, `app`.
 - Дисциплина слоёв: вся математика в `domain`, без внешних зависимостей.
 - Контракты `data` (`MarketData`, `TimeFrame`, ошибки), DDL DuckDB.
-- ⏳ Осталось: gRPC-стабы из `.proto`, auth+refresh, rate-limiter, keyring, tracing.
+- `data::RateLimiter` — per-method ограничитель частоты (скользящее окно, лимит
+  Finam 200 req/min по умолчанию), без внешних зависимостей, покрыт тестами.
+- ⏳ Осталось: gRPC-стабы из `.proto`, auth+refresh, keyring, tracing.
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;

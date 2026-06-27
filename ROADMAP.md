@@ -7,8 +7,11 @@
 - ✅ Дисциплина слоёв (аналитика в `domain` без внешних зависимостей).
 - ✅ Контракты `data` (трейт `MarketData`, ошибки, `TimeFrame`), классификация секторов.
 - ✅ DDL схемы DuckDB в `storage::schema`.
-- ⏳ gRPC-стабы из `.proto` (`tonic-build`), auth + refresh токена, per-method
-  rate-limiter (`governor`), `keyring` для ключа, `tracing`.
+- ✅ Per-method rate-limiter: чистый, без внешних зависимостей, скользящее окно
+  по каждому методу (`data::RateLimiter`, лимит Finam 200 req/min по умолчанию),
+  кросс-платформенно протестирован.
+- ⏳ gRPC-стабы из `.proto` (`tonic-build`), auth + refresh токена, `keyring`
+  для ключа, `tracing`.
 
 ## Фаза 1 — Хранилище и ингест ✅
 - ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции

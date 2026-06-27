@@ -12,5 +12,6 @@ finam-proto = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
+# Rate-limit реализован нативно (см. `src/rate.rs`), без внешних зависимостей.
 # В фазе подключения API добавляются: tonic, prost, tokio, tokio-stream,
-# governor (rate-limit), keyring (секрет API).
+# keyring (секрет API).
