@@ -10,7 +10,9 @@
 - Контракты `data` (`MarketData`, `TimeFrame`, ошибки), DDL DuckDB.
 - `data::RateLimiter` — per-method ограничитель частоты (скользящее окно, лимит
   Finam 200 req/min по умолчанию), без внешних зависимостей, покрыт тестами.
-- ⏳ Осталось: gRPC-стабы из `.proto`, auth+refresh, keyring, tracing.
+- `data::TokenState` — учёт короткоживущего JWT и решение об упреждающем refresh
+  (с запасом-skew); чистая, без сети, покрыта тестами.
+- ⏳ Осталось: gRPC-стабы из `.proto`, сетевой обмен auth, keyring, tracing.
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;

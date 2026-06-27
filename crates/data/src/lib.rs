@@ -10,9 +10,11 @@
 //! Сетевые реализации подключаются в фазе интеграции API; здесь определены
 //! контракты (трейты/типы), на которые опираются `storage` и `app`.
 
+pub mod auth;
 pub mod classify;
 pub mod rate;
 
+pub use auth::TokenState;
 pub use rate::RateLimiter;
 
 use domain::{Bar, Instrument, Quote, Trade};
