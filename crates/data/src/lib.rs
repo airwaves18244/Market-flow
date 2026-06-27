@@ -13,11 +13,15 @@
 pub mod auth;
 pub mod backoff;
 pub mod classify;
+pub mod endpoint;
 pub mod rate;
+pub mod secret;
 
 pub use auth::TokenState;
 pub use backoff::Backoff;
+pub use endpoint::Method;
 pub use rate::RateLimiter;
+pub use secret::{MemSecretStore, SecretStore};
 
 use domain::{Bar, Instrument, Quote, Trade};
 

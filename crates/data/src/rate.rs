@@ -62,13 +62,18 @@ impl RateLimiter {
     ///
     /// Возвращает [`DataError::RateLimited`], если в текущем окне уже
     /// исчерпан лимит по этому методу.
-    pub fn try_acquire(&self, method: &'static str) -> Result<(), DataError> {
+    pub fn try_acquire(&self, method: impl Into<&'static str>) -> Result<(), DataError> {
         self.try_acquire_at(method, Instant::now())
     }
 
     /// Версия [`try_acquire`](Self::try_acquire) с явным моментом времени —
     /// для детерминированных тестов и симуляций.
-    pub fn try_acquire_at(&self, method: &'static str, now: Instant) -> Result<(), DataError> {
+    pub fn try_acquire_at(
+        &self,
+        method: impl Into<&'static str>,
+        now: Instant,
+    ) -> Result<(), DataError> {
+        let method = method.into();
         let mut calls = self.calls.lock().expect("rate-limiter mutex отравлен");
         let slots = calls.entry(method).or_default();
         prune(slots, now, self.window);
@@ -80,12 +85,13 @@ impl RateLimiter {
     }
 
     /// Сколько ещё вызовов `method` допускается прямо сейчас (в текущем окне).
-    pub fn remaining(&self, method: &'static str) -> u32 {
+    pub fn remaining(&self, method: impl Into<&'static str>) -> u32 {
         self.remaining_at(method, Instant::now())
     }
 
     /// Версия [`remaining`](Self::remaining) с явным моментом времени.
-    pub fn remaining_at(&self, method: &'static str, now: Instant) -> u32 {
+    pub fn remaining_at(&self, method: impl Into<&'static str>, now: Instant) -> u32 {
+        let method = method.into();
         let mut calls = self.calls.lock().expect("rate-limiter mutex отравлен");
         let slots = calls.entry(method).or_default();
         prune(slots, now, self.window);
@@ -96,7 +102,12 @@ impl RateLimiter {
     ///
     /// Возвращает `None`, если слот доступен немедленно, иначе — задержку до
     /// истечения самой старой метки в окне.
-    pub fn retry_after_at(&self, method: &'static str, now: Instant) -> Option<Duration> {
+    pub fn retry_after_at(
+        &self,
+        method: impl Into<&'static str>,
+        now: Instant,
+    ) -> Option<Duration> {
+        let method = method.into();
         let mut calls = self.calls.lock().expect("rate-limiter mutex отравлен");
         let slots = calls.entry(method).or_default();
         prune(slots, now, self.window);
@@ -191,6 +202,20 @@ mod tests {
         // Через 20с после занятия ждать осталось ~40с.
         let t1 = t0 + Duration::from_secs(20);
         assert_eq!(rl.retry_after_at("bars", t1), Some(Duration::from_secs(40)));
+    }
+
+    #[test]
+    fn accepts_method_enum_as_key() {
+        use crate::Method;
+        let rl = RateLimiter::per_minute(1);
+        let t0 = Instant::now();
+        // Enum и его строковое имя адресуют один и тот же счётчик.
+        assert!(rl.try_acquire_at(Method::Bars, t0).is_ok());
+        assert!(matches!(
+            rl.try_acquire_at("bars", t0),
+            Err(DataError::RateLimited("bars"))
+        ));
+        assert_eq!(rl.remaining_at(Method::Bars, t0), 0);
     }
 
     #[test]

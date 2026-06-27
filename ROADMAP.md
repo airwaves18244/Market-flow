@@ -17,8 +17,14 @@
   джиттером и классификацией ретраябельности ошибок (`DataError::is_retryable`).
 - ✅ `tracing`: инициализация подписчика в `app::telemetry::init` (фильтр уровней
   из `RUST_LOG`, по умолчанию `info`), стартовый структурированный лог.
-- ⏳ gRPC-стабы из `.proto` (`tonic-build`), сетевой обмен auth + `keyring`
-  для ключа.
+- ✅ Канонические методы API: `data::Method` (Auth/Assets/Bars/LastQuote/
+  LatestTrades) — единый источник имён для ключей лимитера и меток трейсинга;
+  `RateLimiter` принимает `Method` напрямую.
+- ✅ Хранилище секрета: контракт `data::SecretStore` + in-memory `MemSecretStore`
+  (тестируемо кросс-платформенно); ОС-keyring-реализация — за фичей в фазе
+  интеграции.
+- ⏳ gRPC-стабы из `.proto` (`tonic-build`), сетевой обмен auth, ОС-keyring
+  реализация `SecretStore`.
 
 ## Фаза 1 — Хранилище и ингест ✅
 - ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции
