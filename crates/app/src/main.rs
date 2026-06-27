@@ -11,14 +11,20 @@
 
 mod api;
 mod dto;
+mod ingest;
 mod state;
 
 #[cfg(feature = "tauri")]
 mod tauri_app;
 
-use domain::{AssetClass, Bar, TimeFrame};
+use data::auth::TokenManager;
+use data::rate_limit::RateLimiter;
+use data::secret::{SecretStore, StaticSecretStore};
+use data::{DataError, MarketData};
+use domain::{AssetClass, Bar, Instrument, Quote, TimeFrame, Trade};
+use ingest::{poll_cycle, sync_instruments, DEFAULT_MAX_BARS};
 use state::AppState;
-use storage::ingest::Writer;
+use storage::ingest::{BatchCursor, Writer};
 use storage::{schema, MemStore, Store};
 
 fn demo_bar(ts: i64, open: f64, close: f64, volume: f64) -> Bar {
@@ -29,6 +35,92 @@ fn demo_bar(ts: i64, open: f64, close: f64, volume: f64) -> Bar {
         low: open.min(close),
         close,
         volume,
+    }
+}
+
+/// Минимальный демо-исполнитель фьючерсов для smoke (продакшен использует
+/// tokio). Гоняет `poll` до готовности; демо-фьючерсы готовы сразу.
+fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+    use std::pin::pin;
+    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+    fn noop(_: *const ()) {}
+    fn clone(_: *const ()) -> RawWaker {
+        RawWaker::new(std::ptr::null(), &VTABLE)
+    }
+    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+
+    let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+    let mut cx = Context::from_waker(&waker);
+    let mut fut = pin!(fut);
+    loop {
+        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
+/// Инициализировать `tracing`: форматированный вывод с фильтром по `RUST_LOG`
+/// (по умолчанию `info`). Идемпотентна — повторный вызов безопасен.
+fn init_tracing() {
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = fmt().with_env_filter(filter).with_target(false).try_init();
+}
+
+/// Демо-источник рыночных данных для smoke (вместо живого gRPC-клиента Finam):
+/// отдаёт небольшой справочник и синтетические дневные бары.
+struct DemoSource;
+
+impl MarketData for DemoSource {
+    async fn assets(&self, _mic: &str) -> Result<Vec<Instrument>, DataError> {
+        Ok(vec![
+            Instrument {
+                symbol: "SBER@MISX".into(),
+                ticker: "SBER".into(),
+                name: "Сбербанк".into(),
+                asset_class: AssetClass::Equity,
+                sector: Some("Финансы".into()),
+                lot_size: 10,
+                isin: None,
+            },
+            Instrument {
+                symbol: "LKOH@MISX".into(),
+                ticker: "LKOH".into(),
+                name: "Лукойл".into(),
+                asset_class: AssetClass::Equity,
+                sector: Some("Нефтегаз".into()),
+                lot_size: 1,
+                isin: None,
+            },
+        ])
+    }
+
+    async fn bars(
+        &self,
+        symbol: &str,
+        _tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<Bar>, DataError> {
+        let base = if symbol.starts_with("LKOH") {
+            7000.0
+        } else {
+            300.0
+        };
+        let bars: Vec<Bar> = (from_ts.max(1)..=to_ts.min(5))
+            .map(|ts| demo_bar(ts, base, base * 1.01, 1_000.0))
+            .collect();
+        Ok(bars)
+    }
+
+    async fn last_quote(&self, _symbol: &str) -> Result<Quote, DataError> {
+        Err(DataError::Other("демо: котировки не реализованы".into()))
+    }
+
+    async fn latest_trades(&self, _symbol: &str) -> Result<Vec<Trade>, DataError> {
+        Ok(Vec::new())
     }
 }
 
@@ -97,6 +189,8 @@ fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_tracing();
+
     #[cfg(feature = "tauri")]
     {
         tauri_app::run();
@@ -210,6 +304,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             replay.pos,
             replay.frames,
             replay.progress * 100.0
+        );
+
+        // Фаза 0 — инфраструктура авторизации (без сети).
+        println!("\nФаза 0 — инфраструктура data (демо):");
+        let secret = StaticSecretStore::new("demo-api-secret");
+        println!(
+            "  secret.api_secret(): {} символов",
+            secret.api_secret()?.len()
+        );
+        let mut tokens = TokenManager::new();
+        let jwt =
+            block_on(tokens.valid_token(0, || async { Ok(("demo.jwt.token".to_string(), 900)) }))
+                .map_err(|e| e.to_string())?;
+        println!(
+            "  token_manager: получен JWT ({} симв.), TTL 900с",
+            jwt.len()
+        );
+        let mut limiter = RateLimiter::per_minute(200);
+        let ok = limiter.try_acquire("Bars", 0);
+        println!(
+            "  rate_limit(Bars 200/мин): первый запрос={}, остаток={}",
+            ok,
+            limiter.available("Bars", 0)
+        );
+
+        // Фаза 1 — асинхронный цикл ингеста (демо-источник → MemStore).
+        println!("\nФаза 1 — цикл ингеста (демо-источник → MemStore):");
+        let src = DemoSource;
+        let mut ingest_store = MemStore::new();
+        ingest_store.migrate()?;
+        let synced = block_on(sync_instruments(&src, &mut ingest_store, &["MISX"]))
+            .map_err(|e| e.to_string())?;
+        println!("  sync_instruments(): {synced} инструментов");
+        let mut cursor = BatchCursor::new(
+            ingest_store
+                .instruments()?
+                .iter()
+                .map(|i| i.symbol.clone())
+                .collect(),
+            10,
+        );
+        let report = block_on(poll_cycle(
+            &src,
+            &mut ingest_store,
+            &mut cursor,
+            TimeFrame::D1,
+            1,
+            10,
+            DEFAULT_MAX_BARS,
+        ));
+        println!(
+            "  poll_cycle(): дозагружено {} символов, {} баров, ошибок {}",
+            report.backfilled.len(),
+            report.bars_written(),
+            report.errors.len()
         );
 
         Ok(())

@@ -16,6 +16,11 @@ data = { workspace = true }
 storage = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Подписчик tracing для бинаря: форматированный вывод, фильтр по RUST_LOG.
+# Чистый Rust (без ОС-зависимостей) — собирается в кросс-платформенном CI.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
 
 # UI-привязка Tauri. Выключена по умолчанию: её сборка требует десктопного
 # окружения (на Linux — webkit2gtk), поэтому базовый кросс-платформенный CI

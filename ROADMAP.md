@@ -2,13 +2,23 @@
 
 Пошаговый план. Отметка ✅ — сделано в текущей итерации.
 
-## Фаза 0 — Фундамент ✅ (частично)
+## Фаза 0 — Фундамент ✅ (gRPC-стабы — отдельно)
 - ✅ Cargo workspace, члены: `finam-proto`, `domain`, `data`, `storage`, `app`.
 - ✅ Дисциплина слоёв (аналитика в `domain` без внешних зависимостей).
 - ✅ Контракты `data` (трейт `MarketData`, ошибки, `TimeFrame`), классификация секторов.
 - ✅ DDL схемы DuckDB в `storage::schema`.
-- ⏳ gRPC-стабы из `.proto` (`tonic-build`), auth + refresh токена, per-method
-  rate-limiter (`governor`), `keyring` для ключа, `tracing`.
+- ✅ Авторизация + refresh токена: `data::auth::TokenManager` — кэш JWT, срок
+  годности, обновление с запасом; независим от транспорта (refresh — замыкание).
+- ✅ Per-method rate-limiter: `data::rate_limit::RateLimiter` (token-bucket,
+  ~200/мин на метод). Своя реализация вместо `governor` — ядро остаётся
+  кросс-платформенно собираемым без асинхронной инфраструктуры.
+- ✅ Хранилище секрета: `data::secret::SecretStore` (env/инъекция; `keyring` —
+  за фичей в десктопной сборке, эскиз в модуле).
+- ✅ `tracing`: оркестрация ингеста инструментирована спанами/событиями;
+  подписчик с фильтром по `RUST_LOG` в `app`.
+- ⏳ gRPC-стабы из `.proto` (`tonic-build`): требуют `protoc`, vendored `.proto`
+  (`FinamWeb/trade-api-docs`) и `tonic`/`prost` — выносится в среду сборки с
+  доступом к ним; вся остальная инфраструктура Фазы 0 от них не зависит.
 
 ## Фаза 1 — Хранилище и ингест ✅
 - ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции
@@ -20,8 +30,13 @@
 - ✅ Загрузка таблицы классификации секторов (`Writer::load_sector_map`).
 - ✅ Бэкфилл исторических баров: `plan_backfill` + `chunk_range` (страницы под
   лимит баров на запрос).
-- ⏳ Подключение реального источника (`data::MarketData`) и асинхронного цикла
-  опроса — в фазе интеграции API/UI (`app`).
+- ✅ Асинхронный цикл опроса: `app::ingest` поверх `data::MarketData` + `Store`
+  — `sync_instruments` (справочник по площадкам), `backfill_symbol` (дозагрузка
+  «хвоста» + снимок оборота), `poll_cycle` (round-robin через `BatchCursor` с
+  изоляцией сбоев по символу → `PollReport`). Инструментирован `tracing`,
+  протестирован на мок-источнике и `MemStore`.
+- ⏳ Реальная реализация `data::MarketData` поверх gRPC-клиента Finam — зависит
+  от gRPC-стабов Фазы 0; цикл опроса уже готов принять её без изменений.
 
 ## Фаза 2 — Аналитика (`domain`) ✅
 - ✅ turnover, directional turnover, unusual volume.

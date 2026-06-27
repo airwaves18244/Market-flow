@@ -4,11 +4,21 @@
 
 ## Готово
 
-### Фаза 0 — Фундамент (частично)
+### Фаза 0 — Фундамент (gRPC-стабы — отдельно)
 - Cargo workspace: `finam-proto`, `domain`, `data`, `storage`, `app`.
 - Дисциплина слоёв: вся математика в `domain`, без внешних зависимостей.
 - Контракты `data` (`MarketData`, `TimeFrame`, ошибки), DDL DuckDB.
-- ⏳ Осталось: gRPC-стабы из `.proto`, auth+refresh, rate-limiter, keyring, tracing.
+- **Авторизация** (`data::auth`): `TokenManager` — кэш JWT + срок годности +
+  обновление с запасом (`skew`); refresh передаётся замыканием (без сети).
+- **Rate-limit** (`data::rate_limit`): `RateLimiter` — пометодный token-bucket
+  (~200/мин), детерминированный (время — параметр). Своя реализация вместо
+  `governor` ради кросс-платформенной сборки ядра.
+- **Секрет** (`data::secret`): `SecretStore` + `Static`/`Env` импл; `keyring`
+  для десктопа — за фичей (эскиз в модуле).
+- **tracing**: оркестрация ингеста инструментирована; подписчик в `app` с
+  фильтром по `RUST_LOG`.
+- ⏳ Осталось: gRPC-стабы из `.proto` (нужны `protoc` + vendored `.proto` +
+  `tonic`/`prost`); остальная инфраструктура Фазы 0 от них не зависит.
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;
@@ -26,6 +36,11 @@
   `BatchCursor` (round-robin планировщик батч-поллинга под лимит ~200 req/min).
 - **Бэкфилл** (`backfill`): `plan_backfill` (дозагрузка «хвоста» истории) и
   `chunk_range` (нарезка на страницы под лимит баров на запрос).
+- **Цикл ингеста** (`app::ingest`): асинхронная оркестрация поверх
+  `data::MarketData` + `Store` — `sync_instruments`, `backfill_symbol` (с
+  построением снимка оборота), `poll_cycle` (round-robin `BatchCursor` +
+  изоляция сбоев по символу → `PollReport`). `tracing`-спаны; тесты на
+  мок-источнике и `MemStore`. ⏳ Остаётся живая gRPC-реализация `MarketData`.
 - **Типы**: `TurnoverSnapshot`, `SectorEntry`; `TimeFrame` перенесён в `domain`
   (с `code`/`from_code`/`seconds`) и переэкспортирован из `data`.
 
