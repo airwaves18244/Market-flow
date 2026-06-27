@@ -12,11 +12,15 @@ import type {
   FlowEdgeDto,
   FutureGroupDto,
   InstrumentDto,
+  OrderBookDto,
+  ReplayStateDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  TimeAndSalesDto,
   TimeFrame,
   TopMoverDto,
+  TriggeredAlertDto,
   TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
@@ -75,4 +79,17 @@ export const ipc = {
 
   flowSankey: (fromTs: number, toTs: number) =>
     invoke<FlowEdgeDto[]>("flow_sankey", { fromTs, toTs }),
+
+  // ── Фаза 7 — live-функции ───────────────────────────────────────────────
+
+  orderBook: (symbol: string, depth: number) =>
+    invoke<OrderBookDto>("order_book", { symbol, depth }),
+
+  timeAndSales: (symbol: string, limit: number) =>
+    invoke<TimeAndSalesDto>("time_and_sales", { symbol, limit }),
+
+  activeAlerts: () => invoke<TriggeredAlertDto[]>("active_alerts"),
+
+  replayState: (symbol: string, played: number) =>
+    invoke<ReplayStateDto>("replay_state", { symbol, played }),
 };

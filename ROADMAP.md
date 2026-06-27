@@ -70,8 +70,25 @@
 - Frontend: `TotalTurnoverGauge`, `SharesDonut`, `TurnoverStackedArea`, `FlowSankey`
   (+ общий помощник `assetClass.ts` с подписями/цветами классов).
 
-## Фаза 7 — Live-функции
-- Стрим вотчлиста (свечи/стакан/лента), Time&Sales, DOM, алёрты, replay-режим.
+## Фаза 7 — Live-функции ✅ (логика и панели; стрим — далее)
+- ✅ Стакан (DOM): доменная модель книги (`domain::live::book`) — лучшие цены,
+  спред, mid, дисбаланс спроса/предложения, кумулятивная глубина (лесенка).
+- ✅ Лента сделок (Time&Sales): `domain::live::tape` — классификация сторон
+  (явный инициатор или правило тика), CVD, VWAP, купленный/проданный объём.
+- ✅ Алёрты: `domain::live::alerts` — правила (цена ↑/↓, |изменение|, всплеск
+  объёма, спред) + движок проверки по снимку рынка и серьёзность.
+- ✅ Replay-режим: `domain::live::replay` — курсор по шкале времени (шаг,
+  перемотка, прогресс) + фронт-контролы воспроизведения.
+- API: `order_book()`, `time_and_sales()`, `active_alerts()`, `replay_state()`
+  в `crates/app/src/api.rs` (scaffold-данные поверх доменной логики, как
+  `yield_curve` — до подключения живого источника).
+- DTO: `OrderBookDto`/`OrderBookLevelDto`, `TimeAndSalesDto`/`TapeEntryDto`/
+  `TapeStatsDto`, `TriggeredAlertDto`, `ReplayStateDto`.
+- Tauri: команды `order_book`, `time_and_sales`, `active_alerts`, `replay_state`
+  + заготовки live-push событий (`quote:tick`, `trade:tick`, `book:update`).
+- Frontend: `DomLadder`, `TimeSales`, `AlertsPanel`, `ReplayControls`.
+- ⏳ Осталось: подключение реального стрима Finam (`SubscribeQuote`,
+  `SubscribeLatestTrades`, `SubscribeOrderBook`) и пуш событий в вебвью.
 
 ## Фаза 8 — Полировка и сборка
 - Упаковка MSI/NSIS (Tauri bundler), производительность, обработка ошибок, настройки.

@@ -7,16 +7,21 @@
 
 use std::collections::BTreeMap;
 
+use domain::live::alerts::{evaluate, AlertKind, AlertRule, MarketSnapshot, Severity};
+use domain::live::book::{Level, OrderBook};
+use domain::live::replay::ReplayCursor;
+use domain::live::tape::{classify_sides, tape_stats, Side};
 use domain::metrics::breadth::breadth;
 use domain::metrics::crossasset::{flow_matrix, turnover_shares, TurnoverShares};
 use domain::metrics::sector::{rollup_by_sector, InstrumentMetric};
-use domain::{AssetClass, TimeFrame};
+use domain::{AssetClass, TimeFrame, Trade};
 use storage::{StorageError, Store};
 
 use crate::dto::{
     AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto,
-    FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto,
-    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    FutureGroupDto, InstrumentDto, OrderBookDto, OrderBookLevelDto, ReplayStateDto, RrgSectorDto,
+    SectorEntryDto, SectorRow, TapeEntryDto, TapeStatsDto, TimeAndSalesDto, TopMoverDto,
+    TriggeredAlertDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 
 /// Метка сектора для инструментов без классификации.
@@ -516,6 +521,212 @@ pub fn flow_sankey(
         .collect())
 }
 
+// ── Фаза 7 — live-функции (DOM, Time & Sales, алёрты, replay) ───────────────
+
+/// Якорная цена инструмента: закрытие последнего дневного бара (иначе 100).
+/// Служит опорой для детерминированных live-scaffold'ов до интеграции стрима.
+fn anchor_price(store: &dyn Store, symbol: &str) -> Result<f64, StorageError> {
+    Ok(store
+        .bars(symbol, TimeFrame::D1, 0, i64::MAX)?
+        .last()
+        .map(|b| b.close)
+        .unwrap_or(100.0))
+}
+
+/// Стакан котировок (DOM) инструмента.
+///
+/// Scaffold: реальный стакан приходит из стрима `SubscribeOrderBook`, которого
+/// ещё нет. Строим детерминированную книгу вокруг якорной цены и считаем по ней
+/// доменные метрики [`domain::live::book`] (спред, mid, дисбаланс, глубина).
+pub fn order_book(
+    store: &dyn Store,
+    symbol: &str,
+    depth: usize,
+) -> Result<OrderBookDto, StorageError> {
+    let anchor = anchor_price(store, symbol)?;
+    let tick = (anchor * 0.001).max(0.01);
+    let depth = depth.clamp(1, 25);
+    let mut bids = Vec::with_capacity(depth);
+    let mut asks = Vec::with_capacity(depth);
+    for i in 1..=depth {
+        let step = i as f64;
+        // объём тает вглубь; спрос чуть тяжелее предложения (ненулевой дисбаланс)
+        let size = (depth - i + 1) as f64 * 10.0;
+        bids.push(Level {
+            price: anchor - tick * step,
+            size,
+        });
+        asks.push(Level {
+            price: anchor + tick * step,
+            size: size * 0.9,
+        });
+    }
+    let book = OrderBook::new(bids, asks);
+    let map = |levels: Vec<(Level, f64)>| -> Vec<OrderBookLevelDto> {
+        levels
+            .into_iter()
+            .map(|(l, cumulative)| OrderBookLevelDto {
+                price: l.price,
+                size: l.size,
+                cumulative,
+            })
+            .collect()
+    };
+    Ok(OrderBookDto {
+        symbol: symbol.to_string(),
+        bids: map(book.cumulative_bids()),
+        asks: map(book.cumulative_asks()),
+        mid: book.mid(),
+        spread: book.spread(),
+        imbalance: book.imbalance(),
+    })
+}
+
+/// Лента сделок (Time & Sales) инструмента: записи + агрегаты.
+///
+/// Scaffold: реальная лента приходит из `SubscribeLatestTrades`. Генерируем
+/// детерминированную последовательность сделок вокруг якорной цены и прогоняем
+/// через [`domain::live::tape`] (классификация сторон, CVD, VWAP).
+pub fn time_and_sales(
+    store: &dyn Store,
+    symbol: &str,
+    limit: usize,
+) -> Result<TimeAndSalesDto, StorageError> {
+    let anchor = anchor_price(store, symbol)?;
+    let tick = (anchor * 0.0005).max(0.01);
+    let n = limit.clamp(1, 200);
+    let mut trades = Vec::with_capacity(n);
+    for i in 0..n {
+        // детерминированная «пила» вокруг якоря — даёт смесь покупок/продаж
+        let osc = (i % 7) as f64 - 3.0;
+        trades.push(Trade {
+            ts: i as i64,
+            price: anchor + tick * osc,
+            size: 1.0 + (i % 5) as f64,
+            buyer_initiated: None,
+        });
+    }
+    let sides = classify_sides(&trades);
+    let stats = tape_stats(&trades);
+    let entries = trades
+        .iter()
+        .zip(sides)
+        .map(|(t, side)| TapeEntryDto {
+            ts: t.ts,
+            price: t.price,
+            size: t.size,
+            side: match side {
+                Side::Buy => "buy",
+                Side::Sell => "sell",
+            },
+        })
+        .collect();
+    Ok(TimeAndSalesDto {
+        symbol: symbol.to_string(),
+        entries,
+        stats: TapeStatsDto {
+            trades: stats.trades,
+            buy_volume: stats.buy_volume,
+            sell_volume: stats.sell_volume,
+            cvd: stats.cvd(),
+            vwap: stats.vwap(),
+            last_price: stats.last_price,
+        },
+    })
+}
+
+/// Демонстрационные правила алёртов на инструмент (scaffold вместо
+/// пользовательских правил, пока нет их хранения/редактора).
+fn demo_rules_for(symbol: &str) -> [AlertRule; 2] {
+    [
+        AlertRule {
+            id: format!("{symbol}:move"),
+            symbol: symbol.to_string(),
+            kind: AlertKind::PctChange(0.01),
+        },
+        AlertRule {
+            id: format!("{symbol}:vol"),
+            symbol: symbol.to_string(),
+            kind: AlertKind::VolumeSpike(1.5),
+        },
+    ]
+}
+
+/// Сработавшие алёрты по всем инструментам.
+///
+/// Снимок рынка строим из дневных баров (последнее закрытие vs предыдущее,
+/// объём vs средний), правила — демонстрационные [`demo_rules_for`], проверка —
+/// доменный движок [`domain::live::alerts`].
+pub fn active_alerts(store: &dyn Store) -> Result<Vec<TriggeredAlertDto>, StorageError> {
+    let mut snaps: BTreeMap<String, MarketSnapshot> = BTreeMap::new();
+    let mut rules: Vec<AlertRule> = Vec::new();
+    for inst in store.instruments()? {
+        let bars = store.bars(&inst.symbol, TimeFrame::D1, 0, i64::MAX)?;
+        let Some(last) = bars.last().copied() else {
+            continue;
+        };
+        let prev_close = if bars.len() >= 2 {
+            bars[bars.len() - 2].close
+        } else {
+            last.open
+        };
+        let avg_volume = bars.iter().map(|b| b.volume).sum::<f64>() / bars.len() as f64;
+        snaps.insert(
+            inst.symbol.clone(),
+            MarketSnapshot {
+                last: last.close,
+                prev_close,
+                volume: last.volume,
+                avg_volume,
+                spread: last.close * 0.001,
+            },
+        );
+        rules.extend(demo_rules_for(&inst.symbol));
+    }
+    let fired = evaluate(&rules, |sym| snaps.get(sym).copied());
+    Ok(fired
+        .into_iter()
+        .map(|a| TriggeredAlertDto {
+            rule_id: a.rule_id,
+            symbol: a.symbol,
+            message: a.message,
+            severity: match a.severity {
+                Severity::Info => "info",
+                Severity::Warning => "warning",
+                Severity::Critical => "critical",
+            },
+        })
+        .collect())
+}
+
+/// Состояние воспроизведения истории по дневным барам инструмента.
+///
+/// Кадры — метки времени сохранённых баров; `played` задаёт позицию курсора
+/// [`domain::live::replay::ReplayCursor`]. Так фронт-контролы replay получают
+/// контракт до подключения живого планировщика.
+pub fn replay_state(
+    store: &dyn Store,
+    symbol: &str,
+    played: usize,
+) -> Result<ReplayStateDto, StorageError> {
+    let frames: Vec<i64> = store
+        .bars(symbol, TimeFrame::D1, 0, i64::MAX)?
+        .iter()
+        .map(|b| b.ts)
+        .collect();
+    let mut cursor = ReplayCursor::new(frames);
+    for _ in 0..played.min(cursor.len()) {
+        cursor.step();
+    }
+    Ok(ReplayStateDto {
+        frames: cursor.len(),
+        pos: cursor.pos(),
+        current_ts: cursor.current_ts(),
+        progress: cursor.progress(),
+        at_end: cursor.at_end(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -838,5 +1049,113 @@ mod tests {
         assert_eq!(edges[0].to, "future");
         // Доля сместилась на 0.8 (с 0.9 до 0.1 у акций).
         assert!((edges[0].weight - 0.8).abs() < 1e-9);
+    }
+
+    // ── Фаза 7 — live-функции ─────────────────────────────────────────────
+
+    #[test]
+    fn order_book_anchored_to_last_close() {
+        let store = seeded();
+        // SBER: последний бар close = 100 * 1.03 = 103.
+        let book = order_book(&store, "SBER@MISX", 5).unwrap();
+        assert_eq!(book.bids.len(), 5);
+        assert_eq!(book.asks.len(), 5);
+        // лучшие цены окружают якорь
+        assert!(book.bids[0].price < 103.0 && book.asks[0].price > 103.0);
+        let mid = book.mid.unwrap();
+        assert!((mid - 103.0).abs() < 1e-9);
+        // кумулятив растёт вглубь
+        assert!(book.bids[4].cumulative > book.bids[0].cumulative);
+        // спрос тяжелее предложения ⇒ положительный дисбаланс
+        assert!(book.imbalance.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn order_book_defaults_without_bars() {
+        let store = seeded();
+        // XXXX без баров — якорь 100, книга всё равно строится
+        let book = order_book(&store, "XXXX@MISX", 3).unwrap();
+        assert!((book.mid.unwrap() - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn time_and_sales_classifies_and_aggregates() {
+        let store = seeded();
+        let ts = time_and_sales(&store, "SBER@MISX", 20).unwrap();
+        assert_eq!(ts.entries.len(), 20);
+        assert_eq!(ts.stats.trades, 20);
+        // каждая запись имеет валидную сторону
+        assert!(ts
+            .entries
+            .iter()
+            .all(|e| e.side == "buy" || e.side == "sell"));
+        // объём = сумма сторон; CVD согласован
+        let vol = ts.stats.buy_volume + ts.stats.sell_volume;
+        assert!(vol > 0.0);
+        assert!((ts.stats.cvd - (ts.stats.buy_volume - ts.stats.sell_volume)).abs() < 1e-9);
+        assert!(ts.stats.vwap.is_some());
+    }
+
+    #[test]
+    fn active_alerts_fire_on_volume_spike() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .upsert_instruments(&[inst("SBER@MISX", None)])
+            .unwrap();
+        // три обычных бара + последний со всплеском объёма (×5 среднего)
+        let bars = [
+            bar(1, 100.0, 100.0, 1_000.0),
+            bar(2, 100.0, 100.0, 1_000.0),
+            bar(3, 100.0, 100.0, 1_000.0),
+            bar(4, 100.0, 100.0, 9_000.0),
+        ];
+        store
+            .insert_bars("SBER@MISX", TimeFrame::D1, &bars)
+            .unwrap();
+
+        let alerts = active_alerts(&store).unwrap();
+        assert!(alerts.iter().any(|a| a.rule_id == "SBER@MISX:vol"));
+        let vol = alerts
+            .iter()
+            .find(|a| a.rule_id == "SBER@MISX:vol")
+            .unwrap();
+        assert_eq!(vol.severity, "critical");
+        assert_eq!(vol.symbol, "SBER@MISX");
+    }
+
+    #[test]
+    fn active_alerts_quiet_market_is_empty() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .upsert_instruments(&[inst("CALM@MISX", None)])
+            .unwrap();
+        // плоская цена и ровный объём — ни одно правило не срабатывает
+        let bars = [bar(1, 100.0, 100.0, 1_000.0), bar(2, 100.0, 100.0, 1_000.0)];
+        store
+            .insert_bars("CALM@MISX", TimeFrame::D1, &bars)
+            .unwrap();
+        assert!(active_alerts(&store).unwrap().is_empty());
+    }
+
+    #[test]
+    fn replay_state_steps_through_frames() {
+        let store = seeded();
+        // SBER имеет 3 дневных бара (ts 1,2,3)
+        let start = replay_state(&store, "SBER@MISX", 0).unwrap();
+        assert_eq!(start.frames, 3);
+        assert_eq!(start.pos, 0);
+        assert_eq!(start.current_ts, None);
+        assert_eq!(start.progress, 0.0);
+
+        let mid = replay_state(&store, "SBER@MISX", 2).unwrap();
+        assert_eq!(mid.pos, 2);
+        assert_eq!(mid.current_ts, Some(2));
+
+        let end = replay_state(&store, "SBER@MISX", 99).unwrap();
+        assert!(end.at_end);
+        assert_eq!(end.pos, 3);
+        assert_eq!(end.progress, 1.0);
     }
 }

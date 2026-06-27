@@ -9,10 +9,15 @@ import type {
   FlowEdgeDto,
   FutureGroupDto,
   InstrumentDto,
+  OrderBookDto,
+  ReplayStateDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  TapeEntryDto,
+  TimeAndSalesDto,
   TopMoverDto,
+  TriggeredAlertDto,
   TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
@@ -149,6 +154,102 @@ function genTurnover(): TurnoverPoint[] {
   return out;
 }
 
+// ── Фаза 7 — live-функции (детерминированные генераторы, как scaffold в Rust) ─
+
+// Якорная цена по символу — та же логика, что у genBars.
+function anchorFor(symbol: string): number {
+  if (symbol.startsWith("LKOH")) return 7000;
+  if (symbol.startsWith("GAZP")) return 160;
+  if (symbol.startsWith("Si")) return 90000;
+  return 300;
+}
+
+function genOrderBook(symbol: string, depth: number): OrderBookDto {
+  const anchor = anchorFor(symbol);
+  const tick = Math.max(anchor * 0.001, 0.01);
+  const n = Math.min(Math.max(depth, 1), 25);
+  const bids = [];
+  const asks = [];
+  let bidCum = 0;
+  let askCum = 0;
+  let bidVol = 0;
+  let askVol = 0;
+  for (let i = 1; i <= n; i++) {
+    const size = (n - i + 1) * 10;
+    bidCum += size;
+    bidVol += size;
+    const askSize = size * 0.9;
+    askCum += askSize;
+    askVol += askSize;
+    bids.push({ price: anchor - tick * i, size, cumulative: bidCum });
+    asks.push({ price: anchor + tick * i, size: askSize, cumulative: askCum });
+  }
+  return {
+    symbol,
+    bids,
+    asks,
+    mid: anchor,
+    spread: tick * 2,
+    imbalance: (bidVol - askVol) / (bidVol + askVol),
+  };
+}
+
+function genTimeAndSales(symbol: string, limit: number): TimeAndSalesDto {
+  const anchor = anchorFor(symbol);
+  const tick = Math.max(anchor * 0.0005, 0.01);
+  const n = Math.min(Math.max(limit, 1), 200);
+  const entries: TapeEntryDto[] = [];
+  let buyVolume = 0;
+  let sellVolume = 0;
+  let turnover = 0;
+  let prevPrice: number | null = null;
+  let prevSide: "buy" | "sell" = "buy";
+  for (let i = 0; i < n; i++) {
+    const price = anchor + tick * ((i % 7) - 3);
+    const size = 1 + (i % 5);
+    const side: "buy" | "sell" =
+      prevPrice === null ? "buy" : price > prevPrice ? "buy" : price < prevPrice ? "sell" : prevSide;
+    entries.push({ ts: i, price, size, side });
+    if (side === "buy") buyVolume += size;
+    else sellVolume += size;
+    turnover += price * size;
+    prevPrice = price;
+    prevSide = side;
+  }
+  const volume = buyVolume + sellVolume;
+  return {
+    symbol,
+    entries,
+    stats: {
+      trades: n,
+      buyVolume,
+      sellVolume,
+      cvd: buyVolume - sellVolume,
+      vwap: volume > 0 ? turnover / volume : null,
+      lastPrice: entries.length ? entries[entries.length - 1].price : null,
+    },
+  };
+}
+
+const triggeredAlerts: TriggeredAlertDto[] = [
+  { ruleId: "YDEX@MISX:move", symbol: "YDEX@MISX", message: "изменение +4.50% (порог 1.00%)", severity: "info" },
+  { ruleId: "GAZP@MISX:vol", symbol: "GAZP@MISX", message: "объём 5200 ≥ 1.5× среднего (1800)", severity: "critical" },
+  { ruleId: "SBER@MISX:price", symbol: "SBER@MISX", message: "цена 305.00 ≥ 300.00", severity: "warning" },
+];
+
+function genReplayState(played: number): ReplayStateDto {
+  const frames = 90;
+  const pos = Math.min(Math.max(played, 0), frames);
+  const start = Math.floor(Date.UTC(2026, 0, 1) / 1000);
+  return {
+    frames,
+    pos,
+    currentTs: pos === 0 ? null : start + (pos - 1) * 86_400,
+    progress: pos / frames,
+    atEnd: pos >= frames,
+  };
+}
+
 export async function handle<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "instruments":
@@ -182,6 +283,22 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return genTimeline() as unknown as T;
     case "flow_sankey":
       return flowSankey as unknown as T;
+    case "order_book": {
+      const sym = String(args?.symbol ?? "SBER@MISX");
+      const depth = Number(args?.depth ?? 10);
+      return genOrderBook(sym, depth) as unknown as T;
+    }
+    case "time_and_sales": {
+      const sym = String(args?.symbol ?? "SBER@MISX");
+      const limit = Number(args?.limit ?? 50);
+      return genTimeAndSales(sym, limit) as unknown as T;
+    }
+    case "active_alerts":
+      return triggeredAlerts as unknown as T;
+    case "replay_state": {
+      const played = Number(args?.played ?? 0);
+      return genReplayState(played) as unknown as T;
+    }
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
   }

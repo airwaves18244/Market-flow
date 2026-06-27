@@ -10,12 +10,13 @@
 
 use tauri::{Emitter, State};
 
-use domain::TimeFrame;
+use domain::{Quote, TimeFrame, Trade};
 
 use crate::dto::{
     BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
-    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    InstrumentDto, OrderBookDto, ReplayStateDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    TimeAndSalesDto, TopMoverDto, TriggeredAlertDto, TurnoverByClassPoint, TurnoverPoint,
+    YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -139,11 +140,66 @@ fn flow_sankey(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Ve
     state.flow_sankey(from_ts, to_ts).map_err(|e| e.to_string())
 }
 
+// ── Фаза 7 — live-функции ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn order_book(state: State<AppState>, symbol: String, depth: usize) -> CmdResult<OrderBookDto> {
+    state.order_book(&symbol, depth).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn time_and_sales(
+    state: State<AppState>,
+    symbol: String,
+    limit: usize,
+) -> CmdResult<TimeAndSalesDto> {
+    state
+        .time_and_sales(&symbol, limit)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn active_alerts(state: State<AppState>) -> CmdResult<Vec<TriggeredAlertDto>> {
+    state.active_alerts().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn replay_state(
+    state: State<AppState>,
+    symbol: String,
+    played: usize,
+) -> CmdResult<ReplayStateDto> {
+    state
+        .replay_state(&symbol, played)
+        .map_err(|e| e.to_string())
+}
+
 /// Отправить во фронт событие live-обновления оборота (канал `turnover:tick`).
 /// Точка интеграции для потокового ингеста (Фаза 7).
 #[allow(dead_code)]
 pub fn emit_turnover_tick(app: &tauri::AppHandle, point: &TurnoverPoint) -> CmdResult<()> {
     app.emit("turnover:tick", point).map_err(|e| e.to_string())
+}
+
+/// Отправить во фронт live-котировку вотчлиста (канал `quote:tick`).
+/// Точка интеграции для стрима `SubscribeQuote` (Фаза 7).
+#[allow(dead_code)]
+pub fn emit_quote_tick(app: &tauri::AppHandle, quote: &Quote) -> CmdResult<()> {
+    app.emit("quote:tick", quote).map_err(|e| e.to_string())
+}
+
+/// Отправить во фронт live-сделку ленты (канал `trade:tick`).
+/// Точка интеграции для стрима `SubscribeLatestTrades` (Фаза 7).
+#[allow(dead_code)]
+pub fn emit_trade_tick(app: &tauri::AppHandle, trade: &Trade) -> CmdResult<()> {
+    app.emit("trade:tick", trade).map_err(|e| e.to_string())
+}
+
+/// Отправить во фронт обновление стакана (канал `book:update`).
+/// Точка интеграции для стрима `SubscribeOrderBook` (Фаза 7).
+#[allow(dead_code)]
+pub fn emit_order_book(app: &tauri::AppHandle, book: &OrderBookDto) -> CmdResult<()> {
+    app.emit("book:update", book).map_err(|e| e.to_string())
 }
 
 /// Построить состояние с продакшен-бэкендом (DuckDB при фиче `duckdb`,
@@ -184,7 +240,11 @@ pub fn run() {
             yield_curve,
             cross_asset_summary,
             turnover_timeline,
-            flow_sankey
+            flow_sankey,
+            order_book,
+            time_and_sales,
+            active_alerts,
+            replay_state
         ])
         .run(tauri::generate_context!())
         .expect("ошибка запуска приложения Tauri");

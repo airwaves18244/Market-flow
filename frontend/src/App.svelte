@@ -15,8 +15,12 @@
   import SharesDonut from "./lib/components/SharesDonut.svelte";
   import TurnoverStackedArea from "./lib/components/TurnoverStackedArea.svelte";
   import FlowSankey from "./lib/components/FlowSankey.svelte";
+  import DomLadder from "./lib/components/DomLadder.svelte";
+  import TimeSales from "./lib/components/TimeSales.svelte";
+  import AlertsPanel from "./lib/components/AlertsPanel.svelte";
+  import ReplayControls from "./lib/components/ReplayControls.svelte";
   import { ipc } from "./lib/ipc";
-  import type { BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorRow, TopMoverDto, TurnoverByClassPoint, YieldCurvePoint } from "./lib/types";
+  import type { BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto, ReplayStateDto, RrgSectorDto, SectorRow, TimeAndSalesDto, TopMoverDto, TriggeredAlertDto, TurnoverByClassPoint, YieldCurvePoint } from "./lib/types";
 
   const FULL_RANGE = Number.MAX_SAFE_INTEGER;
 
@@ -32,6 +36,10 @@
   let summary = $state<CrossAssetSummaryDto | null>(null);
   let timeline = $state<TurnoverByClassPoint[]>([]);
   let flow = $state<FlowEdgeDto[]>([]);
+  let orderBook = $state<OrderBookDto | null>(null);
+  let tape = $state<TimeAndSalesDto | null>(null);
+  let alerts = $state<TriggeredAlertDto[]>([]);
+  let replay = $state<ReplayStateDto | null>(null);
   let selected = $state("SBER@MISX");
   let error = $state<string | null>(null);
 
@@ -39,10 +47,26 @@
     bars = await ipc.bars(symbol, "d1", 0, FULL_RANGE);
   }
 
+  // Live-данные привязаны к выбранному инструменту (Фаза 7).
+  async function loadLive(symbol: string) {
+    orderBook = await ipc.orderBook(symbol, 12);
+    tape = await ipc.timeAndSales(symbol, 40);
+    replay = await ipc.replayState(symbol, 0);
+  }
+
+  async function seekReplay(played: number) {
+    try {
+      replay = await ipc.replayState(selected, played);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function select(symbol: string) {
     selected = symbol;
     try {
       await loadBars(symbol);
+      await loadLive(symbol);
     } catch (e) {
       error = String(e);
     }
@@ -61,8 +85,10 @@
       summary = await ipc.crossAssetSummary(0, FULL_RANGE);
       timeline = await ipc.turnoverTimeline(0, FULL_RANGE);
       flow = await ipc.flowSankey(0, FULL_RANGE);
+      alerts = await ipc.activeAlerts();
       if (instruments.length > 0) selected = instruments[0].symbol;
       await loadBars(selected);
+      await loadLive(selected);
     } catch (e) {
       error = String(e);
     }
@@ -143,6 +169,22 @@
 
     <Panel title="Сумма всех — перетоки (Sankey)">
       <FlowSankey edges={flow} />
+    </Panel>
+
+    <Panel title={`Стакан (DOM) — ${selected}`}>
+      <DomLadder book={orderBook} />
+    </Panel>
+
+    <Panel title={`Лента сделок — ${selected}`}>
+      <TimeSales {tape} />
+    </Panel>
+
+    <Panel title="Алёрты">
+      <AlertsPanel {alerts} />
+    </Panel>
+
+    <Panel title={`Replay — ${selected}`}>
+      <ReplayControls replay={replay} onSeek={seekReplay} />
     </Panel>
   </main>
 </div>

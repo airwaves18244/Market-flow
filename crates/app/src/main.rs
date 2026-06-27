@@ -183,6 +183,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.flow_sankey(0, i64::MAX)?.len()
         );
 
+        // Фаза 7 — live-функции (DOM, Time & Sales, алёрты, replay).
+        let book = state.order_book("SBER@MISX", 10)?;
+        println!(
+            "  order_book(SBER@MISX): {} bids / {} asks, спред {:.2}, дисбаланс {:+.2}",
+            book.bids.len(),
+            book.asks.len(),
+            book.spread.unwrap_or(0.0),
+            book.imbalance.unwrap_or(0.0)
+        );
+        let tape = state.time_and_sales("SBER@MISX", 50)?;
+        println!(
+            "  time_and_sales(SBER@MISX): {} сделок, CVD {:+.0}, VWAP {:.2}",
+            tape.stats.trades,
+            tape.stats.cvd,
+            tape.stats.vwap.unwrap_or(0.0)
+        );
+        let alerts = state.active_alerts()?;
+        println!("  active_alerts(): {} срабатываний", alerts.len());
+        for a in &alerts {
+            println!("    [{}] {} — {}", a.severity, a.symbol, a.message);
+        }
+        let replay = state.replay_state("SBER@MISX", 2)?;
+        println!(
+            "  replay_state(SBER@MISX, 2): кадр {}/{} ({:.0}%)",
+            replay.pos,
+            replay.frames,
+            replay.progress * 100.0
+        );
+
         Ok(())
     }
 }

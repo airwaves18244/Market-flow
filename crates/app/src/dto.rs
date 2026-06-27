@@ -210,3 +210,90 @@ pub struct FlowEdgeDto {
     /// Вес перетока — сдвиг доли (0..1).
     pub weight: f64,
 }
+
+// ── Фаза 7 — live-функции (DOM, Time & Sales, алёрты, replay) ───────────────
+
+/// Уровень стакана с накопленной глубиной (строка лесенки DOM).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderBookLevelDto {
+    pub price: f64,
+    pub size: f64,
+    /// Накопленный объём от лучшей цены вглубь.
+    pub cumulative: f64,
+}
+
+/// Стакан котировок (DOM) с производными метриками.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderBookDto {
+    pub symbol: String,
+    /// Bids от лучшей (вверху) вглубь.
+    pub bids: Vec<OrderBookLevelDto>,
+    /// Asks от лучшей (вверху) вглубь.
+    pub asks: Vec<OrderBookLevelDto>,
+    pub mid: Option<f64>,
+    pub spread: Option<f64>,
+    /// Дисбаланс спроса/предложения (`-1..1`).
+    pub imbalance: Option<f64>,
+}
+
+/// Запись ленты сделок (Time & Sales).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TapeEntryDto {
+    pub ts: i64,
+    pub price: f64,
+    pub size: f64,
+    /// Сторона: `buy|sell`.
+    pub side: &'static str,
+}
+
+/// Сводка по ленте сделок за окно.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TapeStatsDto {
+    pub trades: usize,
+    pub buy_volume: f64,
+    pub sell_volume: f64,
+    /// Накопленная дельта объёма (`buyVol − sellVol`).
+    pub cvd: f64,
+    pub vwap: Option<f64>,
+    pub last_price: Option<f64>,
+}
+
+/// Ответ команды «лента сделок»: записи + агрегаты.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeAndSalesDto {
+    pub symbol: String,
+    pub entries: Vec<TapeEntryDto>,
+    pub stats: TapeStatsDto,
+}
+
+/// Сработавший алёрт (готовое к показу уведомление).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggeredAlertDto {
+    pub rule_id: String,
+    pub symbol: String,
+    pub message: String,
+    /// Серьёзность: `info|warning|critical`.
+    pub severity: &'static str,
+}
+
+/// Состояние воспроизведения истории (для контролов replay).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayStateDto {
+    /// Всего кадров на шкале.
+    pub frames: usize,
+    /// Сколько кадров проиграно.
+    pub pos: usize,
+    /// Метка текущего кадра (`null` до старта).
+    pub current_ts: Option<i64>,
+    /// Прогресс `0..1`.
+    pub progress: f64,
+    /// Достигнут ли конец.
+    pub at_end: bool,
+}

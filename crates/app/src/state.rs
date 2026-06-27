@@ -12,8 +12,9 @@ use storage::{StorageError, Store};
 use crate::api;
 use crate::dto::{
     BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
-    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    InstrumentDto, OrderBookDto, ReplayStateDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    TimeAndSalesDto, TopMoverDto, TriggeredAlertDto, TurnoverByClassPoint, TurnoverPoint,
+    YieldCurvePoint,
 };
 
 /// Разделяемое состояние терминала.
@@ -129,6 +130,32 @@ impl AppState {
 
     pub fn flow_sankey(&self, from_ts: i64, to_ts: i64) -> Result<Vec<FlowEdgeDto>, StorageError> {
         self.read(|s| api::flow_sankey(s, from_ts, to_ts))
+    }
+
+    // ── Фаза 7 — live-функции ─────────────────────────────────────────────
+
+    pub fn order_book(&self, symbol: &str, depth: usize) -> Result<OrderBookDto, StorageError> {
+        self.read(|s| api::order_book(s, symbol, depth))
+    }
+
+    pub fn time_and_sales(
+        &self,
+        symbol: &str,
+        limit: usize,
+    ) -> Result<TimeAndSalesDto, StorageError> {
+        self.read(|s| api::time_and_sales(s, symbol, limit))
+    }
+
+    pub fn active_alerts(&self) -> Result<Vec<TriggeredAlertDto>, StorageError> {
+        self.read(api::active_alerts)
+    }
+
+    pub fn replay_state(
+        &self,
+        symbol: &str,
+        played: usize,
+    ) -> Result<ReplayStateDto, StorageError> {
+        self.read(|s| api::replay_state(s, symbol, played))
     }
 }
 

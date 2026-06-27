@@ -112,3 +112,61 @@ export interface FlowEdgeDto {
   to: string;
   weight: number;
 }
+
+// ── Фаза 7 — live-функции (DOM, Time & Sales, алёрты, replay) ──────────────
+
+export interface OrderBookLevelDto {
+  price: number;
+  size: number;
+  cumulative: number;
+}
+
+export interface OrderBookDto {
+  symbol: string;
+  bids: OrderBookLevelDto[];
+  asks: OrderBookLevelDto[];
+  mid: number | null;
+  spread: number | null;
+  imbalance: number | null;
+}
+
+export type TradeSide = "buy" | "sell";
+
+export interface TapeEntryDto {
+  ts: number;
+  price: number;
+  size: number;
+  side: TradeSide;
+}
+
+export interface TapeStatsDto {
+  trades: number;
+  buyVolume: number;
+  sellVolume: number;
+  cvd: number;
+  vwap: number | null;
+  lastPrice: number | null;
+}
+
+export interface TimeAndSalesDto {
+  symbol: string;
+  entries: TapeEntryDto[];
+  stats: TapeStatsDto;
+}
+
+export type AlertSeverity = "info" | "warning" | "critical";
+
+export interface TriggeredAlertDto {
+  ruleId: string;
+  symbol: string;
+  message: string;
+  severity: AlertSeverity;
+}
+
+export interface ReplayStateDto {
+  frames: number;
+  pos: number;
+  currentTs: number | null;
+  progress: number;
+  atEnd: boolean;
+}
