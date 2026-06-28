@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../../frontend/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm --prefix ../../frontend run dev",
-    "beforeBuildCommand": "npm --prefix ../../frontend run build"
+    "beforeDevCommand": "npm --prefix ../frontend run dev",
+    "beforeBuildCommand": "npm --prefix ../frontend run build"
   },
   "app": {
     "windows": [
@@ -25,13 +25,18 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": ["msi", "nsis"],
+    "active": true,
+    "targets": ["appimage", "deb", "msi", "nsis"],
     "publisher": "Market Terminal",
     "category": "Finance",
     "shortDescription": "Аналитический терминал рыночных данных (Finam Trade API)",
     "longDescription": "Десктопный read-only терминал: оборот, денежные потоки, секторная ротация и кросс-актив по акциям, фьючерсам и облигациям. Заявки не выставляются.",
     "copyright": "© 2026 Market Terminal",
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    },
     "windows": {
       "nsis": {
         "languages": ["Russian", "English"]

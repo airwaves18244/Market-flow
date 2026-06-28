@@ -32,7 +32,7 @@ tauri = { version = "2", features = [], optional = true }
 [build-dependencies]
 # Нужен только при сборке с фичей `tauri` (генерация контекста из
 # tauri.conf.json). Опциональный, чтобы не тянуться в обычной сборке.
-tauri-build = { version = "2", optional = true }
+tauri-build = { version = "2", optional = true , features = [] }
 
 [features]
 default = []

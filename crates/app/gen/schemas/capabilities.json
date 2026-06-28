@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Базовые разрешения окна терминала: ядро Tauri (вызов IPC-команд и приём событий).","local":true,"windows":["main"],"permissions":["core:default"]}}
