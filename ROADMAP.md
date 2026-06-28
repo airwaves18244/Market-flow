@@ -21,10 +21,16 @@
   LatestTrades) — единый источник имён для ключей лимитера и меток трейсинга;
   `RateLimiter` принимает `Method` напрямую.
 - ✅ Хранилище секрета: контракт `data::SecretStore` + in-memory `MemSecretStore`
-  (тестируемо кросс-платформенно); ОС-keyring-реализация — за фичей в фазе
-  интеграции.
-- ⏳ gRPC-стабы из `.proto` (`tonic-build`), сетевой обмен auth, ОС-keyring
-  реализация `SecretStore`.
+  (тестируемо кросс-платформенно).
+- ✅ ОС-keyring реализация `SecretStore`: `data::KeyringSecretStore` за фичей
+  `keyring` — нативный бэкенд под платформу (Windows → Credential Manager,
+  macOS → Keychain, Linux → ключи ядра/keyutils). Фича выключена в кросс-
+  платформенном CI (как `duckdb`/`tauri`), зависимость не подтягивается.
+  Контрактный тест компилируется всегда; live-roundtrip помечен `#[ignore]`
+  (нужна реальная keyring-сессия).
+- ⏳ gRPC-стабы из `.proto` (`tonic-build`) и сетевой обмен auth
+  (`AuthService.Auth`) — требуют vendored `.proto` (репо `FinamWeb/trade-api-docs`)
+  и `protoc`; подключаются в фазе интеграции API.
 
 ## Фаза 1 — Хранилище и ингест ✅
 - ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции

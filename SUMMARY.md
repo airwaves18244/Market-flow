@@ -17,10 +17,15 @@
 - `data::Method` — канонические имена методов API (ключи лимитера + метки
   трейсинга); `RateLimiter` принимает `Method` напрямую.
 - `data::SecretStore` + `MemSecretStore` — контракт хранилища API-секрета и
-  in-memory реализация (keyring — за фичей позже); покрыто тестами.
+  in-memory реализация; покрыто тестами.
+- `data::KeyringSecretStore` — боевое хранилище секрета поверх ОС-keyring за
+  фичей `keyring` (нативный бэкенд под платформу: Credential Manager / Keychain /
+  ключи ядра Linux). Фича выключена в кросс-платформенном CI, зависимость не
+  тянется. Контрактный тест компилируется всегда; live-roundtrip — `#[ignore]`.
 - `app::telemetry::init` — установка подписчика `tracing` (фильтр из `RUST_LOG`,
   по умолчанию `info`), идемпотентна; стартовый структурированный лог в `main`.
-- ⏳ Осталось: gRPC-стабы из `.proto`, сетевой обмен auth, ОС-keyring для секрета.
+- ⏳ Осталось: gRPC-стабы из `.proto` и сетевой обмен auth (требуют vendored
+  `.proto` + `protoc`) — в фазе интеграции API.
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;
@@ -59,6 +64,7 @@ cargo fmt --all --check                 # формат (как в CI)
 cargo clippy --workspace -- -D warnings # линт без предупреждений (как в CI)
 cargo test --workspace                  # ядро + хранилище + IPC (MemStore), без C++/Tauri
 cargo test -p storage --features duckdb # + нативный DuckDB (bundled)
+cargo test -p data --features keyring   # + ОС-keyring (live-roundtrip: --ignored)
 cargo run -p app                        # smoke: domain → storage → dto
 cd frontend && npm install && npm run build   # сборка фронта (мок-данные)
 ```

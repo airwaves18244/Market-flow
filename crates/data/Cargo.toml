@@ -13,5 +13,20 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 
 # Rate-limit реализован нативно (см. `src/rate.rs`), без внешних зависимостей.
-# В фазе подключения API добавляются: tonic, prost, tokio, tokio-stream,
-# keyring (секрет API).
+# В фазе подключения API добавляются: tonic, prost, tokio, tokio-stream.
+
+# ОС-keyring для секрета API — за фичей `keyring`, выключенной в кросс-
+# платформенном CI (как `duckdb`/`tauri`). Бэкенд выбирается под платформу:
+# Windows → Credential Manager, macOS → Keychain, Linux → ядро (keyutils).
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", optional = true, default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", optional = true, default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", optional = true, default-features = false, features = ["linux-native"] }
+
+[features]
+# Боевое хранилище секрета поверх ОС-keyring (нативные платформенные бэкенды).
+keyring = ["dep:keyring"]

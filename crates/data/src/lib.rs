@@ -21,6 +21,8 @@ pub use auth::TokenState;
 pub use backoff::Backoff;
 pub use endpoint::Method;
 pub use rate::RateLimiter;
+#[cfg(feature = "keyring")]
+pub use secret::KeyringSecretStore;
 pub use secret::{MemSecretStore, SecretStore};
 
 use domain::{Bar, Instrument, Quote, Trade};

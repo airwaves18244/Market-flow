@@ -49,7 +49,8 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   слоя (Фаза 0): `RateLimiter` (per-method лимит ~200/мин), `TokenState`
   (учёт JWT + упреждающий refresh), `Backoff` (экспоненциальные повторы с
   джиттером и `is_retryable`), `Method` (канонические имена методов API),
-  `SecretStore`/`MemSecretStore` (хранилище API-секрета; keyring — позже).
+  `SecretStore`/`MemSecretStore` (контракт + in-memory хранилище API-секрета),
+  `KeyringSecretStore` (боевое хранилище в ОС-keyring за фичей `keyring`).
 - `app` — каркас Tauri (Фаза 3): ядро IPC (`AppState` + DTO + обработчики
   `instruments`/`bars`/`turnover_series`/`sector_rollup`/`sector_map`),
   протестированное на `MemStore`; привязка Tauri за фичей `tauri`; инициализация
@@ -73,6 +74,9 @@ cargo clippy --workspace
 
 # С нативным движком DuckDB (bundled, компиляция C++ из исходников):
 cargo test -p storage --features duckdb
+
+# С ОС-keyring (нативный бэкенд под платформу; live-тест — только с --ignored):
+cargo test -p data --features keyring
 
 # Консольный smoke (путь domain → storage → dto на MemStore):
 cargo run -p app
