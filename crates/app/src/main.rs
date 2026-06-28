@@ -12,6 +12,7 @@
 mod api;
 mod dto;
 mod state;
+mod telemetry;
 
 #[cfg(feature = "tauri")]
 mod tauri_app;
@@ -97,6 +98,13 @@ fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    telemetry::init();
+    tracing::info!(
+        endpoint = finam_proto::ENDPOINT,
+        schema_tables = schema::ALL_DDL.len(),
+        "market terminal запускается"
+    );
+
     #[cfg(feature = "tauri")]
     {
         tauri_app::run();

@@ -8,7 +8,19 @@
 - Cargo workspace: `finam-proto`, `domain`, `data`, `storage`, `app`.
 - Дисциплина слоёв: вся математика в `domain`, без внешних зависимостей.
 - Контракты `data` (`MarketData`, `TimeFrame`, ошибки), DDL DuckDB.
-- ⏳ Осталось: gRPC-стабы из `.proto`, auth+refresh, rate-limiter, keyring, tracing.
+- `data::RateLimiter` — per-method ограничитель частоты (скользящее окно, лимит
+  Finam 200 req/min по умолчанию), без внешних зависимостей, покрыт тестами.
+- `data::TokenState` — учёт короткоживущего JWT и решение об упреждающем refresh
+  (с запасом-skew); чистая, без сети, покрыта тестами.
+- `data::Backoff` — экспоненциальный backoff с потолком/джиттером и
+  `DataError::is_retryable`; чистый расчёт задержек, покрыт тестами.
+- `data::Method` — канонические имена методов API (ключи лимитера + метки
+  трейсинга); `RateLimiter` принимает `Method` напрямую.
+- `data::SecretStore` + `MemSecretStore` — контракт хранилища API-секрета и
+  in-memory реализация (keyring — за фичей позже); покрыто тестами.
+- `app::telemetry::init` — установка подписчика `tracing` (фильтр из `RUST_LOG`,
+  по умолчанию `info`), идемпотентна; стартовый структурированный лог в `main`.
+- ⏳ Осталось: gRPC-стабы из `.proto`, сетевой обмен auth, ОС-keyring для секрета.
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;

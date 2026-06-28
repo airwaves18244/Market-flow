@@ -16,6 +16,8 @@ data = { workspace = true }
 storage = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 # UI-привязка Tauri. Выключена по умолчанию: её сборка требует десктопного
 # окружения (на Linux — webkit2gtk), поэтому базовый кросс-платформенный CI

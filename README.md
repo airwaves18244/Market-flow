@@ -45,10 +45,15 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   - миграции с версией схемы; ингест баров/снимков/инструментов; загрузка
     классификации секторов; планировщик батч-поллинга и бэкфилл истории.
 - `data` — контракты адаптера Finam (трейт `MarketData`, `TimeFrame`, ошибки) и
-  классификация секторов.
+  классификация секторов; плюс чистые, протестированные примитивы клиентского
+  слоя (Фаза 0): `RateLimiter` (per-method лимит ~200/мин), `TokenState`
+  (учёт JWT + упреждающий refresh), `Backoff` (экспоненциальные повторы с
+  джиттером и `is_retryable`), `Method` (канонические имена методов API),
+  `SecretStore`/`MemSecretStore` (хранилище API-секрета; keyring — позже).
 - `app` — каркас Tauri (Фаза 3): ядро IPC (`AppState` + DTO + обработчики
   `instruments`/`bars`/`turnover_series`/`sector_rollup`/`sector_map`),
-  протестированное на `MemStore`; привязка Tauri за фичей `tauri`.
+  протестированное на `MemStore`; привязка Tauri за фичей `tauri`; инициализация
+  `tracing` (`telemetry::init`, фильтр из `RUST_LOG`, по умолчанию `info`).
 - `frontend` — фронт-приложение (Фазы 3–6): Vite + Svelte 5 + TS, тёмная тема,
   докуемые панели, ECharts (treemap, heatmap, scatter, line, gauge, pie, Sankey)
   + Lightweight Charts свечи, типизированный IPC-клиент с мок-режимом (работает

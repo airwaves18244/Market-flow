@@ -7,8 +7,24 @@
 - ✅ Дисциплина слоёв (аналитика в `domain` без внешних зависимостей).
 - ✅ Контракты `data` (трейт `MarketData`, ошибки, `TimeFrame`), классификация секторов.
 - ✅ DDL схемы DuckDB в `storage::schema`.
-- ⏳ gRPC-стабы из `.proto` (`tonic-build`), auth + refresh токена, per-method
-  rate-limiter (`governor`), `keyring` для ключа, `tracing`.
+- ✅ Per-method rate-limiter: чистый, без внешних зависимостей, скользящее окно
+  по каждому методу (`data::RateLimiter`, лимит Finam 200 req/min по умолчанию),
+  кросс-платформенно протестирован.
+- ✅ Учёт авторизации: `data::TokenState` отслеживает короткоживущий JWT и его
+  срок, решает об упреждающем refresh (с запасом-skew) — чистая, тестируемая
+  логика; сетевой обмен `AuthService.Auth` подключается в фазе интеграции.
+- ✅ Повторы: `data::Backoff` — экспоненциальный backoff с потолком, полным
+  джиттером и классификацией ретраябельности ошибок (`DataError::is_retryable`).
+- ✅ `tracing`: инициализация подписчика в `app::telemetry::init` (фильтр уровней
+  из `RUST_LOG`, по умолчанию `info`), стартовый структурированный лог.
+- ✅ Канонические методы API: `data::Method` (Auth/Assets/Bars/LastQuote/
+  LatestTrades) — единый источник имён для ключей лимитера и меток трейсинга;
+  `RateLimiter` принимает `Method` напрямую.
+- ✅ Хранилище секрета: контракт `data::SecretStore` + in-memory `MemSecretStore`
+  (тестируемо кросс-платформенно); ОС-keyring-реализация — за фичей в фазе
+  интеграции.
+- ⏳ gRPC-стабы из `.proto` (`tonic-build`), сетевой обмен auth, ОС-keyring
+  реализация `SecretStore`.
 
 ## Фаза 1 — Хранилище и ингест ✅
 - ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции
