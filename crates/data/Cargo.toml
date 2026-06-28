@@ -31,6 +31,10 @@ keyring = { version = "3", optional = true, default-features = false, features =
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", optional = true, default-features = false, features = ["linux-native"] }
 
+[[example]]
+name = "live_check"
+required-features = ["grpc"]
+
 [features]
 # Боевое хранилище секрета поверх ОС-keyring (нативные платформенные бэкенды).
 keyring = ["dep:keyring"]

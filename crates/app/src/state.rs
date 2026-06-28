@@ -25,6 +25,9 @@ pub struct AppState {
     store: Mutex<Box<dyn Store + Send>>,
 }
 
+// В headless-live режиме IPC-read-методы (обработчики команд) не вызываются —
+// их потребляет Tauri-UI и тесты. Глушим dead_code только для этой комбинации.
+#[cfg_attr(feature = "live", allow(dead_code))]
 impl AppState {
     /// Создать состояние поверх произвольного бэкенда хранилища.
     pub fn new(store: impl Store + Send + 'static) -> Self {

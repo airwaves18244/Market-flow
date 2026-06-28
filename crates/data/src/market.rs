@@ -41,17 +41,9 @@ impl<T: AuthTransport, S: SecretStore> FinamMarketData<T, S> {
     /// Подключиться к произвольному эндпоинту (стенд/прокси). Для `https`
     /// включается TLS с системными корневыми сертификатами.
     pub fn connect_to(endpoint: &str, auth: AuthManager<T, S>) -> Result<Self, DataError> {
-        let mut ep = tonic::transport::Channel::from_shared(endpoint.to_owned())
-            .map_err(|e| DataError::Transport(format!("неверный эндпоинт: {e}")))?;
-        if endpoint.starts_with("https") {
-            let tls = tonic::transport::ClientTlsConfig::new().with_native_roots();
-            ep = ep
-                .tls_config(tls)
-                .map_err(|e| DataError::Transport(format!("tls: {e}")))?;
-        }
         Ok(Self {
             auth,
-            channel: ep.connect_lazy(),
+            channel: build_endpoint(endpoint)?.connect_lazy(),
             limiter: RateLimiter::finam_default(),
             backoff: Backoff::finam_default(),
         })
@@ -202,6 +194,20 @@ where
             Ok::<_, DataError>(resp.trades.iter().map(map_trade).collect())
         })
     }
+}
+
+/// Сконфигурировать gRPC-эндпоинт: для `https` включить TLS с системными
+/// корневыми сертификатами. Единый билдер для auth-транспорта и клиента данных.
+pub(crate) fn build_endpoint(url: &str) -> Result<tonic::transport::Endpoint, DataError> {
+    let mut ep = tonic::transport::Channel::from_shared(url.to_owned())
+        .map_err(|e| DataError::Transport(format!("неверный эндпоинт: {e}")))?;
+    if url.starts_with("https") {
+        let tls = tonic::transport::ClientTlsConfig::new().with_native_roots();
+        ep = ep
+            .tls_config(tls)
+            .map_err(|e| DataError::Transport(format!("tls: {e}")))?;
+    }
+    Ok(ep)
 }
 
 /// Положить JWT в метаданные `authorization` (Finam ждёт «голый» токен).

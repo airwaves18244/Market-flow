@@ -73,9 +73,16 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
 
 Представления 1–4 готовы. Сетевой gRPC-клиент Finam за фичей `grpc` реализован
 полностью: auth, рыночные данные (`MarketData`) и live-стримы с авто-reconnect.
-Асинхронный планировщик ингеста — за фичей `ingest`. Остаётся подключить живой
-источник к UI (нужен API-секрет), а также Time&Sales/DOM, алёрты, replay и
-упаковку (остаток фаз 7–8, см. `ROADMAP`).
+Боевой режим (`app` фича `live`) связывает живой источник с планировщиком
+ингеста: авторизация → справочник инструментов → цикл опроса баров в хранилище.
+Секрет берётся из `FINAM_API_SECRET` или ОС-keyring (в репозиторий не попадает).
+Остаётся UI поверх live-данных, Time&Sales/DOM, алёрты, replay и упаковка
+(остаток фаз 7–8, см. `ROADMAP`).
+
+> **Доступ к API.** Боевой режим требует сетевого доступа к
+> `trade-api.finam.ru:443`. В Claude Code on the web добавьте этот хост в
+> network egress allowlist окружения, иначе вызовы вернут
+> «Host not in allowlist».
 
 ## Сборка и тесты
 
@@ -104,6 +111,16 @@ cd frontend && npm install && npm run build
 
 # Десктоп целиком (нужен webkit2gtk на Linux):
 cargo run -p app --features tauri
+
+# Живой smoke gRPC-пайплайна (auth → assets → bars/quote) против Finam:
+FINAM_API_SECRET=… cargo run -p data --features grpc --example live_check
+
+# Боевой режим: live-подключение и ингест баров вотчлиста в хранилище.
+# Нужен сетевой доступ к trade-api.finam.ru:443 и валидный секрет.
+FINAM_API_SECRET=… cargo run -p app --features live
+# (опц.) сохранить секрет в ОС-keyring один раз, дальше запускать без env:
+FINAM_API_SECRET=… cargo run -p app --features live,keyring -- --store-secret
+cargo run -p app --features live,keyring
 ```
 
 ## Finam Trade API

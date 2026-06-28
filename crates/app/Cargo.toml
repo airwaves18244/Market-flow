@@ -41,3 +41,7 @@ tauri = ["dep:tauri", "dep:tauri-build"]
 duckdb = ["storage/duckdb"]
 # Асинхронный планировщик ингеста (poll рыночных данных в хранилище).
 ingest = ["dep:tokio"]
+# Хранение API-секрета в ОС-keyring (для live-режима).
+keyring = ["data/keyring"]
+# Боевой режим: live-подключение к Finam (gRPC) + ингест в хранилище.
+live = ["ingest", "data/grpc"]

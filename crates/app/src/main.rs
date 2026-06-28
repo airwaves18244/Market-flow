@@ -21,14 +21,26 @@ mod telemetry;
 #[allow(dead_code)]
 mod ingest;
 
+#[cfg(feature = "live")]
+mod live;
+
 #[cfg(feature = "tauri")]
 mod tauri_app;
 
-use domain::{AssetClass, Bar, TimeFrame};
-use state::AppState;
-use storage::ingest::Writer;
-use storage::{schema, MemStore, Store};
+use storage::schema;
 
+// Импорты и хелперы консольного smoke нужны только когда не собран ни Tauri-UI,
+// ни боевой live-режим (оба не вызывают демо-наполнение).
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use domain::{AssetClass, Bar, TimeFrame};
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use state::AppState;
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use storage::ingest::Writer;
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use storage::{MemStore, Store};
+
+#[cfg(not(any(feature = "tauri", feature = "live")))]
 fn demo_bar(ts: i64, open: f64, close: f64, volume: f64) -> Bar {
     Bar {
         ts,
@@ -41,6 +53,7 @@ fn demo_bar(ts: i64, open: f64, close: f64, volume: f64) -> Bar {
 }
 
 /// Наполнить хранилище демонстрационными данными (для smoke без живого API).
+#[cfg(not(any(feature = "tauri", feature = "live")))]
 fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
     use domain::Instrument;
 
@@ -112,13 +125,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "market terminal запускается"
     );
 
+    // Боевой режим: live-подключение к Finam (нужны egress-доступ к
+    // trade-api.finam.ru:443 и `FINAM_API_SECRET`/keyring).
+    #[cfg(feature = "live")]
+    {
+        // `market-terminal --store-secret` — сохранить FINAM_API_SECRET в keyring.
+        #[cfg(feature = "keyring")]
+        if std::env::args().any(|a| a == "--store-secret") {
+            live::store_secret_from_env()?;
+            return Ok(());
+        }
+        let mic = std::env::var("FINAM_MIC").unwrap_or_else(|_| "MISX".to_owned());
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        // `return` нужен для прочих конфигураций сборки (Tauri/smoke ниже).
+        #[allow(clippy::needless_return)]
+        return rt.block_on(live::run(&mic));
+    }
+
     #[cfg(feature = "tauri")]
     {
         tauri_app::run();
         return Ok(());
     }
 
-    #[cfg(not(feature = "tauri"))]
+    #[cfg(not(any(feature = "tauri", feature = "live")))]
     {
         println!("market terminal — каркас (Фаза 3: Tauri-оболочка + IPC)");
         println!("Классы активов: {:?}", AssetClass::ALL);

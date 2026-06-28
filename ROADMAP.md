@@ -64,8 +64,12 @@
   (`tick`) обходит вотчлист круговым `BatchCursor`, держит per-method лимит
   (`RateLimiter`), тянет бары и пишет их со снимком оборота; боевой цикл (`run`)
   крутит такты по таймеру tokio. Источник абстрактный (трейт `MarketData`) —
-  такт покрыт тестами на фейке (без сети). Боевой источник — `FinamMarketData`
-  (фича `grpc`); подключение к живому API требует секрета (вне CI).
+  такт покрыт тестами на фейке (без сети).
+- ✅ Подключение реального источника: боевой режим `app` (фича `live`) связывает
+  `FinamMarketData` (gRPC) с планировщиком — авторизация → справочник → цикл
+  опроса баров в хранилище. Секрет из `FINAM_API_SECRET`/keyring. Требует
+  egress-доступа к `trade-api.finam.ru:443`; проверено до сетевой границы.
+  Живой smoke пайплайна — `cargo run -p data --features grpc --example live_check`.
 
 ## Фаза 2 — Аналитика (`domain`) ✅
 - ✅ turnover, directional turnover, unusual volume.

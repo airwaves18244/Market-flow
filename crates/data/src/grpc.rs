@@ -208,8 +208,7 @@ impl AuthTransport for GrpcAuthTransport {
         use finam_proto::auth::auth_service_client::AuthServiceClient;
         use finam_proto::auth::{AuthRequest, TokenDetailsRequest};
 
-        let channel = tonic::transport::Channel::from_shared(self.endpoint.clone())
-            .map_err(|e| DataError::Transport(format!("неверный эндпоинт: {e}")))?
+        let channel = crate::market::build_endpoint(&self.endpoint)?
             .connect()
             .await
             .map_err(|e| DataError::Transport(format!("подключение: {e}")))?;
