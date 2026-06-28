@@ -19,11 +19,22 @@ use data::{
 
 #[tokio::main]
 async fn main() {
-    let secret = std::env::var("FINAM_API_SECRET").unwrap_or_default();
+    // Секрет: переменная окружения `FINAM_API_SECRET`, иначе файл `.env`
+    // (ключи `FINAM_API_SECRET`/`FINAM_SECRET`, без учёта регистра).
+    let secret = std::env::var(data::SECRET_ENV_VAR)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_owned())
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|cwd| data::find_dotenv_secret(&cwd, 4))
+        })
+        .unwrap_or_default();
     if secret.is_empty() {
         eprintln!(
-            "FINAM_API_SECRET не задан — проверяем только связность \
-             (ожидается ошибка авторизации от сервера)."
+            "Секрет не задан (ни FINAM_API_SECRET, ни .env) — проверяем только \
+             связность (ожидается ошибка авторизации от сервера)."
         );
     }
 

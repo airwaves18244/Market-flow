@@ -13,6 +13,7 @@
 pub mod auth;
 pub mod backoff;
 pub mod classify;
+pub mod dotenv;
 pub mod endpoint;
 #[cfg(feature = "grpc")]
 pub mod grpc;
@@ -25,6 +26,7 @@ pub mod stream;
 
 pub use auth::TokenState;
 pub use backoff::Backoff;
+pub use dotenv::{find_dotenv_secret, ENV_VAR as SECRET_ENV_VAR};
 pub use endpoint::Method;
 #[cfg(feature = "grpc")]
 pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
