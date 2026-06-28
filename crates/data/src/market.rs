@@ -26,8 +26,8 @@ use crate::{AuthTransport, Backoff, DataError, MarketData, Method, RateLimiter, 
 /// (через [`AuthManager`]); канал к gRPC-эндпоинту переиспользуется между
 /// вызовами (ленивое подключение).
 pub struct FinamMarketData<T: AuthTransport, S: SecretStore> {
-    auth: AuthManager<T, S>,
-    channel: tonic::transport::Channel,
+    pub(crate) auth: AuthManager<T, S>,
+    pub(crate) channel: tonic::transport::Channel,
     limiter: RateLimiter,
     backoff: Backoff,
 }
@@ -205,7 +205,10 @@ where
 }
 
 /// Положить JWT в метаданные `authorization` (Finam ждёт «голый» токен).
-fn attach_auth<M>(request: &mut tonic::Request<M>, token: &str) -> Result<(), DataError> {
+pub(crate) fn attach_auth<M>(
+    request: &mut tonic::Request<M>,
+    token: &str,
+) -> Result<(), DataError> {
     let value = token
         .parse()
         .map_err(|_| DataError::Auth("токен не пригоден для HTTP-заголовка".to_owned()))?;
@@ -214,7 +217,7 @@ fn attach_auth<M>(request: &mut tonic::Request<M>, token: &str) -> Result<(), Da
 }
 
 /// Маппинг `tonic::Status` в [`DataError`] с учётом ретраябельности.
-fn status_to_error(status: tonic::Status) -> DataError {
+pub(crate) fn status_to_error(status: tonic::Status) -> DataError {
     use tonic::Code;
     match status.code() {
         Code::Unauthenticated | Code::PermissionDenied => {
@@ -256,7 +259,7 @@ fn secs_to_ts(secs: i64) -> Timestamp {
 }
 
 /// Доменный тайм-фрейм → числовой код enum `TimeFrame` из proto.
-fn timeframe_to_proto(tf: TimeFrame) -> i32 {
+pub(crate) fn timeframe_to_proto(tf: TimeFrame) -> i32 {
     // Значения соответствуют enum TimeFrame в marketdata_service.proto.
     match tf {
         TimeFrame::M1 => 1,
@@ -303,7 +306,7 @@ fn map_asset(a: finam_proto::assets::Asset) -> Option<Instrument> {
 }
 
 /// proto `Bar` → доменный [`Bar`].
-fn map_bar(b: &finam_proto::marketdata::Bar) -> Bar {
+pub(crate) fn map_bar(b: &finam_proto::marketdata::Bar) -> Bar {
     Bar {
         ts: ts_to_secs(b.timestamp.as_ref()),
         open: decimal_to_f64(b.open.as_ref()),
@@ -315,7 +318,7 @@ fn map_bar(b: &finam_proto::marketdata::Bar) -> Bar {
 }
 
 /// proto `Quote` → доменный [`Quote`].
-fn map_quote(q: &finam_proto::marketdata::Quote) -> Quote {
+pub(crate) fn map_quote(q: &finam_proto::marketdata::Quote) -> Quote {
     Quote {
         ts: ts_to_secs(q.timestamp.as_ref()),
         last: decimal_to_f64(q.last.as_ref()),
@@ -326,7 +329,7 @@ fn map_quote(q: &finam_proto::marketdata::Quote) -> Quote {
 }
 
 /// proto `Trade` → доменный [`Trade`]. Сторона: BUY → инициирована покупателем.
-fn map_trade(t: &finam_proto::marketdata::Trade) -> Trade {
+pub(crate) fn map_trade(t: &finam_proto::marketdata::Trade) -> Trade {
     let buyer_initiated = match t.side {
         x if x == Side::Buy as i32 => Some(true),
         x if x == Side::Sell as i32 => Some(false),

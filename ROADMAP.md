@@ -115,8 +115,17 @@
 - Frontend: `TotalTurnoverGauge`, `SharesDonut`, `TurnoverStackedArea`, `FlowSankey`
   (+ общий помощник `assetClass.ts` с подписями/цветами классов).
 
-## Фаза 7 — Live-функции
-- Стрим вотчлиста (свечи/стакан/лента), Time&Sales, DOM, алёрты, replay-режим.
+## Фаза 7 — Live-функции (частично)
+- ✅ Транспорт live-стримов: `data::stream` (фича `grpc`) — хэндлы
+  `QuoteStream`/`TradeStream`/`BarStream` поверх серверных стримов
+  `MarketDataService.Subscribe*` с авторизацией и переводом протобаф→домен;
+  методы `FinamMarketData::subscribe_quotes`/`subscribe_trades`/`subscribe_bars`.
+- ✅ Авто-reconnect: `data::StreamReconnect` — экспоненциальная пауза с
+  джиттером до потолка, сброс после успешных данных (стрим Finam рвётся ~раз в
+  24 ч). Чистый контроллер и маппинг сообщений (включая `StreamError`) покрыты
+  тестами без сети; сам стрим интеграционно проверяется при наличии секрета.
+- ⏳ Time&Sales / DOM (стакан) представления, алёрты и replay-режим — на фронте
+  и в оркестрации (следующий шаг live-фазы).
 
 ## Фаза 8 — Полировка и сборка
 - Упаковка MSI/NSIS (Tauri bundler), производительность, обработка ошибок, настройки.

@@ -20,6 +20,8 @@ pub mod grpc;
 pub mod market;
 pub mod rate;
 pub mod secret;
+#[cfg(feature = "grpc")]
+pub mod stream;
 
 pub use auth::TokenState;
 pub use backoff::Backoff;
@@ -32,6 +34,8 @@ pub use rate::RateLimiter;
 #[cfg(feature = "keyring")]
 pub use secret::KeyringSecretStore;
 pub use secret::{MemSecretStore, SecretStore};
+#[cfg(feature = "grpc")]
+pub use stream::{BarStream, QuoteStream, StreamReconnect, TradeStream};
 
 use domain::{Bar, Instrument, Quote, Trade};
 
