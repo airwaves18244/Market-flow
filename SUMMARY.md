@@ -4,7 +4,7 @@
 
 ## Готово
 
-### Фаза 0 — Фундамент (частично)
+### Фаза 0 — Фундамент ✅
 - Cargo workspace: `finam-proto`, `domain`, `data`, `storage`, `app`.
 - Дисциплина слоёв: вся математика в `domain`, без внешних зависимостей.
 - Контракты `data` (`MarketData`, `TimeFrame`, ошибки), DDL DuckDB.
@@ -25,15 +25,19 @@
 - `app::telemetry::init` — установка подписчика `tracing` (фильтр из `RUST_LOG`,
   по умолчанию `info`), идемпотентна; стартовый структурированный лог в `main`.
 - `finam-proto` — gRPC-кодоген за фичей `grpc`: клиентские стабы из vendored
-  `.proto` (`proto/`) через `tonic-build` + `protoc-bin-vendored` (свой `protoc`).
-  По умолчанию фича выключена, `tonic`/`prost` не подтягиваются. Готов `AuthService`.
+  `.proto` (`proto/`: `AuthService`/`AssetsService`/`MarketDataService` +
+  `google/type/*`) через `tonic-build` + `protoc-bin-vendored` (свой `protoc`).
+  По умолчанию фича выключена, `tonic`/`prost` не подтягиваются.
 - `data::AuthManager` + `data::GrpcAuthTransport` — сетевой обмен `AuthService.Auth`
   за фичей `grpc`. Связывает `TokenState`/`RateLimiter`/`Backoff`/`SecretStore`:
   кэш токена, упреждающий refresh, лимит метода `Auth`, повтор транзиентных
   сбоев с backoff (без повтора auth-ошибок). Транспорт за трейтом `AuthTransport`
   → оркестрация покрыта тестами без сети.
-- ⏳ Осталось по фазе 0: стабы `AssetsService`/`MarketDataService` и реализация
-  `MarketData` поверх gRPC — следующий шаг фазы интеграции.
+- `data::FinamMarketData` — реализация трейта `MarketData` поверх gRPC за фичей
+  `grpc`: `assets`/`bars`/`last_quote`/`latest_trades` с JWT в `authorization`,
+  per-method лимитом, повтором транзиентных сбоев и маппингом протобаф→домен
+  (Decimal/Timestamp/Side). Чистые функции маппинга покрыты тестами.
+- Фаза 0 завершена; стримовые `Subscribe*` относятся к фазе 7 (live).
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;

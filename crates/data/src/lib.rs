@@ -16,6 +16,8 @@ pub mod classify;
 pub mod endpoint;
 #[cfg(feature = "grpc")]
 pub mod grpc;
+#[cfg(feature = "grpc")]
+pub mod market;
 pub mod rate;
 pub mod secret;
 
@@ -24,6 +26,8 @@ pub use backoff::Backoff;
 pub use endpoint::Method;
 #[cfg(feature = "grpc")]
 pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
+#[cfg(feature = "grpc")]
+pub use market::FinamMarketData;
 pub use rate::RateLimiter;
 #[cfg(feature = "keyring")]
 pub use secret::KeyringSecretStore;

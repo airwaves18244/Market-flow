@@ -7,8 +7,7 @@
 //! без зависимостей: тяжёлые `tonic`/`prost` и build-tooling не подтягиваются.
 //!
 //! Эндпоинт: `https://trade-api.finam.ru:443` (HTTP/2, TLS).
-//! Сервисы: `AuthService` (готов), `AssetsService`, `MarketDataService`
-//! (стабы добавляются в фазе интеграции рыночных данных).
+//! Сервисы: `AuthService`, `AssetsService`, `MarketDataService` (read-only).
 
 /// Базовый адрес gRPC-эндпоинта Finam Trade API.
 pub const ENDPOINT: &str = "https://trade-api.finam.ru:443";
@@ -16,11 +15,28 @@ pub const ENDPOINT: &str = "https://trade-api.finam.ru:443";
 /// Хост gRPC-эндпоинта (для проверки TLS-домена и метрик).
 pub const HOST: &str = "trade-api.finam.ru";
 
-/// Сгенерированные стабы `grpc.tradeapi.v1.auth` (`AuthService` и сообщения).
+/// Весь сгенерированный код (один модульный файл с вложенностью пакетов).
 ///
-/// Доступен под фичей `grpc`. Содержит, в частности,
-/// `auth_service_client::AuthServiceClient`, `AuthRequest`, `AuthResponse`.
+/// Доступен под фичей `grpc`. Содержит пакеты `grpc.tradeapi.v1.*` и
+/// `google.type.*`; `google.protobuf.*` отображены на `prost_types`.
 #[cfg(feature = "grpc")]
-pub mod auth {
-    tonic::include_proto!("grpc.tradeapi.v1.auth");
+#[allow(clippy::all, clippy::pedantic, clippy::nursery, rustdoc::all)]
+#[rustfmt::skip]
+pub mod pb {
+    include!(concat!(env!("OUT_DIR"), "/finam.rs"));
 }
+
+/// `grpc.tradeapi.v1.auth` — `AuthService` и сообщения.
+///
+/// Содержит `auth_service_client::AuthServiceClient`, `AuthRequest`,
+/// `AuthResponse`, `TokenDetailsRequest`/`TokenDetailsResponse`.
+#[cfg(feature = "grpc")]
+pub use pb::grpc::tradeapi::v1::auth;
+
+/// `grpc.tradeapi.v1.assets` — `AssetsService` и сообщения.
+#[cfg(feature = "grpc")]
+pub use pb::grpc::tradeapi::v1::assets;
+
+/// `grpc.tradeapi.v1.marketdata` — `MarketDataService` и сообщения.
+#[cfg(feature = "grpc")]
+pub use pb::grpc::tradeapi::v1::marketdata;

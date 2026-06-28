@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 # выключенной в кросс-платформенном CI (как `duckdb`/`tauri`).
 tonic = { version = "0.12", optional = true, features = ["tls", "tls-roots"] }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
+prost-types = { version = "0.13", optional = true }
 
 # ОС-keyring для секрета API — за фичей `keyring`, выключенной в кросс-
 # платформенном CI (как `duckdb`/`tauri`). Бэкенд выбирается под платформу:
@@ -33,5 +34,5 @@ keyring = { version = "3", optional = true, default-features = false, features =
 [features]
 # Боевое хранилище секрета поверх ОС-keyring (нативные платформенные бэкенды).
 keyring = ["dep:keyring"]
-# Сетевой gRPC-клиент Finam (auth-обмен поверх сгенерированных стабов).
-grpc = ["dep:tonic", "dep:tokio", "finam-proto/grpc"]
+# Сетевой gRPC-клиент Finam (auth-обмен + рыночные данные поверх стабов).
+grpc = ["dep:tonic", "dep:tokio", "dep:prost-types", "finam-proto/grpc"]

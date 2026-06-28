@@ -952,6 +952,7 @@ dependencies = [
  "domain",
  "finam-proto",
  "keyring",
+ "prost-types",
  "serde",
  "thiserror 2.0.18",
  "tokio",

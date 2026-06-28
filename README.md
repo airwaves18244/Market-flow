@@ -52,8 +52,10 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   `SecretStore`/`MemSecretStore` (контракт + in-memory хранилище API-секрета),
   `KeyringSecretStore` (боевое хранилище в ОС-keyring за фичей `keyring`).
   Сетевой gRPC-клиент — за фичей `grpc`: `AuthManager` + `GrpcAuthTransport`
-  реализуют обмен `AuthService.Auth` (кэш JWT, упреждающий refresh, лимит
-  метода, повтор транзиентных сбоев), оркестрация покрыта тестами без сети.
+  (обмен `AuthService.Auth`: кэш JWT, упреждающий refresh, лимит метода, повтор
+  транзиентных сбоев) и `FinamMarketData` — реализация трейта `MarketData`
+  (`assets`/`bars`/`last_quote`/`latest_trades`) с JWT-авторизацией, лимитами и
+  маппингом протобаф→домен. Оркестрация и маппинг покрыты тестами без сети.
 - `app` — каркас Tauri (Фаза 3): ядро IPC (`AppState` + DTO + обработчики
   `instruments`/`bars`/`turnover_series`/`sector_rollup`/`sector_map`),
   протестированное на `MemStore`; привязка Tauri за фичей `tauri`; инициализация
@@ -65,8 +67,9 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   RRG), фьючерсы (группы), облигации (кривая доходности, эмитенты), «сумма всех»
   (gauge общего оборота, donut долей, stacked area, Sankey перетоков).
 
-Представления 1–4 готовы. Сетевые реализации (tonic/gRPC) подключаются в фазах
-интеграции API (см. `ROADMAP`).
+Представления 1–4 готовы. Сетевой gRPC-клиент Finam (auth + рыночные данные)
+реализован за фичей `grpc`; остаётся подключить его к асинхронному циклу опроса
+и live-стримам (Фазы 7–8, см. `ROADMAP`).
 
 ## Сборка и тесты
 
