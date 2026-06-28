@@ -2,7 +2,7 @@
 
 Пошаговый план. Отметка ✅ — сделано в текущей итерации.
 
-## Фаза 0 — Фундамент ✅ (частично)
+## Фаза 0 — Фундамент ✅
 - ✅ Cargo workspace, члены: `finam-proto`, `domain`, `data`, `storage`, `app`.
 - ✅ Дисциплина слоёв (аналитика в `domain` без внешних зависимостей).
 - ✅ Контракты `data` (трейт `MarketData`, ошибки, `TimeFrame`), классификация секторов.
@@ -21,10 +21,33 @@
   LatestTrades) — единый источник имён для ключей лимитера и меток трейсинга;
   `RateLimiter` принимает `Method` напрямую.
 - ✅ Хранилище секрета: контракт `data::SecretStore` + in-memory `MemSecretStore`
-  (тестируемо кросс-платформенно); ОС-keyring-реализация — за фичей в фазе
-  интеграции.
-- ⏳ gRPC-стабы из `.proto` (`tonic-build`), сетевой обмен auth, ОС-keyring
-  реализация `SecretStore`.
+  (тестируемо кросс-платформенно).
+- ✅ ОС-keyring реализация `SecretStore`: `data::KeyringSecretStore` за фичей
+  `keyring` — нативный бэкенд под платформу (Windows → Credential Manager,
+  macOS → Keychain, Linux → ключи ядра/keyutils). Фича выключена в кросс-
+  платформенном CI (как `duckdb`/`tauri`), зависимость не подтягивается.
+  Контрактный тест компилируется всегда; live-roundtrip помечен `#[ignore]`
+  (нужна реальная keyring-сессия).
+- ✅ gRPC-кодоген: `finam-proto` генерирует клиентские стабы из vendored
+  `.proto` (`proto/`, санитизированные копии из `FinamWeb/finam-trade-api`:
+  `AuthService`, `AssetsService`, `MarketDataService`, `side`, плюс
+  `google/type/*`) через `tonic-build` + `protoc-bin-vendored` (свой `protoc`,
+  без системного) — за фичей `grpc`. По умолчанию фича выключена: тяжёлые
+  `tonic`/`prost` и build-tooling не подтягиваются (лёгкий CI, как
+  `duckdb`/`tauri`).
+- ✅ Сетевой обмен auth (`AuthService.Auth`): `data::AuthManager` +
+  `data::GrpcAuthTransport` за фичей `grpc`. Менеджер связывает чистые примитивы
+  (`TokenState`/`RateLimiter`/`Backoff`/`SecretStore`): переиспользует
+  действующий JWT, упреждающе обновляет, держит лимит метода `Auth`, повторяет
+  транзиентные сбои с backoff и не повторяет ошибки авторизации. Транспорт
+  отделён трейтом `AuthTransport`, поэтому оркестрация покрыта тестами без сети.
+- ✅ Реализация `MarketData` поверх gRPC: `data::FinamMarketData` за фичей
+  `grpc` реализует `assets`/`bars`/`last_quote`/`latest_trades`. Каждый вызов
+  берёт JWT у `AuthManager` (метаданные `authorization`), держит per-method
+  лимит, повторяет транзиентные сбои с backoff и переводит протобаф-типы
+  (Decimal/Timestamp/Side) в чистые доменные значения. Маппинг вынесен в чистые
+  функции и покрыт тестами; сетевые вызовы интеграционно проверяются при наличии
+  реального секрета (в CI выключено).
 
 ## Фаза 1 — Хранилище и ингест ✅
 - ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции
@@ -36,8 +59,17 @@
 - ✅ Загрузка таблицы классификации секторов (`Writer::load_sector_map`).
 - ✅ Бэкфилл исторических баров: `plan_backfill` + `chunk_range` (страницы под
   лимит баров на запрос).
-- ⏳ Подключение реального источника (`data::MarketData`) и асинхронного цикла
-  опроса — в фазе интеграции API/UI (`app`).
+- ✅ Асинхронный цикл опроса: `app::ingest::IngestService` (фича `ingest`)
+  связывает источник `data::MarketData` с хранилищем через `AppState`. Такт
+  (`tick`) обходит вотчлист круговым `BatchCursor`, держит per-method лимит
+  (`RateLimiter`), тянет бары и пишет их со снимком оборота; боевой цикл (`run`)
+  крутит такты по таймеру tokio. Источник абстрактный (трейт `MarketData`) —
+  такт покрыт тестами на фейке (без сети).
+- ✅ Подключение реального источника: боевой режим `app` (фича `live`) связывает
+  `FinamMarketData` (gRPC) с планировщиком — авторизация → справочник → цикл
+  опроса баров в хранилище. Секрет из `FINAM_API_SECRET`/keyring. Требует
+  egress-доступа к `trade-api.finam.ru:443`; проверено до сетевой границы.
+  Живой smoke пайплайна — `cargo run -p data --features grpc --example live_check`.
 
 ## Фаза 2 — Аналитика (`domain`) ✅
 - ✅ turnover, directional turnover, unusual volume.
@@ -57,7 +89,8 @@
 - ✅ Фронт: Vite + Svelte 5 + TS, тёмная тема, каркас докуемых панелей,
   типизированный IPC-клиент с мок-режимом (работает в браузере без бэкенда),
   ECharts treemap и Lightweight Charts свечи.
-- ⏳ Полноценный dockview и асинхронный планировщик ингеста — в следующих фазах.
+- ✅ Асинхронный планировщик ингеста — `app::ingest` (фича `ingest`), см. фазу 1.
+- ⏳ Полноценный dockview (фронт) — в фазе полировки.
 
 ## Фаза 4 — Представление 1 (Акции/секторы) ✅
 - ✅ treemap (размер=оборот, цвет=%изм) — уже реализовано в Фазе 3.
@@ -86,8 +119,42 @@
 - Frontend: `TotalTurnoverGauge`, `SharesDonut`, `TurnoverStackedArea`, `FlowSankey`
   (+ общий помощник `assetClass.ts` с подписями/цветами классов).
 
-## Фаза 7 — Live-функции
-- Стрим вотчлиста (свечи/стакан/лента), Time&Sales, DOM, алёрты, replay-режим.
+## Фаза 7 — Live-функции ✅
+- ✅ Транспорт live-стримов: `data::stream` (фича `grpc`) — хэндлы
+  `QuoteStream`/`TradeStream`/`BarStream` поверх серверных стримов
+  `MarketDataService.Subscribe*` с авторизацией и переводом протобаф→домен;
+  методы `FinamMarketData::subscribe_quotes`/`subscribe_trades`/`subscribe_bars`.
+- ✅ Авто-reconnect: `data::StreamReconnect` — экспоненциальная пауза с
+  джиттером до потолка, сброс после успешных данных (стрим Finam рвётся ~раз в
+  24 ч). Чистый контроллер и маппинг сообщений (включая `StreamError`) покрыты
+  тестами без сети; сам стрим интеграционно проверяется при наличии секрета.
+- ✅ DOM (стакан): доменный `OrderBook`/`BookLevel` + `FinamMarketData::order_book`
+  (`MarketDataService.OrderBook`) с маппингом строк в биды/аски (сортировка,
+  спред); метод `Method::OrderBook` для лимита. Маппинг покрыт тестами.
+- ✅ Алёрты: `domain::metrics::alerts` — `AlertEngine` с фронтовым срабатыванием
+  (цена/изменение, без повторного спама), чистый и протестированный.
+- ✅ Replay-режим: `app::replay::ReplaySource` реализует `MarketData` из
+  сохранённых баров (в т.ч. `from_store`) — тот же путь ингеста/аналитики без
+  сети; покрыт тестами. Time&Sales — это лента `subscribe_trades`.
+- ✅ Фронтовые панели Time&Sales/DOM/алёртов: компоненты `TimeSales`,
+  `OrderBook` (лесенка с барами глубины и спредом), `AlertsPanel` (правила +
+  срабатывания). DTO `TradeDto`/`OrderBookDto`/`AlertEventDto` + вход
+  `AlertRuleInput`; команда `alerts_scan` (прогон правил по сохранённым барам)
+  и команды-контракты `latest_trades`/`order_book`. Живые обновления —
+  события `trade:tick`/`orderbook:tick` (эмиттеры `emit_trade`/
+  `emit_order_book`), фронт подписывается через `onTrade`/`onOrderBook`
+  (в браузере — мок-снимок). DTO-маппинг и `alerts_scan` покрыты тестами.
 
 ## Фаза 8 — Полировка и сборка
-- Упаковка MSI/NSIS (Tauri bundler), производительность, обработка ошибок, настройки.
+- ✅ Настройки представления: `frontend/src/lib/settings.ts` (localStorage) +
+  панель `SettingsPanel` — глубина стакана, размер ленты сделок, лимит
+  топ-движений; изменения сохраняются и перезагружают зависимые данные.
+- ✅ Производительность фронта: разнесение тяжёлых библиотек (ECharts,
+  Lightweight Charts) в отдельные кешируемые чанки (`manualChunks`) — код
+  приложения ужался с ~1.27 МБ до ~73 КБ.
+- ✅ Конфигурация упаковки: метаданные бандла в `tauri.conf.json`
+  (издатель, категория, описания, NSIS-языки RU/EN), цели `msi`/`nsis`.
+- ✅ Обработка ошибок: верхнеуровневый баннер ошибки + локальные состояния
+  ошибок/пустоты в панелях (алёрты, стакан, лента).
+- ⏳ Финальная сборка MSI/NSIS (`cargo tauri build`) и иконки — требуют
+  десктопного окружения (webkit2gtk) вне кросс-платформенного CI.

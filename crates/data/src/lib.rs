@@ -14,14 +14,28 @@ pub mod auth;
 pub mod backoff;
 pub mod classify;
 pub mod endpoint;
+#[cfg(feature = "grpc")]
+pub mod grpc;
+#[cfg(feature = "grpc")]
+pub mod market;
 pub mod rate;
 pub mod secret;
+#[cfg(feature = "grpc")]
+pub mod stream;
 
 pub use auth::TokenState;
 pub use backoff::Backoff;
 pub use endpoint::Method;
+#[cfg(feature = "grpc")]
+pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
+#[cfg(feature = "grpc")]
+pub use market::FinamMarketData;
 pub use rate::RateLimiter;
+#[cfg(feature = "keyring")]
+pub use secret::KeyringSecretStore;
 pub use secret::{MemSecretStore, SecretStore};
+#[cfg(feature = "grpc")]
+pub use stream::{BarStream, QuoteStream, StreamReconnect, TradeStream};
 
 use domain::{Bar, Instrument, Quote, Trade};
 
@@ -31,7 +45,7 @@ use domain::{Bar, Instrument, Quote, Trade};
 pub use domain::TimeFrame;
 
 /// Ошибки слоя данных.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DataError {
     #[error("ошибка авторизации: {0}")]
     Auth(String),

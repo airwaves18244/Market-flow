@@ -14,14 +14,41 @@ mod dto;
 mod state;
 mod telemetry;
 
+// Планировщик ингеста — сервис, который потребляет десктопный рантайм (связка с
+// живым `data::MarketData`) и юнит-тесты. В headless-сборке часть его API
+// (боевой цикл `run`) не вызывается, поэтому глушим dead_code на уровне модуля.
+#[cfg(feature = "ingest")]
+#[allow(dead_code)]
+mod ingest;
+
+#[cfg(feature = "live")]
+mod live;
+
+// Replay-источник (offline-режим): реализует `MarketData` из сохранённых баров.
+// В бинаре напрямую не вызывается — потребляется тестами и replay-сценариями.
+#[cfg(feature = "ingest")]
+#[allow(dead_code)]
+mod replay;
+
 #[cfg(feature = "tauri")]
 mod tauri_app;
 
-use domain::{AssetClass, Bar, TimeFrame};
-use state::AppState;
-use storage::ingest::Writer;
-use storage::{schema, MemStore, Store};
+use storage::schema;
 
+// Импорты и хелперы консольного smoke нужны только когда не собран ни Tauri-UI,
+// ни боевой live-режим (оба не вызывают демо-наполнение).
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use domain::{AssetClass, Bar, BookLevel, OrderBook, TimeFrame, Trade};
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use dto::{AlertRuleInput, OrderBookDto, TradeDto};
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use state::AppState;
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use storage::ingest::Writer;
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use storage::{MemStore, Store};
+
+#[cfg(not(any(feature = "tauri", feature = "live")))]
 fn demo_bar(ts: i64, open: f64, close: f64, volume: f64) -> Bar {
     Bar {
         ts,
@@ -34,6 +61,7 @@ fn demo_bar(ts: i64, open: f64, close: f64, volume: f64) -> Bar {
 }
 
 /// Наполнить хранилище демонстрационными данными (для smoke без живого API).
+#[cfg(not(any(feature = "tauri", feature = "live")))]
 fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
     use domain::Instrument;
 
@@ -105,13 +133,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "market terminal запускается"
     );
 
+    // Боевой режим: live-подключение к Finam (нужны egress-доступ к
+    // trade-api.finam.ru:443 и `FINAM_API_SECRET`/keyring).
+    #[cfg(feature = "live")]
+    {
+        // `market-terminal --store-secret` — сохранить FINAM_API_SECRET в keyring.
+        #[cfg(feature = "keyring")]
+        if std::env::args().any(|a| a == "--store-secret") {
+            live::store_secret_from_env()?;
+            return Ok(());
+        }
+        let mic = std::env::var("FINAM_MIC").unwrap_or_else(|_| "MISX".to_owned());
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        // `return` нужен для прочих конфигураций сборки (Tauri/smoke ниже).
+        #[allow(clippy::needless_return)]
+        return rt.block_on(live::run(&mic));
+    }
+
     #[cfg(feature = "tauri")]
     {
         tauri_app::run();
         return Ok(());
     }
 
-    #[cfg(not(feature = "tauri"))]
+    #[cfg(not(any(feature = "tauri", feature = "live")))]
     {
         println!("market terminal — каркас (Фаза 3: Tauri-оболочка + IPC)");
         println!("Классы активов: {:?}", AssetClass::ALL);
@@ -189,6 +236,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "  flow_sankey(): {} рёбер перетока",
             state.flow_sankey(0, i64::MAX)?.len()
+        );
+
+        // Фаза 7 — live-панели: алёрты по сохранённым барам + маппинг
+        // Time&Sales/DOM (живые данные приходят стримом, здесь — демо маппинга).
+        let rules = vec![AlertRuleInput {
+            symbol: "SBER@MISX".into(),
+            kind: "priceAbove".into(),
+            threshold: 300.0,
+        }];
+        println!(
+            "  alerts_scan(SBER>300): {} срабатываний",
+            state.alerts_scan(&rules, 0, i64::MAX)?.len()
+        );
+        let trade = TradeDto::from(&Trade {
+            ts: 3,
+            price: 305.0,
+            size: 12.0,
+            buyer_initiated: Some(true),
+        });
+        println!("  trade→dto: цена={} объём={}", trade.price, trade.size);
+        let book = OrderBookDto::from(&OrderBook {
+            ts: 3,
+            bids: vec![BookLevel {
+                price: 304.5,
+                size: 50.0,
+            }],
+            asks: vec![BookLevel {
+                price: 305.5,
+                size: 40.0,
+            }],
+        });
+        println!(
+            "  orderbook→dto: {} бид(ов) / {} аск(ов)",
+            book.bids.len(),
+            book.asks.len()
         );
 
         Ok(())

@@ -6,14 +6,18 @@
 
 use std::sync::Mutex;
 
+#[cfg(feature = "ingest")]
+use domain::Bar;
 use domain::TimeFrame;
+#[cfg(feature = "ingest")]
+use storage::ingest::snapshot_from_bars;
 use storage::{StorageError, Store};
 
 use crate::api;
 use crate::dto::{
-    BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
-    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
+    FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 
 /// Разделяемое состояние терминала.
@@ -21,6 +25,9 @@ pub struct AppState {
     store: Mutex<Box<dyn Store + Send>>,
 }
 
+// В headless-live режиме IPC-read-методы (обработчики команд) не вызываются —
+// их потребляет Tauri-UI и тесты. Глушим dead_code только для этой комбинации.
+#[cfg_attr(feature = "live", allow(dead_code))]
 impl AppState {
     /// Создать состояние поверх произвольного бэкенда хранилища.
     pub fn new(store: impl Store + Send + 'static) -> Self {
@@ -39,6 +46,44 @@ impl AppState {
             .lock()
             .map_err(|_| StorageError::Db("state lock poisoned".into()))?;
         f(guard.as_ref())
+    }
+
+    /// Выполнить запись под блокировкой. Отравленный мьютекс → ошибка БД.
+    #[cfg(feature = "ingest")]
+    fn write<F, R>(&self, f: F) -> Result<R, StorageError>
+    where
+        F: FnOnce(&mut dyn Store) -> Result<R, StorageError>,
+    {
+        let mut guard = self
+            .store
+            .lock()
+            .map_err(|_| StorageError::Db("state lock poisoned".into()))?;
+        f(guard.as_mut())
+    }
+
+    /// Записать бары инструмента и построить снимок оборота на `snapshot_ts`.
+    ///
+    /// Точка входа планировщика ингеста ([`crate::ingest`]). Идемпотентно по
+    /// ключам схемы (повторный ингест не плодит дублей). Пустая серия — no-op;
+    /// снимок пишется только для непустой серии.
+    #[cfg(feature = "ingest")]
+    pub fn ingest_bars(
+        &self,
+        symbol: &str,
+        tf: TimeFrame,
+        bars: &[Bar],
+        snapshot_ts: i64,
+    ) -> Result<(), StorageError> {
+        if bars.is_empty() {
+            return Ok(());
+        }
+        self.write(|s| {
+            s.insert_bars(symbol, tf, bars)?;
+            if let Some(snap) = snapshot_from_bars(bars, snapshot_ts) {
+                s.insert_snapshot(symbol, &snap)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn instruments(&self) -> Result<Vec<InstrumentDto>, StorageError> {
@@ -129,6 +174,16 @@ impl AppState {
 
     pub fn flow_sankey(&self, from_ts: i64, to_ts: i64) -> Result<Vec<FlowEdgeDto>, StorageError> {
         self.read(|s| api::flow_sankey(s, from_ts, to_ts))
+    }
+
+    /// Прогон правил алёртов по сохранённым барам (replay-проверка правил).
+    pub fn alerts_scan(
+        &self,
+        rules: &[AlertRuleInput],
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<AlertEventDto>, StorageError> {
+        self.read(|s| api::alerts_scan(s, rules, from_ts, to_ts))
     }
 }
 

@@ -17,17 +17,20 @@ pub enum Method {
     Bars,
     /// `MarketDataService.LastQuote` — последняя котировка.
     LastQuote,
+    /// `MarketDataService.OrderBook` — текущий стакан (DOM).
+    OrderBook,
     /// `MarketDataService.LatestTrades` — последние сделки.
     LatestTrades,
 }
 
 impl Method {
     /// Все методы — для итерирования (например, прогрев/диагностика лимитов).
-    pub const ALL: [Method; 5] = [
+    pub const ALL: [Method; 6] = [
         Method::Auth,
         Method::Assets,
         Method::Bars,
         Method::LastQuote,
+        Method::OrderBook,
         Method::LatestTrades,
     ];
 
@@ -38,6 +41,7 @@ impl Method {
             Method::Assets => "assets",
             Method::Bars => "bars",
             Method::LastQuote => "last_quote",
+            Method::OrderBook => "order_book",
             Method::LatestTrades => "latest_trades",
         }
     }
@@ -75,6 +79,7 @@ mod tests {
         assert_eq!(Method::Assets.as_str(), "assets");
         assert_eq!(Method::Bars.as_str(), "bars");
         assert_eq!(Method::LastQuote.as_str(), "last_quote");
+        assert_eq!(Method::OrderBook.as_str(), "order_book");
         assert_eq!(Method::LatestTrades.as_str(), "latest_trades");
     }
 

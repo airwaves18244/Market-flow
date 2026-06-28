@@ -2,6 +2,8 @@
 // Позволяют разрабатывать и собирать UI до интеграции с ядром.
 
 import type {
+  AlertEventDto,
+  AlertRuleInput,
   BarPoint,
   BondIssuerDto,
   BreadthDto,
@@ -9,10 +11,12 @@ import type {
   FlowEdgeDto,
   FutureGroupDto,
   InstrumentDto,
+  OrderBookDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
   TopMoverDto,
+  TradeDto,
   TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
@@ -149,6 +153,95 @@ function genTurnover(): TurnoverPoint[] {
   return out;
 }
 
+// ── Фаза 7 — live-панели (Time&Sales / DOM / алёрты) ──────────────────────
+
+// Опорная цена символа для лент сделок и стакана.
+function basePrice(symbol: string): number {
+  if (symbol.startsWith("LKOH")) return 6850;
+  if (symbol.startsWith("GAZP")) return 160;
+  if (symbol.startsWith("GMKN")) return 175_000;
+  if (symbol.startsWith("YDEX")) return 3200;
+  return 305; // SBER и прочее
+}
+
+// Лента обезличенных сделок (самые свежие — первыми).
+function genTrades(symbol: string, limit: number): TradeDto[] {
+  const out: TradeDto[] = [];
+  const base = basePrice(symbol);
+  const now = Math.floor(Date.now() / 1000);
+  let price = base;
+  for (let i = 0; i < limit; i++) {
+    price = Math.max(1, price + (Math.random() - 0.5) * base * 0.001);
+    out.push({
+      ts: now - i,
+      price: Number(price.toFixed(2)),
+      size: Math.ceil(Math.random() * 50),
+      buyerInitiated: Math.random() > 0.5,
+    });
+  }
+  return out;
+}
+
+// Снимок стакана: симметричная лесенка вокруг середины.
+function genOrderBook(symbol: string, depth: number): OrderBookDto {
+  const base = basePrice(symbol);
+  const tick = Math.max(0.01, base * 0.0005);
+  const bids = [];
+  const asks = [];
+  for (let i = 0; i < depth; i++) {
+    bids.push({
+      price: Number((base - tick * (i + 1)).toFixed(2)),
+      size: Math.ceil((depth - i) * (5 + Math.random() * 20)),
+    });
+    asks.push({
+      price: Number((base + tick * (i + 1)).toFixed(2)),
+      size: Math.ceil((depth - i) * (5 + Math.random() * 20)),
+    });
+  }
+  return { ts: Math.floor(Date.now() / 1000), bids, asks };
+}
+
+// Прогон правил по мок-барам (edge-triggered, как в доменном движке).
+function scanAlerts(rules: AlertRuleInput[]): AlertEventDto[] {
+  const out: AlertEventDto[] = [];
+  for (const rule of rules) {
+    const seed = basePrice(rule.symbol);
+    const bars = genBars(seed);
+    let active = false;
+    for (const b of bars) {
+      const change = b.open !== 0 ? (b.close - b.open) / b.open : 0;
+      let holds = false;
+      let label = "";
+      switch (rule.kind) {
+        case "priceAbove":
+          holds = b.close > rule.threshold;
+          label = `цена выше ${rule.threshold}`;
+          break;
+        case "priceBelow":
+          holds = b.close < rule.threshold;
+          label = `цена ниже ${rule.threshold}`;
+          break;
+        case "changeAbove":
+          holds = change > rule.threshold;
+          label = `изменение выше ${(rule.threshold * 100).toFixed(2)}%`;
+          break;
+        case "changeBelow":
+          holds = change < rule.threshold;
+          label = `изменение ниже ${(rule.threshold * 100).toFixed(2)}%`;
+          break;
+      }
+      if (holds && !active) {
+        active = true;
+        out.push({ symbol: rule.symbol, ts: b.ts, price: b.close, change, message: label });
+      } else if (!holds) {
+        active = false;
+      }
+    }
+  }
+  out.sort((a, b) => a.ts - b.ts);
+  return out;
+}
+
 export async function handle<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "instruments":
@@ -182,6 +275,20 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return genTimeline() as unknown as T;
     case "flow_sankey":
       return flowSankey as unknown as T;
+    case "latest_trades": {
+      const sym = String(args?.symbol ?? "SBER@MISX");
+      const limit = Number(args?.limit ?? 50);
+      return genTrades(sym, limit) as unknown as T;
+    }
+    case "order_book": {
+      const sym = String(args?.symbol ?? "SBER@MISX");
+      const depth = Number(args?.depth ?? 10);
+      return genOrderBook(sym, depth) as unknown as T;
+    }
+    case "alerts_scan": {
+      const rules = (args?.rules ?? []) as AlertRuleInput[];
+      return scanAlerts(rules) as unknown as T;
+    }
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
   }

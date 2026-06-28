@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use domain::metrics::alerts::{AlertEngine, Observation};
 use domain::metrics::breadth::breadth;
 use domain::metrics::crossasset::{flow_matrix, turnover_shares, TurnoverShares};
 use domain::metrics::sector::{rollup_by_sector, InstrumentMetric};
@@ -14,9 +15,9 @@ use domain::{AssetClass, TimeFrame};
 use storage::{StorageError, Store};
 
 use crate::dto::{
-    AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto,
-    FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto,
-    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    AlertEventDto, AlertRuleInput, AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto,
+    CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto,
+    SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 
 /// Метка сектора для инструментов без классификации.
@@ -516,6 +517,65 @@ pub fn flow_sankey(
         .collect())
 }
 
+// ── Фаза 7 — алёрты по сохранённым данным ──────────────────────────────────
+
+/// Прогон правил алёртов по сохранённым барам.
+///
+/// Для каждого правила берём дневные бары соответствующего инструмента в окне
+/// `[from_ts, to_ts]`, строим наблюдения (`price` = закрытие бара, `change` =
+/// `(close − open) / open` — дневное изменение в долях) и пропускаем их через
+/// edge-triggered [`AlertEngine`]. Наблюдения по всем инструментам
+/// упорядочиваются по времени, чтобы движок видел согласованную хронологию.
+/// Возвращает события в порядке срабатывания — основа для replay-проверки
+/// правил и для панели алёртов без живого подключения.
+pub fn alerts_scan(
+    store: &dyn Store,
+    rules: &[AlertRuleInput],
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<AlertEventDto>, StorageError> {
+    let domain_rules: Vec<_> = rules.iter().filter_map(AlertRuleInput::to_rule).collect();
+    if domain_rules.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Уникальные символы из правил → наблюдения по дневным барам.
+    let mut symbols: Vec<&str> = domain_rules.iter().map(|r| r.symbol.as_str()).collect();
+    symbols.sort_unstable();
+    symbols.dedup();
+
+    // (ts, symbol, observation) по всем инструментам, далее сортируем по ts.
+    let mut feed: Vec<(i64, String, Observation)> = Vec::new();
+    for sym in symbols {
+        for bar in store.bars(sym, TimeFrame::D1, from_ts, to_ts)? {
+            let change = if bar.open != 0.0 {
+                (bar.close - bar.open) / bar.open
+            } else {
+                0.0
+            };
+            feed.push((
+                bar.ts,
+                sym.to_string(),
+                Observation {
+                    ts: bar.ts,
+                    price: bar.close,
+                    change,
+                },
+            ));
+        }
+    }
+    feed.sort_by_key(|a| a.0);
+
+    let mut engine = AlertEngine::new(domain_rules);
+    let mut out = Vec::new();
+    for (_, sym, obs) in &feed {
+        for ev in engine.observe(sym, obs) {
+            out.push(AlertEventDto::from(&ev));
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,6 +857,35 @@ mod tests {
         assert!(tl[0].equity > 0.0);
         assert!(tl[0].future > 0.0);
         assert!(tl[0].bond > 0.0);
+    }
+
+    #[test]
+    fn alerts_scan_fires_on_stored_bars() {
+        use crate::dto::AlertRuleInput;
+        let store = seeded(); // SBER close растёт 101→102→103 от base=100
+        let rules = vec![AlertRuleInput {
+            symbol: "SBER@MISX".into(),
+            kind: "priceAbove".into(),
+            threshold: 102.0,
+        }];
+        let events = alerts_scan(&store, &rules, 0, 9).unwrap();
+        // Бар ts=3 закрывается на 103 (>102) → одно срабатывание по фронту.
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].symbol, "SBER@MISX");
+        assert!(events[0].message.contains("выше"));
+    }
+
+    #[test]
+    fn alerts_scan_ignores_unknown_kind_and_empty_rules() {
+        use crate::dto::AlertRuleInput;
+        let store = seeded();
+        assert!(alerts_scan(&store, &[], 0, 9).unwrap().is_empty());
+        let bogus = vec![AlertRuleInput {
+            symbol: "SBER@MISX".into(),
+            kind: "nonsense".into(),
+            threshold: 1.0,
+        }];
+        assert!(alerts_scan(&store, &bogus, 0, 9).unwrap().is_empty());
     }
 
     #[test]
