@@ -564,7 +564,7 @@ pub fn alerts_scan(
             ));
         }
     }
-    feed.sort_by(|a, b| a.0.cmp(&b.0));
+    feed.sort_by_key(|a| a.0);
 
     let mut engine = AlertEngine::new(domain_rules);
     let mut out = Vec::new();
