@@ -38,7 +38,8 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   - **breadth** — ширина рынка (A/D, % растущих);
   - **sector** — роллапы метрик по секторам (взвешенные по обороту);
   - **rrg** — секторная ротация (RS-Ratio / RS-Momentum, квадранты);
-  - **crossasset** — доли оборота по классам активов и матрица перетоков (Sankey).
+  - **crossasset** — доли оборота по классам активов и матрица перетоков (Sankey);
+  - **alerts** — движок алёртов по цене/изменению (edge-triggered, без спама).
 - `storage` — слой хранилища (Фаза 1), покрыт тестами:
   - контракт `Store` + реализации `MemStore` (в памяти) и `DuckStore` (нативный
     DuckDB за фичей `duckdb`);
@@ -54,10 +55,11 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   Сетевой gRPC-клиент — за фичей `grpc`: `AuthManager` + `GrpcAuthTransport`
   (обмен `AuthService.Auth`: кэш JWT, упреждающий refresh, лимит метода, повтор
   транзиентных сбоев), `FinamMarketData` — реализация трейта `MarketData`
-  (`assets`/`bars`/`last_quote`/`latest_trades`) с JWT-авторизацией, лимитами и
-  маппингом протобаф→домен, и live-стримы (`stream`): `subscribe_*` поверх
-  `Subscribe*` + `StreamReconnect` (авто-reconnect при обрыве ~раз в 24 ч).
-  Оркестрация, маппинг и политика повторов покрыты тестами без сети.
+  (`assets`/`bars`/`last_quote`/`latest_trades`/`order_book` — DOM) с JWT-
+  авторизацией, лимитами и маппингом протобаф→домен, и live-стримы (`stream`):
+  `subscribe_*` поверх `Subscribe*` + `StreamReconnect` (авто-reconnect при
+  обрыве ~раз в 24 ч). Оркестрация, маппинг и политика повторов покрыты тестами
+  без сети. Offline-реплей — `app::replay::ReplaySource` (тот же трейт из баров).
 - `app` — каркас Tauri (Фаза 3): ядро IPC (`AppState` + DTO + обработчики
   `instruments`/`bars`/`turnover_series`/`sector_rollup`/`sector_map`),
   протестированное на `MemStore`; привязка Tauri за фичей `tauri`; инициализация

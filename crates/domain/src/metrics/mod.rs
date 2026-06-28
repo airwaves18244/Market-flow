@@ -6,8 +6,10 @@
 //! - [`breadth`] — ширина рынка (растущие/падающие, A/D);
 //! - [`sector`] — роллапы метрик по секторам;
 //! - [`rrg`] — секторная ротация в стиле RRG (RS-Ratio / RS-Momentum);
-//! - [`crossasset`] — доли оборота по классам активов и матрица перетоков.
+//! - [`crossasset`] — доли оборота по классам активов и матрица перетоков;
+//! - [`alerts`] — алёрты по рыночным условиям (цена/изменение), edge-triggered.
 
+pub mod alerts;
 pub mod breadth;
 pub mod crossasset;
 pub mod flow;

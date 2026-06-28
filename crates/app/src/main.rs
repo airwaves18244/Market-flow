@@ -24,6 +24,12 @@ mod ingest;
 #[cfg(feature = "live")]
 mod live;
 
+// Replay-источник (offline-режим): реализует `MarketData` из сохранённых баров.
+// В бинаре напрямую не вызывается — потребляется тестами и replay-сценариями.
+#[cfg(feature = "ingest")]
+#[allow(dead_code)]
+mod replay;
+
 #[cfg(feature = "tauri")]
 mod tauri_app;
 

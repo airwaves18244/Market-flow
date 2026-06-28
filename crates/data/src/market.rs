@@ -11,7 +11,7 @@
 //! функции и покрыт тестами; сами сетевые вызовы интеграционно проверяются при
 //! наличии реального секрета (в CI выключено).
 
-use domain::{AssetClass, Bar, Instrument, Quote, TimeFrame, Trade};
+use domain::{AssetClass, Bar, BookLevel, Instrument, OrderBook, Quote, TimeFrame, Trade};
 use prost_types::Timestamp;
 
 use finam_proto::pb::google::r#type::{Decimal, Interval};
@@ -196,6 +196,36 @@ where
     }
 }
 
+impl<T, S> FinamMarketData<T, S>
+where
+    T: AuthTransport,
+    S: SecretStore + Send + Sync,
+{
+    /// Текущий стакан (DOM) по инструменту (`MarketDataService.OrderBook`).
+    pub async fn order_book(&self, symbol: &str) -> Result<OrderBook, DataError> {
+        use finam_proto::marketdata::market_data_service_client::MarketDataServiceClient;
+        use finam_proto::marketdata::OrderBookRequest;
+
+        call_with_retry!(self, Method::OrderBook, async {
+            let token = self.auth.access_token().await?;
+            let mut client = MarketDataServiceClient::new(self.channel.clone());
+            let mut request = tonic::Request::new(OrderBookRequest {
+                symbol: symbol.to_owned(),
+            });
+            attach_auth(&mut request, &token)?;
+            let resp = client
+                .order_book(request)
+                .await
+                .map_err(status_to_error)?
+                .into_inner();
+            resp.orderbook
+                .as_ref()
+                .map(map_order_book)
+                .ok_or_else(|| DataError::Other("пустой стакан в ответе".to_owned()))
+        })
+    }
+}
+
 /// Сконфигурировать gRPC-эндпоинт: для `https` включить TLS с системными
 /// корневыми сертификатами. Единый билдер для auth-транспорта и клиента данных.
 pub(crate) fn build_endpoint(url: &str) -> Result<tonic::transport::Endpoint, DataError> {
@@ -349,6 +379,38 @@ pub(crate) fn map_trade(t: &finam_proto::marketdata::Trade) -> Trade {
     }
 }
 
+/// proto `OrderBook` → доменный [`OrderBook`] (DOM).
+///
+/// Строки с `buy_size` идут в биды, с `sell_size` — в аски. Биды сортируются по
+/// убыванию цены (лучший — первый), аски — по возрастанию. `ts` снимка — самая
+/// поздняя метка среди строк.
+pub(crate) fn map_order_book(ob: &finam_proto::marketdata::OrderBook) -> OrderBook {
+    use finam_proto::marketdata::order_book::row::Side as RowSide;
+
+    let mut bids = Vec::new();
+    let mut asks = Vec::new();
+    let mut ts = 0i64;
+    for row in &ob.rows {
+        ts = ts.max(ts_to_secs(row.timestamp.as_ref()));
+        let price = decimal_to_f64(row.price.as_ref());
+        match row.side.as_ref() {
+            Some(RowSide::BuySize(size)) => bids.push(BookLevel {
+                price,
+                size: decimal_to_f64(Some(size)),
+            }),
+            Some(RowSide::SellSize(size)) => asks.push(BookLevel {
+                price,
+                size: decimal_to_f64(Some(size)),
+            }),
+            None => {}
+        }
+    }
+    // Лучший бид — наивысшая цена; лучший аск — наименьшая.
+    bids.sort_by(|a, b| b.price.total_cmp(&a.price));
+    asks.sort_by(|a, b| a.price.total_cmp(&b.price));
+    OrderBook { ts, bids, asks }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +546,45 @@ mod tests {
             ..buy.clone()
         };
         assert_eq!(map_trade(&unk).buyer_initiated, None);
+    }
+
+    #[test]
+    fn map_order_book_splits_and_sorts_sides() {
+        use finam_proto::marketdata::order_book::{row::Side as RowSide, Row};
+        use finam_proto::marketdata::OrderBook as PbOrderBook;
+
+        let row = |price: &str, side: RowSide, ts: i64| Row {
+            price: dec(price),
+            side: Some(side),
+            action: 0,
+            mpid: String::new(),
+            timestamp: Some(secs_to_ts(ts)),
+        };
+        let ob = PbOrderBook {
+            rows: vec![
+                row("100.0", RowSide::BuySize(Decimal { value: "5".into() }), 10),
+                row(
+                    "101.0",
+                    RowSide::SellSize(Decimal { value: "7".into() }),
+                    12,
+                ),
+                row("99.5", RowSide::BuySize(Decimal { value: "3".into() }), 11),
+                row("102.0", RowSide::SellSize(Decimal { value: "2".into() }), 9),
+            ],
+        };
+        let dom = map_order_book(&ob);
+        assert_eq!(dom.ts, 12); // самая поздняя метка
+                                // Биды по убыванию цены: 100.0 затем 99.5.
+        assert_eq!(
+            dom.bids.iter().map(|l| l.price).collect::<Vec<_>>(),
+            [100.0, 99.5]
+        );
+        // Аски по возрастанию цены: 101.0 затем 102.0.
+        assert_eq!(
+            dom.asks.iter().map(|l| l.price).collect::<Vec<_>>(),
+            [101.0, 102.0]
+        );
+        assert_eq!(dom.best_bid().unwrap().size, 5.0);
+        assert_eq!(dom.spread(), Some(1.0)); // 101.0 - 100.0
     }
 }

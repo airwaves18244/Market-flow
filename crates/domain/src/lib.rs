@@ -12,4 +12,4 @@
 pub mod metrics;
 pub mod model;
 
-pub use model::{AssetClass, Bar, Instrument, Quote, TimeFrame, Trade};
+pub use model::{AssetClass, Bar, BookLevel, Instrument, OrderBook, Quote, TimeFrame, Trade};

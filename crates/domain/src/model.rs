@@ -184,6 +184,42 @@ impl Trade {
     }
 }
 
+/// Уровень стакана: цена и совокупный объём на ней.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BookLevel {
+    pub price: f64,
+    pub size: f64,
+}
+
+/// Снимок стакана (DOM, из `OrderBook`/`SubscribeOrderBook`).
+///
+/// `bids` отсортированы по убыванию цены (лучший бид — первый), `asks` — по
+/// возрастанию (лучший аск — первый).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderBook {
+    /// Момент снимка, UNIX-секунды UTC.
+    pub ts: i64,
+    pub bids: Vec<BookLevel>,
+    pub asks: Vec<BookLevel>,
+}
+
+impl OrderBook {
+    /// Лучший бид (наивысшая цена покупки), если есть.
+    pub fn best_bid(&self) -> Option<&BookLevel> {
+        self.bids.first()
+    }
+
+    /// Лучший аск (наименьшая цена продажи), если есть.
+    pub fn best_ask(&self) -> Option<&BookLevel> {
+        self.asks.first()
+    }
+
+    /// Спред «лучший аск − лучший бид», если обе стороны присутствуют.
+    pub fn spread(&self) -> Option<f64> {
+        Some(self.best_ask()?.price - self.best_bid()?.price)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
