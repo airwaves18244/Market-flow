@@ -28,9 +28,22 @@
   платформенном CI (как `duckdb`/`tauri`), зависимость не подтягивается.
   Контрактный тест компилируется всегда; live-roundtrip помечен `#[ignore]`
   (нужна реальная keyring-сессия).
-- ⏳ gRPC-стабы из `.proto` (`tonic-build`) и сетевой обмен auth
-  (`AuthService.Auth`) — требуют vendored `.proto` (репо `FinamWeb/trade-api-docs`)
-  и `protoc`; подключаются в фазе интеграции API.
+- ✅ gRPC-кодоген: `finam-proto` генерирует клиентские стабы из vendored
+  `.proto` (`proto/`, санитизированные копии из `FinamWeb/finam-trade-api`)
+  через `tonic-build` + `protoc-bin-vendored` (свой `protoc`, без системного) —
+  за фичей `grpc`. По умолчанию фича выключена: тяжёлые `tonic`/`prost` и
+  build-tooling не подтягиваются (лёгкий CI, как `duckdb`/`tauri`). Сейчас
+  сгенерирован `AuthService`.
+- ✅ Сетевой обмен auth (`AuthService.Auth`): `data::AuthManager` +
+  `data::GrpcAuthTransport` за фичей `grpc`. Менеджер связывает чистые примитивы
+  (`TokenState`/`RateLimiter`/`Backoff`/`SecretStore`): переиспользует
+  действующий JWT, упреждающе обновляет, держит лимит метода `Auth`, повторяет
+  транзиентные сбои с backoff и не повторяет ошибки авторизации. Транспорт
+  отделён трейтом `AuthTransport`, поэтому оркестрация покрыта тестами без сети;
+  боевой обмен интеграционно проверяется при наличии реального секрета.
+- ⏳ Стабы `AssetsService`/`MarketDataService` и реализация трейта `MarketData`
+  поверх gRPC — следующий шаг фазы интеграции (по тому же шаблону: vendored
+  `.proto` → codegen за `grpc` → маппинг в доменные типы).
 
 ## Фаза 1 — Хранилище и ингест ✅
 - ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции

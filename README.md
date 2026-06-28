@@ -51,6 +51,9 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   джиттером и `is_retryable`), `Method` (канонические имена методов API),
   `SecretStore`/`MemSecretStore` (контракт + in-memory хранилище API-секрета),
   `KeyringSecretStore` (боевое хранилище в ОС-keyring за фичей `keyring`).
+  Сетевой gRPC-клиент — за фичей `grpc`: `AuthManager` + `GrpcAuthTransport`
+  реализуют обмен `AuthService.Auth` (кэш JWT, упреждающий refresh, лимит
+  метода, повтор транзиентных сбоев), оркестрация покрыта тестами без сети.
 - `app` — каркас Tauri (Фаза 3): ядро IPC (`AppState` + DTO + обработчики
   `instruments`/`bars`/`turnover_series`/`sector_rollup`/`sector_map`),
   протестированное на `MemStore`; привязка Tauri за фичей `tauri`; инициализация
@@ -77,6 +80,9 @@ cargo test -p storage --features duckdb
 
 # С ОС-keyring (нативный бэкенд под платформу; live-тест — только с --ignored):
 cargo test -p data --features keyring
+
+# С gRPC-слоем (codegen из .proto через vendored protoc + auth-обмен):
+cargo test -p data --features grpc
 
 # Консольный smoke (путь domain → storage → dto на MemStore):
 cargo run -p app

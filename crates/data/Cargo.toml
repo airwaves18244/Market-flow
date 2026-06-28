@@ -13,7 +13,10 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 
 # Rate-limit реализован нативно (см. `src/rate.rs`), без внешних зависимостей.
-# В фазе подключения API добавляются: tonic, prost, tokio, tokio-stream.
+# Сетевой gRPC-клиент (tonic) и async-runtime (tokio) — за фичей `grpc`,
+# выключенной в кросс-платформенном CI (как `duckdb`/`tauri`).
+tonic = { version = "0.12", optional = true, features = ["tls", "tls-roots"] }
+tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 
 # ОС-keyring для секрета API — за фичей `keyring`, выключенной в кросс-
 # платформенном CI (как `duckdb`/`tauri`). Бэкенд выбирается под платформу:
@@ -30,3 +33,5 @@ keyring = { version = "3", optional = true, default-features = false, features =
 [features]
 # Боевое хранилище секрета поверх ОС-keyring (нативные платформенные бэкенды).
 keyring = ["dep:keyring"]
+# Сетевой gRPC-клиент Finam (auth-обмен поверх сгенерированных стабов).
+grpc = ["dep:tonic", "dep:tokio", "finam-proto/grpc"]

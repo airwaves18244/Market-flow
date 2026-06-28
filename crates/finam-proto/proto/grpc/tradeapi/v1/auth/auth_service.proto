@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+// Источник: FinamWeb/finam-trade-api, proto/grpc/tradeapi/v1/auth/auth_service.proto.
+// Вендорится в санитизированном виде: для чистого gRPC-клиента убраны импорты и
+// опции gRPC-gateway / OpenAPI (google.api.http, protoc_gen_openapiv2) — они нужны
+// только REST-шлюзу и тянут googleapis/grpc-gateway. Остаётся google.protobuf.*
+// (well-known types, поставляются вместе с protoc). Поля и их номера сохранены
+// 1:1 с оригиналом ради совместимости по проводу.
+package grpc.tradeapi.v1.auth;
+
+import "google/protobuf/timestamp.proto";
+
+option java_multiple_files = true;
+
+// Аутентификация и работа с JWT-сессиями.
+service AuthService {
+  // Обмен API-секрета на короткоживущий JWT.
+  rpc Auth(AuthRequest) returns (AuthResponse);
+
+  // Детали JWT: сроки, права на рыночные данные, доступные счета.
+  rpc TokenDetails(TokenDetailsRequest) returns (TokenDetailsResponse);
+
+  // Поток обновляемых JWT по долгоживущему секрету.
+  rpc SubscribeJwtRenewal(SubscribeJwtRenewalRequest)
+      returns (stream SubscribeJwtRenewalResponse);
+}
+
+message AuthRequest {
+  // Долгоживущий API-секрет.
+  string secret = 1;
+  // Идентификатор приложения-источника (опционально).
+  string source_app_id = 2;
+}
+
+message AuthResponse {
+  // Короткоживущий JWT access-token.
+  string token = 1;
+}
+
+message TokenDetailsRequest {
+  string token = 1;
+}
+
+message TokenDetailsResponse {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  repeated MDPermission md_permissions = 3;
+  repeated string account_ids = 4;
+  bool readonly = 5;
+}
+
+message MDPermission {
+  enum QuoteLevel {
+    QUOTE_LEVEL_UNSPECIFIED = 0;
+    QUOTE_LEVEL_LAST_PRICE = 1;
+    QUOTE_LEVEL_BEST_BID_OFFER = 2;
+    QUOTE_LEVEL_DEPTH_OF_MARKET = 3;
+    QUOTE_LEVEL_DEPTH_OF_BOOK = 4;
+    QUOTE_LEVEL_ACCESS_FORBIDDEN = 5;
+  }
+  QuoteLevel quote_level = 1;
+  int32 delay_minutes = 2;
+
+  oneof condition {
+    string mic = 3;
+    string country = 4;
+    string continent = 5;
+    bool worldwide = 6;
+  }
+}
+
+message SubscribeJwtRenewalRequest {
+  string secret = 1;
+  string source_app_id = 2;
+}
+
+message SubscribeJwtRenewalResponse {
+  string token = 1;
+}

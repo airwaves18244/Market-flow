@@ -24,8 +24,16 @@
   тянется. Контрактный тест компилируется всегда; live-roundtrip — `#[ignore]`.
 - `app::telemetry::init` — установка подписчика `tracing` (фильтр из `RUST_LOG`,
   по умолчанию `info`), идемпотентна; стартовый структурированный лог в `main`.
-- ⏳ Осталось: gRPC-стабы из `.proto` и сетевой обмен auth (требуют vendored
-  `.proto` + `protoc`) — в фазе интеграции API.
+- `finam-proto` — gRPC-кодоген за фичей `grpc`: клиентские стабы из vendored
+  `.proto` (`proto/`) через `tonic-build` + `protoc-bin-vendored` (свой `protoc`).
+  По умолчанию фича выключена, `tonic`/`prost` не подтягиваются. Готов `AuthService`.
+- `data::AuthManager` + `data::GrpcAuthTransport` — сетевой обмен `AuthService.Auth`
+  за фичей `grpc`. Связывает `TokenState`/`RateLimiter`/`Backoff`/`SecretStore`:
+  кэш токена, упреждающий refresh, лимит метода `Auth`, повтор транзиентных
+  сбоев с backoff (без повтора auth-ошибок). Транспорт за трейтом `AuthTransport`
+  → оркестрация покрыта тестами без сети.
+- ⏳ Осталось по фазе 0: стабы `AssetsService`/`MarketDataService` и реализация
+  `MarketData` поверх gRPC — следующий шаг фазы интеграции.
 
 ### Фаза 2 — Аналитика (`domain`)
 - turnover / directional turnover / unusual volume; money flow / MFI / CVD;
@@ -65,6 +73,7 @@ cargo clippy --workspace -- -D warnings # линт без предупрежде
 cargo test --workspace                  # ядро + хранилище + IPC (MemStore), без C++/Tauri
 cargo test -p storage --features duckdb # + нативный DuckDB (bundled)
 cargo test -p data --features keyring   # + ОС-keyring (live-roundtrip: --ignored)
+cargo test -p data --features grpc      # + gRPC auth-обмен (оркестрация без сети)
 cargo run -p app                        # smoke: domain → storage → dto
 cd frontend && npm install && npm run build   # сборка фронта (мок-данные)
 ```

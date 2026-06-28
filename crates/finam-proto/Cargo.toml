@@ -4,10 +4,23 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Сгенерированные gRPC-стабы Finam Trade API (заполняется в фазе подключения API)"
+description = "Сгенерированные gRPC-стабы Finam Trade API (codegen за фичей `grpc`)"
 
-# В фазе подключения API сюда добавляются:
-#   [dependencies] tonic, prost
-#   [build-dependencies] tonic-build
-# и build.rs, генерирующий код из vendored .proto (репо FinamWeb/trade-api-docs).
+# gRPC-стабы генерируются из vendored `.proto` (proto/) через `tonic-build` +
+# `protoc-bin-vendored` (свой protoc, без системного) — всё за фичей `grpc`.
+# По умолчанию (кросс-платформенный CI) фича выключена: тяжёлые tonic/prost и
+# build-tooling не подтягиваются, крейт остаётся лёгкой заглушкой с константой
+# ENDPOINT. Так держим лёгкий CI, как с `duckdb`/`tauri`.
+
 [dependencies]
+tonic = { version = "0.12", optional = true }
+prost = { version = "0.13", optional = true }
+prost-types = { version = "0.13", optional = true }
+
+[build-dependencies]
+tonic-build = { version = "0.12", optional = true }
+protoc-bin-vendored = { version = "3", optional = true }
+
+[features]
+# Генерация и подключение gRPC-клиентов из vendored `.proto`.
+grpc = ["dep:tonic", "dep:prost", "dep:prost-types", "dep:tonic-build", "dep:protoc-bin-vendored"]
