@@ -14,6 +14,13 @@ mod dto;
 mod state;
 mod telemetry;
 
+// Планировщик ингеста — сервис, который потребляет десктопный рантайм (связка с
+// живым `data::MarketData`) и юнит-тесты. В headless-сборке часть его API
+// (боевой цикл `run`) не вызывается, поэтому глушим dead_code на уровне модуля.
+#[cfg(feature = "ingest")]
+#[allow(dead_code)]
+mod ingest;
+
 #[cfg(feature = "tauri")]
 mod tauri_app;
 

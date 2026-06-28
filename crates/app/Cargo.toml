@@ -16,8 +16,13 @@ data = { workspace = true }
 storage = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+# Async-runtime для планировщика ингеста (фича `ingest`). Выключен по умолчанию,
+# чтобы базовый CI оставался лёгким (как `tauri`/`duckdb`).
+tokio = { version = "1", optional = true, features = ["rt", "macros", "time"] }
 
 # UI-привязка Tauri. Выключена по умолчанию: её сборка требует десктопного
 # окружения (на Linux — webkit2gtk), поэтому базовый кросс-платформенный CI
@@ -34,3 +39,5 @@ default = []
 tauri = ["dep:tauri", "dep:tauri-build"]
 # Продакшен-хранилище: нативный DuckDB вместо MemStore.
 duckdb = ["storage/duckdb"]
+# Асинхронный планировщик ингеста (poll рыночных данных в хранилище).
+ingest = ["dep:tokio"]

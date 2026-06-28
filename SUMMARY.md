@@ -57,6 +57,11 @@
   `chunk_range` (нарезка на страницы под лимит баров на запрос).
 - **Типы**: `TurnoverSnapshot`, `SectorEntry`; `TimeFrame` перенесён в `domain`
   (с `code`/`from_code`/`seconds`) и переэкспортирован из `data`.
+- **Асинхронный цикл опроса** (`app::ingest`, фича `ingest`): `IngestService`
+  связывает `data::MarketData` → `AppState`/`Store`. Такт обходит вотчлист
+  круговым `BatchCursor` под per-method лимитом, тянет бары и пишет снимок
+  оборота; боевой цикл `run` — по таймеру tokio. Источник за трейтом → такт
+  покрыт тестами на фейке (без сети).
 
 ### Фаза 3 — Tauri-оболочка + каркас фронта
 - **Ядро IPC** (`crates/app`): `AppState` поверх `Store`; DTO (camelCase);
@@ -78,6 +83,7 @@ cargo test --workspace                  # ядро + хранилище + IPC (M
 cargo test -p storage --features duckdb # + нативный DuckDB (bundled)
 cargo test -p data --features keyring   # + ОС-keyring (live-roundtrip: --ignored)
 cargo test -p data --features grpc      # + gRPC auth-обмен (оркестрация без сети)
+cargo test -p app --features ingest     # + асинхронный планировщик ингеста
 cargo run -p app                        # smoke: domain → storage → dto
 cd frontend && npm install && npm run build   # сборка фронта (мок-данные)
 ```

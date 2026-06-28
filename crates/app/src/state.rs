@@ -6,7 +6,11 @@
 
 use std::sync::Mutex;
 
+#[cfg(feature = "ingest")]
+use domain::Bar;
 use domain::TimeFrame;
+#[cfg(feature = "ingest")]
+use storage::ingest::snapshot_from_bars;
 use storage::{StorageError, Store};
 
 use crate::api;
@@ -39,6 +43,44 @@ impl AppState {
             .lock()
             .map_err(|_| StorageError::Db("state lock poisoned".into()))?;
         f(guard.as_ref())
+    }
+
+    /// Выполнить запись под блокировкой. Отравленный мьютекс → ошибка БД.
+    #[cfg(feature = "ingest")]
+    fn write<F, R>(&self, f: F) -> Result<R, StorageError>
+    where
+        F: FnOnce(&mut dyn Store) -> Result<R, StorageError>,
+    {
+        let mut guard = self
+            .store
+            .lock()
+            .map_err(|_| StorageError::Db("state lock poisoned".into()))?;
+        f(guard.as_mut())
+    }
+
+    /// Записать бары инструмента и построить снимок оборота на `snapshot_ts`.
+    ///
+    /// Точка входа планировщика ингеста ([`crate::ingest`]). Идемпотентно по
+    /// ключам схемы (повторный ингест не плодит дублей). Пустая серия — no-op;
+    /// снимок пишется только для непустой серии.
+    #[cfg(feature = "ingest")]
+    pub fn ingest_bars(
+        &self,
+        symbol: &str,
+        tf: TimeFrame,
+        bars: &[Bar],
+        snapshot_ts: i64,
+    ) -> Result<(), StorageError> {
+        if bars.is_empty() {
+            return Ok(());
+        }
+        self.write(|s| {
+            s.insert_bars(symbol, tf, bars)?;
+            if let Some(snap) = snapshot_from_bars(bars, snapshot_ts) {
+                s.insert_snapshot(symbol, &snap)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn instruments(&self) -> Result<Vec<InstrumentDto>, StorageError> {

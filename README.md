@@ -60,6 +60,8 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   `instruments`/`bars`/`turnover_series`/`sector_rollup`/`sector_map`),
   протестированное на `MemStore`; привязка Tauri за фичей `tauri`; инициализация
   `tracing` (`telemetry::init`, фильтр из `RUST_LOG`, по умолчанию `info`).
+  Асинхронный планировщик ингеста `ingest::IngestService` за фичей `ingest`
+  (опрос `data::MarketData` в хранилище под лимитом; такт покрыт тестами).
 - `frontend` — фронт-приложение (Фазы 3–6): Vite + Svelte 5 + TS, тёмная тема,
   докуемые панели, ECharts (treemap, heatmap, scatter, line, gauge, pie, Sankey)
   + Lightweight Charts свечи, типизированный IPC-клиент с мок-режимом (работает
@@ -86,6 +88,9 @@ cargo test -p data --features keyring
 
 # С gRPC-слоем (codegen из .proto через vendored protoc + auth-обмен):
 cargo test -p data --features grpc
+
+# С планировщиком ингеста (async-цикл опроса данных в хранилище):
+cargo test -p app --features ingest
 
 # Консольный smoke (путь domain → storage → dto на MemStore):
 cargo run -p app
