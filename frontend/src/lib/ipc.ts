@@ -5,6 +5,8 @@
 // именуются camelCase: Tauri преобразует их в snake_case параметры команд.
 
 import type {
+  AlertEventDto,
+  AlertRuleInput,
   BarPoint,
   BondIssuerDto,
   BreadthDto,
@@ -12,11 +14,13 @@ import type {
   FlowEdgeDto,
   FutureGroupDto,
   InstrumentDto,
+  OrderBookDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
   TimeFrame,
   TopMoverDto,
+  TradeDto,
   TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
@@ -75,4 +79,34 @@ export const ipc = {
 
   flowSankey: (fromTs: number, toTs: number) =>
     invoke<FlowEdgeDto[]>("flow_sankey", { fromTs, toTs }),
+
+  // ── Фаза 7 — live-панели ────────────────────────────────────────────────
+  // Time&Sales и DOM в боевом режиме приходят live-push событиями
+  // (`trade:tick` / `orderbook:tick`); в мок-режиме отдаются снимком.
+  latestTrades: (symbol: string, limit?: number) =>
+    invoke<TradeDto[]>("latest_trades", { symbol, limit }),
+
+  orderBook: (symbol: string, depth?: number) =>
+    invoke<OrderBookDto>("order_book", { symbol, depth }),
+
+  alertsScan: (rules: AlertRuleInput[], fromTs: number, toTs: number) =>
+    invoke<AlertEventDto[]>("alerts_scan", { rules, fromTs, toTs }),
 };
+
+// Подписки на live-push события (каналы `trade:tick` / `orderbook:tick`).
+// В браузере (мок-режим) — no-op: данные отдаются первичным снимком из `ipc`.
+// Возвращают функцию отписки.
+
+type Unlisten = () => void;
+
+export async function onTrade(cb: (t: TradeDto) => void): Promise<Unlisten> {
+  if (!inTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<TradeDto>("trade:tick", (e) => cb(e.payload));
+}
+
+export async function onOrderBook(cb: (b: OrderBookDto) => void): Promise<Unlisten> {
+  if (!inTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<OrderBookDto>("orderbook:tick", (e) => cb(e.payload));
+}

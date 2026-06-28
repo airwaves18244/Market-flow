@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import Panel from "./lib/components/Panel.svelte";
   import SectorTreemap from "./lib/components/SectorTreemap.svelte";
   import CandleChart from "./lib/components/CandleChart.svelte";
@@ -15,8 +15,13 @@
   import SharesDonut from "./lib/components/SharesDonut.svelte";
   import TurnoverStackedArea from "./lib/components/TurnoverStackedArea.svelte";
   import FlowSankey from "./lib/components/FlowSankey.svelte";
-  import { ipc } from "./lib/ipc";
-  import type { BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorRow, TopMoverDto, TurnoverByClassPoint, YieldCurvePoint } from "./lib/types";
+  import TimeSales from "./lib/components/TimeSales.svelte";
+  import OrderBook from "./lib/components/OrderBook.svelte";
+  import AlertsPanel from "./lib/components/AlertsPanel.svelte";
+  import SettingsPanel from "./lib/components/SettingsPanel.svelte";
+  import { loadSettings, saveSettings, type Settings } from "./lib/settings";
+  import { ipc, onTrade, onOrderBook } from "./lib/ipc";
+  import type { AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto, RrgSectorDto, SectorRow, TopMoverDto, TradeDto, TurnoverByClassPoint, YieldCurvePoint } from "./lib/types";
 
   const FULL_RANGE = Number.MAX_SAFE_INTEGER;
 
@@ -32,28 +37,51 @@
   let summary = $state<CrossAssetSummaryDto | null>(null);
   let timeline = $state<TurnoverByClassPoint[]>([]);
   let flow = $state<FlowEdgeDto[]>([]);
+  let trades = $state<TradeDto[]>([]);
+  let orderBook = $state<OrderBookDto | null>(null);
   let selected = $state("SBER@MISX");
   let error = $state<string | null>(null);
+  let settings = $state<Settings>(loadSettings());
 
-  async function loadBars(symbol: string) {
-    bars = await ipc.bars(symbol, "d1", 0, FULL_RANGE);
+  async function loadSymbol(symbol: string) {
+    // Свечи + live-панели (Time&Sales / DOM) зависят от выбранного инструмента.
+    [bars, trades, orderBook] = await Promise.all([
+      ipc.bars(symbol, "d1", 0, FULL_RANGE),
+      ipc.latestTrades(symbol, settings.tapeLimit),
+      ipc.orderBook(symbol, settings.domDepth),
+    ]);
   }
 
   async function select(symbol: string) {
     selected = symbol;
     try {
-      await loadBars(symbol);
+      await loadSymbol(symbol);
     } catch (e) {
       error = String(e);
     }
   }
+
+  // Применить новые настройки: сохранить и перезагрузить зависимые данные.
+  async function applySettings(next: Settings) {
+    settings = next;
+    saveSettings(next);
+    try {
+      topMovers = await ipc.topMovers(0, FULL_RANGE, settings.topMoversLimit);
+      await loadSymbol(selected);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // Прогон правил алёртов через ядро (для панели алёртов).
+  const scanAlerts = (rules: AlertRuleInput[]) => ipc.alertsScan(rules, 0, FULL_RANGE);
 
   onMount(async () => {
     try {
       instruments = await ipc.instruments();
       sectors = await ipc.sectorRollup(0, FULL_RANGE);
       breadth = await ipc.breadthData(0, FULL_RANGE);
-      topMovers = await ipc.topMovers(0, FULL_RANGE, 10);
+      topMovers = await ipc.topMovers(0, FULL_RANGE, settings.topMoversLimit);
       rrgData = await ipc.rrgSectors(0, FULL_RANGE);
       futures = await ipc.futuresRollup(0, FULL_RANGE);
       bonds = await ipc.bondsRollup(0, FULL_RANGE);
@@ -62,10 +90,26 @@
       timeline = await ipc.turnoverTimeline(0, FULL_RANGE);
       flow = await ipc.flowSankey(0, FULL_RANGE);
       if (instruments.length > 0) selected = instruments[0].symbol;
-      await loadBars(selected);
+      await loadSymbol(selected);
     } catch (e) {
       error = String(e);
     }
+
+    // Live-push: в десктопной сборке лента/стакан обновляются событиями
+    // (в браузере подписки — no-op, данные берутся из первичного снимка).
+    unlisteners.push(
+      await onTrade((t) => {
+        trades = [t, ...trades].slice(0, settings.tapeLimit);
+      }),
+      await onOrderBook((b) => {
+        orderBook = b;
+      }),
+    );
+  });
+
+  let unlisteners: Array<() => void> = [];
+  onDestroy(() => {
+    for (const un of unlisteners) un();
   });
 </script>
 
@@ -91,6 +135,22 @@
 
     <Panel title="Инструменты">
       <InstrumentList items={instruments} {selected} onSelect={select} />
+    </Panel>
+
+    <Panel title={`Лента сделок — ${selected}`}>
+      <TimeSales {trades} />
+    </Panel>
+
+    <Panel title={`Стакан (DOM) — ${selected}`}>
+      <OrderBook book={orderBook} />
+    </Panel>
+
+    <Panel title="Алёрты">
+      <AlertsPanel {instruments} scan={scanAlerts} />
+    </Panel>
+
+    <Panel title="Настройки">
+      <SettingsPanel {settings} onChange={applySettings} />
     </Panel>
 
     {#if breadth}

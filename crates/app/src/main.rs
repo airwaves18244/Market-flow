@@ -38,7 +38,9 @@ use storage::schema;
 // Импорты и хелперы консольного smoke нужны только когда не собран ни Tauri-UI,
 // ни боевой live-режим (оба не вызывают демо-наполнение).
 #[cfg(not(any(feature = "tauri", feature = "live")))]
-use domain::{AssetClass, Bar, TimeFrame};
+use domain::{AssetClass, Bar, BookLevel, OrderBook, TimeFrame, Trade};
+#[cfg(not(any(feature = "tauri", feature = "live")))]
+use dto::{AlertRuleInput, OrderBookDto, TradeDto};
 #[cfg(not(any(feature = "tauri", feature = "live")))]
 use state::AppState;
 #[cfg(not(any(feature = "tauri", feature = "live")))]
@@ -234,6 +236,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "  flow_sankey(): {} рёбер перетока",
             state.flow_sankey(0, i64::MAX)?.len()
+        );
+
+        // Фаза 7 — live-панели: алёрты по сохранённым барам + маппинг
+        // Time&Sales/DOM (живые данные приходят стримом, здесь — демо маппинга).
+        let rules = vec![AlertRuleInput {
+            symbol: "SBER@MISX".into(),
+            kind: "priceAbove".into(),
+            threshold: 300.0,
+        }];
+        println!(
+            "  alerts_scan(SBER>300): {} срабатываний",
+            state.alerts_scan(&rules, 0, i64::MAX)?.len()
+        );
+        let trade = TradeDto::from(&Trade {
+            ts: 3,
+            price: 305.0,
+            size: 12.0,
+            buyer_initiated: Some(true),
+        });
+        println!("  trade→dto: цена={} объём={}", trade.price, trade.size);
+        let book = OrderBookDto::from(&OrderBook {
+            ts: 3,
+            bids: vec![BookLevel {
+                price: 304.5,
+                size: 50.0,
+            }],
+            asks: vec![BookLevel {
+                price: 305.5,
+                size: 40.0,
+            }],
+        });
+        println!(
+            "  orderbook→dto: {} бид(ов) / {} аск(ов)",
+            book.bids.len(),
+            book.asks.len()
         );
 
         Ok(())

@@ -13,9 +13,9 @@ use tauri::{Emitter, State};
 use domain::TimeFrame;
 
 use crate::dto::{
-    BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
-    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
+    FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto, RrgSectorDto, SectorEntryDto,
+    SectorRow, TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -139,11 +139,57 @@ fn flow_sankey(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Ve
     state.flow_sankey(from_ts, to_ts).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn alerts_scan(
+    state: State<AppState>,
+    rules: Vec<AlertRuleInput>,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<AlertEventDto>> {
+    state
+        .alerts_scan(&rules, from_ts, to_ts)
+        .map_err(|e| e.to_string())
+}
+
+/// Лента сделок (Time&Sales). В store-backed сборке тиковые сделки не
+/// сохраняются, поэтому первичный ответ пуст — живые сделки приходят событием
+/// `trade:tick` (см. [`emit_trade`]) из live-стрима `subscribe_trades`.
+/// Команда сохраняет единый IPC-контракт для фронта.
+#[tauri::command]
+fn latest_trades(_symbol: String, _limit: Option<usize>) -> CmdResult<Vec<TradeDto>> {
+    Ok(Vec::new())
+}
+
+/// Снимок стакана (DOM). Аналогично [`latest_trades`]: первичный ответ пуст,
+/// живые обновления приходят событием `orderbook:tick` (см. [`emit_order_book`]).
+#[tauri::command]
+fn order_book(_symbol: String, _depth: Option<usize>) -> CmdResult<OrderBookDto> {
+    Ok(OrderBookDto {
+        ts: 0,
+        bids: Vec::new(),
+        asks: Vec::new(),
+    })
+}
+
 /// Отправить во фронт событие live-обновления оборота (канал `turnover:tick`).
 /// Точка интеграции для потокового ингеста (Фаза 7).
 #[allow(dead_code)]
 pub fn emit_turnover_tick(app: &tauri::AppHandle, point: &TurnoverPoint) -> CmdResult<()> {
     app.emit("turnover:tick", point).map_err(|e| e.to_string())
+}
+
+/// Отправить во фронт сделку для ленты Time&Sales (канал `trade:tick`).
+/// Точка интеграции для live-стрима `subscribe_trades` (Фаза 7).
+#[allow(dead_code)]
+pub fn emit_trade(app: &tauri::AppHandle, trade: &TradeDto) -> CmdResult<()> {
+    app.emit("trade:tick", trade).map_err(|e| e.to_string())
+}
+
+/// Отправить во фронт снимок стакана для DOM (канал `orderbook:tick`).
+/// Точка интеграции для live-стрима `subscribe_order_book` (Фаза 7).
+#[allow(dead_code)]
+pub fn emit_order_book(app: &tauri::AppHandle, book: &OrderBookDto) -> CmdResult<()> {
+    app.emit("orderbook:tick", book).map_err(|e| e.to_string())
 }
 
 /// Построить состояние с продакшен-бэкендом (DuckDB при фиче `duckdb`,
@@ -184,7 +230,10 @@ pub fn run() {
             yield_curve,
             cross_asset_summary,
             turnover_timeline,
-            flow_sankey
+            flow_sankey,
+            alerts_scan,
+            latest_trades,
+            order_book
         ])
         .run(tauri::generate_context!())
         .expect("ошибка запуска приложения Tauri");

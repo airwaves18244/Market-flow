@@ -112,3 +112,44 @@ export interface FlowEdgeDto {
   to: string;
   weight: number;
 }
+
+// ── Фаза 7 — live-панели (Time&Sales / DOM / алёрты) ──────────────────────
+
+export interface TradeDto {
+  ts: number;
+  price: number;
+  size: number;
+  /** true — покупка (агрессор-бид), false — продажа, null — сторона неизвестна. */
+  buyerInitiated: boolean | null;
+}
+
+export interface BookLevelDto {
+  price: number;
+  size: number;
+}
+
+export interface OrderBookDto {
+  ts: number;
+  /** Биды по убыванию цены (лучший — первый). */
+  bids: BookLevelDto[];
+  /** Аски по возрастанию цены (лучший — первый). */
+  asks: BookLevelDto[];
+}
+
+export interface AlertEventDto {
+  symbol: string;
+  ts: number;
+  price: number;
+  /** Дневное изменение в долях (0.01 = +1%). */
+  change: number;
+  message: string;
+}
+
+export type AlertKind = "priceAbove" | "priceBelow" | "changeAbove" | "changeBelow";
+
+/** Правило алёрта, отправляемое в ядро (вход IPC). */
+export interface AlertRuleInput {
+  symbol: string;
+  kind: AlertKind;
+  threshold: number;
+}

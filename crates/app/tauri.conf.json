@@ -26,6 +26,16 @@
   },
   "bundle": {
     "active": false,
-    "targets": ["msi", "nsis"]
+    "targets": ["msi", "nsis"],
+    "publisher": "Market Terminal",
+    "category": "Finance",
+    "shortDescription": "Аналитический терминал рыночных данных (Finam Trade API)",
+    "longDescription": "Десктопный read-only терминал: оборот, денежные потоки, секторная ротация и кросс-актив по акциям, фьючерсам и облигациям. Заявки не выставляются.",
+    "copyright": "© 2026 Market Terminal",
+    "windows": {
+      "nsis": {
+        "languages": ["Russian", "English"]
+      }
+    }
   }
 }

@@ -119,7 +119,7 @@
 - Frontend: `TotalTurnoverGauge`, `SharesDonut`, `TurnoverStackedArea`, `FlowSankey`
   (+ общий помощник `assetClass.ts` с подписями/цветами классов).
 
-## Фаза 7 — Live-функции (частично)
+## Фаза 7 — Live-функции ✅
 - ✅ Транспорт live-стримов: `data::stream` (фича `grpc`) — хэндлы
   `QuoteStream`/`TradeStream`/`BarStream` поверх серверных стримов
   `MarketDataService.Subscribe*` с авторизацией и переводом протобаф→домен;
@@ -136,8 +136,25 @@
 - ✅ Replay-режим: `app::replay::ReplaySource` реализует `MarketData` из
   сохранённых баров (в т.ч. `from_store`) — тот же путь ингеста/аналитики без
   сети; покрыт тестами. Time&Sales — это лента `subscribe_trades`.
-- ⏳ Фронтовые панели Time&Sales/DOM/алёртов поверх live-данных — в фазе
-  полировки UI.
+- ✅ Фронтовые панели Time&Sales/DOM/алёртов: компоненты `TimeSales`,
+  `OrderBook` (лесенка с барами глубины и спредом), `AlertsPanel` (правила +
+  срабатывания). DTO `TradeDto`/`OrderBookDto`/`AlertEventDto` + вход
+  `AlertRuleInput`; команда `alerts_scan` (прогон правил по сохранённым барам)
+  и команды-контракты `latest_trades`/`order_book`. Живые обновления —
+  события `trade:tick`/`orderbook:tick` (эмиттеры `emit_trade`/
+  `emit_order_book`), фронт подписывается через `onTrade`/`onOrderBook`
+  (в браузере — мок-снимок). DTO-маппинг и `alerts_scan` покрыты тестами.
 
 ## Фаза 8 — Полировка и сборка
-- Упаковка MSI/NSIS (Tauri bundler), производительность, обработка ошибок, настройки.
+- ✅ Настройки представления: `frontend/src/lib/settings.ts` (localStorage) +
+  панель `SettingsPanel` — глубина стакана, размер ленты сделок, лимит
+  топ-движений; изменения сохраняются и перезагружают зависимые данные.
+- ✅ Производительность фронта: разнесение тяжёлых библиотек (ECharts,
+  Lightweight Charts) в отдельные кешируемые чанки (`manualChunks`) — код
+  приложения ужался с ~1.27 МБ до ~73 КБ.
+- ✅ Конфигурация упаковки: метаданные бандла в `tauri.conf.json`
+  (издатель, категория, описания, NSIS-языки RU/EN), цели `msi`/`nsis`.
+- ✅ Обработка ошибок: верхнеуровневый баннер ошибки + локальные состояния
+  ошибок/пустоты в панелях (алёрты, стакан, лента).
+- ⏳ Финальная сборка MSI/NSIS (`cargo tauri build`) и иконки — требуют
+  десктопного окружения (webkit2gtk) вне кросс-платформенного CI.

@@ -15,9 +15,9 @@ use storage::{StorageError, Store};
 
 use crate::api;
 use crate::dto::{
-    BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
-    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
+    FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 
 /// Разделяемое состояние терминала.
@@ -174,6 +174,16 @@ impl AppState {
 
     pub fn flow_sankey(&self, from_ts: i64, to_ts: i64) -> Result<Vec<FlowEdgeDto>, StorageError> {
         self.read(|s| api::flow_sankey(s, from_ts, to_ts))
+    }
+
+    /// Прогон правил алёртов по сохранённым барам (replay-проверка правил).
+    pub fn alerts_scan(
+        &self,
+        rules: &[AlertRuleInput],
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<AlertEventDto>, StorageError> {
+        self.read(|s| api::alerts_scan(s, rules, from_ts, to_ts))
     }
 }
 

@@ -4,9 +4,10 @@
 //! `camelCase` (привычно для TypeScript), чтобы фронт получал готовые к
 //! отрисовке структуры (treemap/heatmap/свечи/временные ряды) без доустройки.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use domain::Instrument;
+use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
+use domain::{BookLevel, Instrument, OrderBook, Trade};
 use storage::store::TurnoverSnapshot;
 use storage::SectorEntry;
 
@@ -209,4 +210,204 @@ pub struct FlowEdgeDto {
     pub to: String,
     /// Вес перетока — сдвиг доли (0..1).
     pub weight: f64,
+}
+
+// ── Фаза 7 — live-панели (Time&Sales / DOM / алёрты) ───────────────────────
+
+/// Обезличенная сделка для ленты Time&Sales.
+///
+/// Потребляется UI/live-push слоем (Tauri); в headless-live режиме (`live` без
+/// `tauri`) лента не строится, поэтому там тип не конструируется.
+#[cfg_attr(feature = "live", allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeDto {
+    pub ts: i64,
+    pub price: f64,
+    pub size: f64,
+    /// Сторона-инициатор: `true` — покупка (агрессор-бид), `false` — продажа,
+    /// `None` — биржа не отдаёт сторону.
+    pub buyer_initiated: Option<bool>,
+}
+
+impl From<&Trade> for TradeDto {
+    fn from(t: &Trade) -> Self {
+        Self {
+            ts: t.ts,
+            price: t.price,
+            size: t.size,
+            buyer_initiated: t.buyer_initiated,
+        }
+    }
+}
+
+/// Уровень стакана (цена + совокупный объём) для DOM-лесенки.
+#[cfg_attr(feature = "live", allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct BookLevelDto {
+    pub price: f64,
+    pub size: f64,
+}
+
+impl From<&BookLevel> for BookLevelDto {
+    fn from(l: &BookLevel) -> Self {
+        Self {
+            price: l.price,
+            size: l.size,
+        }
+    }
+}
+
+/// Снимок стакана (DOM): биды (по убыванию цены) и аски (по возрастанию).
+#[cfg_attr(feature = "live", allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OrderBookDto {
+    pub ts: i64,
+    pub bids: Vec<BookLevelDto>,
+    pub asks: Vec<BookLevelDto>,
+}
+
+impl From<&OrderBook> for OrderBookDto {
+    fn from(b: &OrderBook) -> Self {
+        Self {
+            ts: b.ts,
+            bids: b.bids.iter().map(BookLevelDto::from).collect(),
+            asks: b.asks.iter().map(BookLevelDto::from).collect(),
+        }
+    }
+}
+
+/// Сработавший алёрт для панели уведомлений.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AlertEventDto {
+    pub symbol: String,
+    pub ts: i64,
+    pub price: f64,
+    /// Дневное изменение в долях (`0.01` = +1%).
+    pub change: f64,
+    /// Человекочитаемое описание сработавшего условия.
+    pub message: String,
+}
+
+impl From<&AlertEvent> for AlertEventDto {
+    fn from(e: &AlertEvent) -> Self {
+        Self {
+            symbol: e.symbol.clone(),
+            ts: e.ts,
+            price: e.price,
+            change: e.change,
+            message: e.message.clone(),
+        }
+    }
+}
+
+/// Правило алёрта, приходящее с фронта (вход IPC).
+///
+/// Плоское представление доменного [`AlertRule`]: `kind` выбирает условие,
+/// `threshold` — порог (цена или доля изменения, в зависимости от `kind`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertRuleInput {
+    pub symbol: String,
+    /// `priceAbove` | `priceBelow` | `changeAbove` | `changeBelow`.
+    pub kind: String,
+    pub threshold: f64,
+}
+
+impl AlertRuleInput {
+    /// Преобразовать в доменное правило; `None` при неизвестном `kind`.
+    pub fn to_rule(&self) -> Option<AlertRule> {
+        let condition = match self.kind.as_str() {
+            "priceAbove" => AlertCondition::PriceAbove(self.threshold),
+            "priceBelow" => AlertCondition::PriceBelow(self.threshold),
+            "changeAbove" => AlertCondition::ChangeAbove(self.threshold),
+            "changeBelow" => AlertCondition::ChangeBelow(self.threshold),
+            _ => return None,
+        };
+        Some(AlertRule::new(self.symbol.clone(), condition))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use domain::metrics::alerts::AlertEvent;
+    use domain::{BookLevel, OrderBook, Trade};
+
+    #[test]
+    fn alert_rule_input_converts_known_kinds() {
+        let r = AlertRuleInput {
+            symbol: "SBER@MISX".into(),
+            kind: "priceAbove".into(),
+            threshold: 300.0,
+        }
+        .to_rule()
+        .unwrap();
+        assert_eq!(r.symbol, "SBER@MISX");
+        assert_eq!(r.condition, AlertCondition::PriceAbove(300.0));
+
+        assert!(AlertRuleInput {
+            symbol: "X".into(),
+            kind: "bogus".into(),
+            threshold: 1.0,
+        }
+        .to_rule()
+        .is_none());
+    }
+
+    #[test]
+    fn trade_dto_maps_fields() {
+        let t = Trade {
+            ts: 10,
+            price: 305.5,
+            size: 12.0,
+            buyer_initiated: Some(true),
+        };
+        let dto = TradeDto::from(&t);
+        assert_eq!(dto.ts, 10);
+        assert_eq!(dto.price, 305.5);
+        assert_eq!(dto.size, 12.0);
+        assert_eq!(dto.buyer_initiated, Some(true));
+    }
+
+    #[test]
+    fn order_book_dto_preserves_sides() {
+        let book = OrderBook {
+            ts: 5,
+            bids: vec![
+                BookLevel {
+                    price: 100.0,
+                    size: 3.0,
+                },
+                BookLevel {
+                    price: 99.5,
+                    size: 7.0,
+                },
+            ],
+            asks: vec![BookLevel {
+                price: 100.5,
+                size: 4.0,
+            }],
+        };
+        let dto = OrderBookDto::from(&book);
+        assert_eq!(dto.ts, 5);
+        assert_eq!(dto.bids.len(), 2);
+        assert_eq!(dto.bids[0].price, 100.0);
+        assert_eq!(dto.asks[0].size, 4.0);
+    }
+
+    #[test]
+    fn alert_event_dto_maps_message() {
+        let e = AlertEvent {
+            symbol: "SBER@MISX".into(),
+            ts: 7,
+            price: 310.0,
+            change: 0.03,
+            message: "цена выше 300".into(),
+        };
+        let dto = AlertEventDto::from(&e);
+        assert_eq!(dto.symbol, "SBER@MISX");
+        assert_eq!(dto.message, "цена выше 300");
+        assert_eq!(dto.change, 0.03);
+    }
 }
