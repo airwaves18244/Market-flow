@@ -67,9 +67,13 @@
   такт покрыт тестами на фейке (без сети).
 - ✅ Подключение реального источника: боевой режим `app` (фича `live`) связывает
   `FinamMarketData` (gRPC) с планировщиком — авторизация → справочник → цикл
-  опроса баров в хранилище. Секрет из `FINAM_API_SECRET`/keyring. Требует
-  egress-доступа к `trade-api.finam.ru:443`; проверено до сетевой границы.
-  Живой smoke пайплайна — `cargo run -p data --features grpc --example live_check`.
+  опроса баров в хранилище. Секрет берётся из переменной окружения
+  `FINAM_API_SECRET`, файла `.env` (ключи `FINAM_API_SECRET`/`FINAM_SECRET`, без
+  учёта регистра; файл в `.gitignore`) или ОС-keyring (фича `keyring`). Загрузчик
+  `.env` — чистый парсер без зависимостей (`data::dotenv`, покрыт тестами).
+  Требует egress-доступа к `trade-api.finam.ru:443`; проверено до сетевой границы
+  (с секретом из `.env` пайплайн доходит до allowlist-проверки egress). Живой
+  smoke пайплайна — `cargo run -p data --features grpc --example live_check`.
 
 ## Фаза 2 — Аналитика (`domain`) ✅
 - ✅ turnover, directional turnover, unusual volume.

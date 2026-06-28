@@ -20,11 +20,19 @@ use storage::{MemStore, Store};
 use crate::ingest::{IngestConfig, IngestService};
 use crate::state::AppState;
 
-/// Достать API-секрет: сперва `FINAM_API_SECRET`, затем ОС-keyring (фича
-/// `keyring`). Возвращает понятную ошибку, если секрет нигде не задан.
+/// Достать API-секрет: сперва переменная окружения `FINAM_API_SECRET`, затем
+/// файл `.env` (рядом с рабочим каталогом или выше; ключи `FINAM_API_SECRET`/
+/// `FINAM_SECRET`, без учёта регистра), затем ОС-keyring (фича `keyring`).
+/// Возвращает понятную ошибку, если секрет нигде не задан.
 pub fn load_secret() -> Result<String, String> {
-    if let Ok(s) = std::env::var("FINAM_API_SECRET") {
+    if let Ok(s) = std::env::var(data::SECRET_ENV_VAR) {
         if !s.trim().is_empty() {
+            return Ok(s.trim().to_owned());
+        }
+    }
+    // Файл `.env` (в `.gitignore`): ищем начиная с текущего каталога вверх.
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(s) = data::find_dotenv_secret(&cwd, 4) {
             return Ok(s);
         }
     }
@@ -38,8 +46,9 @@ pub fn load_secret() -> Result<String, String> {
         }
     }
     Err(
-        "API-секрет не задан: установите переменную окружения FINAM_API_SECRET \
-         (или сохраните секрет в ОС-keyring при сборке с фичей `keyring`)"
+        "API-секрет не задан: установите переменную окружения FINAM_API_SECRET, \
+         положите его в файл .env (FINAM_API_SECRET=… или FINAM_SECRET=…) \
+         или сохраните в ОС-keyring (сборка с фичей `keyring`)"
             .to_owned(),
     )
 }
