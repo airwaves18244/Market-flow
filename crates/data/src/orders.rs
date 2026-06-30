@@ -142,8 +142,14 @@ mod tests {
         let mut r = SimOrderRouter::new(1_000_000.0, RiskLimits::default());
         r.on_book(&OrderBook {
             ts: 1,
-            bids: vec![BookLevel { price: 99.0, size: 10.0 }],
-            asks: vec![BookLevel { price: 100.0, size: 10.0 }],
+            bids: vec![BookLevel {
+                price: 99.0,
+                size: 10.0,
+            }],
+            asks: vec![BookLevel {
+                price: 100.0,
+                size: 10.0,
+            }],
         });
         r
     }

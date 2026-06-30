@@ -66,7 +66,10 @@ impl BacktestReport {
         equity_curve: Vec<(i64, f64)>,
         initial_capital: f64,
     ) -> Self {
-        let final_equity = equity_curve.last().map(|(_, e)| *e).unwrap_or(initial_capital);
+        let final_equity = equity_curve
+            .last()
+            .map(|(_, e)| *e)
+            .unwrap_or(initial_capital);
         let net_pnl = final_equity - initial_capital;
         let return_pct = if initial_capital != 0.0 {
             net_pnl / initial_capital
@@ -101,7 +104,11 @@ impl BacktestReport {
         } else {
             0.0
         };
-        let avg_win = if wins > 0 { gross_win / wins as f64 } else { 0.0 };
+        let avg_win = if wins > 0 {
+            gross_win / wins as f64
+        } else {
+            0.0
+        };
         let avg_loss = if losses > 0 {
             gross_loss / losses as f64
         } else {

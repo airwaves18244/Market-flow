@@ -35,34 +35,74 @@ pub fn descriptors() -> Vec<StrategyDescriptor> {
             id: "ma_cross",
             label: "Пересечение скользящих (MA cross)",
             params: vec![
-                ParamSpec { name: "fast", label: "Быстрая MA", default: 5.0 },
-                ParamSpec { name: "slow", label: "Медленная MA", default: 20.0 },
-                ParamSpec { name: "lot", label: "Лот", default: 1.0 },
+                ParamSpec {
+                    name: "fast",
+                    label: "Быстрая MA",
+                    default: 5.0,
+                },
+                ParamSpec {
+                    name: "slow",
+                    label: "Медленная MA",
+                    default: 20.0,
+                },
+                ParamSpec {
+                    name: "lot",
+                    label: "Лот",
+                    default: 1.0,
+                },
             ],
         },
         StrategyDescriptor {
             id: "same_lot",
             label: "Равные лоты (пробой)",
             params: vec![
-                ParamSpec { name: "lot", label: "Лот", default: 1.0 },
-                ParamSpec { name: "lookback", label: "Окно пробоя", default: 10.0 },
+                ParamSpec {
+                    name: "lot",
+                    label: "Лот",
+                    default: 1.0,
+                },
+                ParamSpec {
+                    name: "lookback",
+                    label: "Окно пробоя",
+                    default: 10.0,
+                },
             ],
         },
         StrategyDescriptor {
             id: "iceberg",
             label: "Айсберг (набор равными клипами)",
             params: vec![
-                ParamSpec { name: "clip", label: "Клип", default: 1.0 },
-                ParamSpec { name: "clips", label: "Число клипов", default: 5.0 },
-                ParamSpec { name: "period", label: "Период тренда", default: 20.0 },
+                ParamSpec {
+                    name: "clip",
+                    label: "Клип",
+                    default: 1.0,
+                },
+                ParamSpec {
+                    name: "clips",
+                    label: "Число клипов",
+                    default: 5.0,
+                },
+                ParamSpec {
+                    name: "period",
+                    label: "Период тренда",
+                    default: 20.0,
+                },
             ],
         },
         StrategyDescriptor {
             id: "cvd_momentum",
             label: "Импульс дельты объёма (CVD)",
             params: vec![
-                ParamSpec { name: "lot", label: "Лот", default: 1.0 },
-                ParamSpec { name: "period", label: "Окно дельты", default: 14.0 },
+                ParamSpec {
+                    name: "lot",
+                    label: "Лот",
+                    default: 1.0,
+                },
+                ParamSpec {
+                    name: "period",
+                    label: "Окно дельты",
+                    default: 14.0,
+                },
             ],
         },
     ]
@@ -249,7 +289,10 @@ mod tests {
         let bars: Vec<Bar> = (0..20)
             .map(|i| bar(i, 100.0 + i as f64, 100.0 + i as f64, 1.0))
             .collect();
-        let mut s = SameLotStrategy { lot: 3.0, lookback: 5 };
+        let mut s = SameLotStrategy {
+            lot: 3.0,
+            lookback: 5,
+        };
         let r = run_backtest(&bars, &mut s, BacktestConfig::default());
         assert!(!r.trades.is_empty());
         // Все сделки одного «равного» размера (3 лота на первый вход).
@@ -262,7 +305,11 @@ mod tests {
         let bars: Vec<Bar> = (0..30)
             .map(|i| bar(i, 100.0 + i as f64, 100.5 + i as f64, 1.0))
             .collect();
-        let mut s = IcebergStrategy { clip: 2.0, clips: 3.0, period: 5 };
+        let mut s = IcebergStrategy {
+            clip: 2.0,
+            clips: 3.0,
+            period: 5,
+        };
         let r = run_backtest(&bars, &mut s, BacktestConfig::default());
         // Каждая сделка — ровно один клип (2 лота); позиция не превышает clip*clips=6.
         assert!(r.trades.iter().all(|t| (t.qty - 2.0).abs() < 1e-9));
@@ -272,10 +319,11 @@ mod tests {
     #[test]
     fn cvd_momentum_goes_long_on_buying_pressure() {
         // Все бары растут (close>open) → положительная дельта → лонг.
-        let bars: Vec<Bar> = (0..20)
-            .map(|i| bar(i, 100.0, 101.0, 10.0))
-            .collect();
-        let mut s = CvdMomentumStrategy { lot: 1.0, period: 5 };
+        let bars: Vec<Bar> = (0..20).map(|i| bar(i, 100.0, 101.0, 10.0)).collect();
+        let mut s = CvdMomentumStrategy {
+            lot: 1.0,
+            period: 5,
+        };
         let r = run_backtest(&bars, &mut s, BacktestConfig::default());
         assert!(r.trades.iter().any(|t| t.side == crate::model::Side::Buy));
     }

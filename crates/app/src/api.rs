@@ -586,7 +586,10 @@ pub fn alerts_scan(
 
 /// Каталог встроенных стратегий с их параметрами (для пикера в UI).
 pub fn list_strategies() -> Vec<StrategyDescriptorDto> {
-    descriptors().iter().map(StrategyDescriptorDto::from).collect()
+    descriptors()
+        .iter()
+        .map(StrategyDescriptorDto::from)
+        .collect()
 }
 
 /// Прогнать бэктест стратегии по сохранённым барам инструмента.
@@ -968,13 +971,23 @@ mod tests {
     #[test]
     fn delta_footprint_bins_trades_by_bar_and_price() {
         let mut store = seeded(); // SBER дневные бары на ts=1,2,3
-        // Сделки на ts=1 (внутри дневного бара): покупка 5 @100, продажа 2 @100.
+                                  // Сделки на ts=1 (внутри дневного бара): покупка 5 @100, продажа 2 @100.
         store
             .insert_trades(
                 "SBER@MISX",
                 &[
-                    Trade { ts: 1, price: 100.0, size: 5.0, buyer_initiated: Some(true) },
-                    Trade { ts: 1, price: 100.0, size: 2.0, buyer_initiated: Some(false) },
+                    Trade {
+                        ts: 1,
+                        price: 100.0,
+                        size: 5.0,
+                        buyer_initiated: Some(true),
+                    },
+                    Trade {
+                        ts: 1,
+                        price: 100.0,
+                        size: 2.0,
+                        buyer_initiated: Some(false),
+                    },
                 ],
             )
             .unwrap();
@@ -992,7 +1005,12 @@ mod tests {
         let mut store = seeded();
         // 4 подряд по 10 → серия равных лотов.
         let trades: Vec<Trade> = (1..=4)
-            .map(|i| Trade { ts: i, price: 100.0, size: 10.0, buyer_initiated: Some(true) })
+            .map(|i| Trade {
+                ts: i,
+                price: 100.0,
+                size: 10.0,
+                buyer_initiated: Some(true),
+            })
             .collect();
         store.insert_trades("SBER@MISX", &trades).unwrap();
         let cfg = RobotConfigInput::default();

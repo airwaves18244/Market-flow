@@ -129,17 +129,15 @@ impl Store for MemStore {
         Ok(trades.len())
     }
 
-    fn trades(
-        &self,
-        symbol: &str,
-        from_ts: i64,
-        to_ts: i64,
-    ) -> Result<Vec<Trade>, StorageError> {
+    fn trades(&self, symbol: &str, from_ts: i64, to_ts: i64) -> Result<Vec<Trade>, StorageError> {
         Ok(self
             .trades
             .get(symbol)
             .into_iter()
-            .flat_map(|m| m.range(from_ts..=to_ts).flat_map(|(_, v)| v.iter().copied()))
+            .flat_map(|m| {
+                m.range(from_ts..=to_ts)
+                    .flat_map(|(_, v)| v.iter().copied())
+            })
             .collect())
     }
 
@@ -266,10 +264,16 @@ mod tests {
             buyer_initiated: bi,
         };
         // вставляем вразнобой, в т.ч. два тика на одной секунде (append, не upsert)
-        s.insert_trades("SBER@MISX", &[t(3, 30.0, 1.0, Some(true)), t(1, 10.0, 2.0, None)])
-            .unwrap();
-        s.insert_trades("SBER@MISX", &[t(2, 20.0, 3.0, Some(false)), t(2, 21.0, 4.0, Some(true))])
-            .unwrap();
+        s.insert_trades(
+            "SBER@MISX",
+            &[t(3, 30.0, 1.0, Some(true)), t(1, 10.0, 2.0, None)],
+        )
+        .unwrap();
+        s.insert_trades(
+            "SBER@MISX",
+            &[t(2, 20.0, 3.0, Some(false)), t(2, 21.0, 4.0, Some(true))],
+        )
+        .unwrap();
 
         let got = s.trades("SBER@MISX", 1, 3).unwrap();
         // 4 тика по возрастанию ts; внутри ts=2 — порядок поступления (20,21)

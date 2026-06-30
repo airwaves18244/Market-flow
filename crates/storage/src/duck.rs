@@ -262,12 +262,7 @@ impl Store for DuckStore {
         Ok(trades.len())
     }
 
-    fn trades(
-        &self,
-        symbol: &str,
-        from_ts: i64,
-        to_ts: i64,
-    ) -> Result<Vec<Trade>, StorageError> {
+    fn trades(&self, symbol: &str, from_ts: i64, to_ts: i64) -> Result<Vec<Trade>, StorageError> {
         let mut stmt = self
             .conn
             .prepare(
@@ -452,8 +447,11 @@ mod tests {
             size,
             buyer_initiated: bi,
         };
-        s.insert_trades("SBER@MISX", &[t(1, 10.0, 2.0, None), t(2, 20.0, 3.0, Some(false))])
-            .unwrap();
+        s.insert_trades(
+            "SBER@MISX",
+            &[t(1, 10.0, 2.0, None), t(2, 20.0, 3.0, Some(false))],
+        )
+        .unwrap();
         s.insert_trades("SBER@MISX", &[t(2, 21.0, 4.0, Some(true))])
             .unwrap();
 

@@ -12,9 +12,7 @@ use std::sync::Mutex;
 use domain::trading::{OrderRequest, RiskLimits, SimBroker};
 use domain::{OrderBook, Trade};
 
-use crate::dto::{
-    AccountDto, FillEventDto, OrderDto, OrderInput, PositionDto, SubmitResultDto,
-};
+use crate::dto::{AccountDto, FillEventDto, OrderDto, OrderInput, PositionDto, SubmitResultDto};
 
 /// Стартовая наличность симулятора по умолчанию.
 const DEFAULT_CASH: f64 = 1_000_000.0;
@@ -73,7 +71,11 @@ impl TradeSession {
 
     /// Активные заявки (блоттер).
     pub fn orders(&self) -> Vec<OrderDto> {
-        self.lock().working_orders().iter().map(OrderDto::from).collect()
+        self.lock()
+            .working_orders()
+            .iter()
+            .map(OrderDto::from)
+            .collect()
     }
 
     /// Открытые позиции (ненулевые).
@@ -99,12 +101,20 @@ impl TradeSession {
 
     /// Прокинуть печать сделки в симулятор (исполнение лимиток/стопов).
     pub fn on_trade(&self, trade: &Trade) -> Vec<FillEventDto> {
-        self.lock().on_trade(trade).iter().map(FillEventDto::from).collect()
+        self.lock()
+            .on_trade(trade)
+            .iter()
+            .map(FillEventDto::from)
+            .collect()
     }
 
     /// Обновить стакан симулятора (исполнение ставших маркетабельными лимиток).
     pub fn on_book(&self, book: &OrderBook) -> Vec<FillEventDto> {
-        self.lock().on_book(book).iter().map(FillEventDto::from).collect()
+        self.lock()
+            .on_book(book)
+            .iter()
+            .map(FillEventDto::from)
+            .collect()
     }
 }
 
@@ -131,8 +141,14 @@ mod tests {
         let s = TradeSession::new();
         s.on_book(&OrderBook {
             ts: 1,
-            bids: vec![BookLevel { price: 99.0, size: 10.0 }],
-            asks: vec![BookLevel { price: 100.0, size: 10.0 }],
+            bids: vec![BookLevel {
+                price: 99.0,
+                size: 10.0,
+            }],
+            asks: vec![BookLevel {
+                price: 100.0,
+                size: 10.0,
+            }],
         });
         s
     }

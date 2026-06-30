@@ -319,8 +319,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fp.len(),
             total_delta
         );
-        let signals = state.robot_scan("SBER@MISX", 0, i64::MAX, &dto::RobotConfigInput::default())?;
-        println!("  robot_scan(SBER@MISX): {} сигналов роботов", signals.len());
+        let signals =
+            state.robot_scan("SBER@MISX", 0, i64::MAX, &dto::RobotConfigInput::default())?;
+        println!(
+            "  robot_scan(SBER@MISX): {} сигналов роботов",
+            signals.len()
+        );
 
         // V2 — симулятор торговли: подаём стакан, ставим рыночную заявку.
         state.trade_session().on_book(&OrderBook {

@@ -162,10 +162,7 @@ mod tests {
     #[test]
     fn cumulative_delta_runs_across_bars() {
         // Бар0 [0,60): дельта +4; бар1 [60,120): дельта −1.
-        let trades = [
-            t(1, 100.0, 4.0, Some(true)),
-            t(70, 100.0, 1.0, Some(false)),
-        ];
+        let trades = [t(1, 100.0, 4.0, Some(true)), t(70, 100.0, 1.0, Some(false))];
         let fp = footprint(&trades, &[0, 60], 60, 1.0);
         assert_eq!(fp[0].cumulative_delta, 4.0);
         assert_eq!(fp[1].delta, -1.0);
@@ -182,10 +179,7 @@ mod tests {
     #[test]
     fn trades_bucket_to_nearest_tick() {
         // tick=0.5: 100.24→100.0, 100.26→100.5
-        let trades = [
-            t(1, 100.24, 1.0, Some(true)),
-            t(2, 100.26, 1.0, Some(true)),
-        ];
+        let trades = [t(1, 100.24, 1.0, Some(true)), t(2, 100.26, 1.0, Some(true))];
         let fp = footprint(&trades, &[0], 60, 0.5);
         let prices: Vec<f64> = fp[0].cells.iter().map(|c| c.price).collect();
         assert_eq!(prices, vec![100.0, 100.5]);

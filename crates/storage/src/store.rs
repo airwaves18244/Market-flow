@@ -105,12 +105,7 @@ pub trait Store {
 
     /// Сделки инструмента в `[from_ts, to_ts]` (включительно), по возрастанию
     /// `ts`; внутри одной секунды сохраняется порядок поступления.
-    fn trades(
-        &self,
-        symbol: &str,
-        from_ts: i64,
-        to_ts: i64,
-    ) -> Result<Vec<Trade>, StorageError>;
+    fn trades(&self, symbol: &str, from_ts: i64, to_ts: i64) -> Result<Vec<Trade>, StorageError>;
 
     /// Заменить/дополнить таблицу классификации секторов. Возвращает число строк.
     fn upsert_sector_map(&mut self, entries: &[SectorEntry]) -> Result<usize, StorageError>;

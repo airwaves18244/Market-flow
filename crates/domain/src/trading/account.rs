@@ -81,7 +81,10 @@ impl Account {
 
     /// Позиция по инструменту (пустая, если её нет).
     pub fn position(&self, symbol: &str) -> Position {
-        self.positions.get(symbol).copied().unwrap_or_else(Position::flat)
+        self.positions
+            .get(symbol)
+            .copied()
+            .unwrap_or_else(Position::flat)
     }
 
     /// Применить исполнение к счёту: денежный поток + позиция + реализованный P&L.

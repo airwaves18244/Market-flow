@@ -218,9 +218,7 @@ impl AppState {
         params: &StrategyParams,
         config: &BacktestConfigInput,
     ) -> Result<BacktestReportDto, StorageError> {
-        self.read(|s| {
-            api::run_backtest(s, symbol, tf, from_ts, to_ts, strategy_id, params, config)
-        })
+        self.read(|s| api::run_backtest(s, symbol, tf, from_ts, to_ts, strategy_id, params, config))
     }
 
     // ── V2 / Delta ──────────────────────────────────────────────────────────

@@ -65,12 +65,7 @@ impl Default for RiskLimits {
 
 impl RiskLimits {
     /// Проверить заявку до постановки: объём и проекция позиции в пределах лимитов.
-    pub fn check(
-        &self,
-        current_position: f64,
-        side: Side,
-        qty: f64,
-    ) -> Result<(), RejectReason> {
+    pub fn check(&self, current_position: f64, side: Side, qty: f64) -> Result<(), RejectReason> {
         if qty <= 0.0 {
             return Err(RejectReason::InvalidQty);
         }
@@ -95,7 +90,10 @@ mod tests {
             max_order_qty: 10.0,
             max_position: 15.0,
         };
-        assert_eq!(limits.check(0.0, Side::Buy, 0.0), Err(RejectReason::InvalidQty));
+        assert_eq!(
+            limits.check(0.0, Side::Buy, 0.0),
+            Err(RejectReason::InvalidQty)
+        );
         assert_eq!(
             limits.check(0.0, Side::Buy, 11.0),
             Err(RejectReason::MaxOrderQty)

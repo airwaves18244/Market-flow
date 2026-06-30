@@ -61,7 +61,11 @@ impl SimBroker {
 
     /// Поставить заявку. Возвращает итоговое состояние заявки и список
     /// исполнений, либо причину отклонения (риск/нет ликвидности).
-    pub fn submit(&mut self, req: OrderRequest, ts: i64) -> Result<(Order, Vec<Fill>), RejectReason> {
+    pub fn submit(
+        &mut self,
+        req: OrderRequest,
+        ts: i64,
+    ) -> Result<(Order, Vec<Fill>), RejectReason> {
         if matches!(req.kind, OrderType::Limit | OrderType::Stop) && req.price.is_none() {
             return Err(RejectReason::MissingPrice);
         }
@@ -140,10 +144,18 @@ impl SimBroker {
         while i < working.len() {
             let order = &mut working[i];
             let fill_price = match (order.kind, order.side) {
-                (OrderType::Limit, Side::Buy) => (trade.price <= order.price.unwrap()).then(|| order.price.unwrap()),
-                (OrderType::Limit, Side::Sell) => (trade.price >= order.price.unwrap()).then(|| order.price.unwrap()),
-                (OrderType::Stop, Side::Buy) => (trade.price >= order.price.unwrap()).then_some(trade.price),
-                (OrderType::Stop, Side::Sell) => (trade.price <= order.price.unwrap()).then_some(trade.price),
+                (OrderType::Limit, Side::Buy) => {
+                    (trade.price <= order.price.unwrap()).then(|| order.price.unwrap())
+                }
+                (OrderType::Limit, Side::Sell) => {
+                    (trade.price >= order.price.unwrap()).then(|| order.price.unwrap())
+                }
+                (OrderType::Stop, Side::Buy) => {
+                    (trade.price >= order.price.unwrap()).then_some(trade.price)
+                }
+                (OrderType::Stop, Side::Sell) => {
+                    (trade.price <= order.price.unwrap()).then_some(trade.price)
+                }
                 _ => None,
             };
             if let Some(price) = fill_price {
@@ -255,12 +267,24 @@ mod tests {
         OrderBook {
             ts: 1,
             bids: vec![
-                BookLevel { price: 99.0, size: 5.0 },
-                BookLevel { price: 98.0, size: 10.0 },
+                BookLevel {
+                    price: 99.0,
+                    size: 5.0,
+                },
+                BookLevel {
+                    price: 98.0,
+                    size: 10.0,
+                },
             ],
             asks: vec![
-                BookLevel { price: 100.0, size: 5.0 },
-                BookLevel { price: 101.0, size: 10.0 },
+                BookLevel {
+                    price: 100.0,
+                    size: 5.0,
+                },
+                BookLevel {
+                    price: 101.0,
+                    size: 10.0,
+                },
             ],
         }
     }

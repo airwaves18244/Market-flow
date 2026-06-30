@@ -74,8 +74,7 @@ impl Book {
         if self.position == 0.0 || self.position.signum() == signed.signum() {
             // Открытие или наращивание в ту же сторону: средняя цена — взвешенная.
             let new_pos = self.position + signed;
-            self.avg_price =
-                (self.avg_price * self.position.abs() + price * qty) / new_pos.abs();
+            self.avg_price = (self.avg_price * self.position.abs() + price * qty) / new_pos.abs();
             self.position = new_pos;
         } else {
             // Сокращение/закрытие (возможно с переворотом).
