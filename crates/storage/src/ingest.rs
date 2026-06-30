@@ -11,7 +11,7 @@
 //! `app`; здесь — синхронные, кросс-платформенно тестируемые кирпичики.
 
 use domain::metrics::turnover::{directional_turnover, total_turnover};
-use domain::{Bar, Instrument, TimeFrame};
+use domain::{Bar, Instrument, TimeFrame, Trade};
 
 use crate::store::{SectorEntry, Store, TurnoverSnapshot};
 use crate::StorageError;
@@ -111,6 +111,12 @@ impl<'a, S: Store> Writer<'a, S> {
             }
             None => Ok(false),
         }
+    }
+
+    /// Дописать обезличенные сделки (тиковую ленту) инструмента. Питает
+    /// footprint/дельту и симулятор исполнения. Возвращает число строк.
+    pub fn trades(&mut self, symbol: &str, trades: &[Trade]) -> Result<usize, StorageError> {
+        self.store.insert_trades(symbol, trades)
     }
 
     /// Загрузить таблицу классификации секторов из пар `(ключ, сектор)`.

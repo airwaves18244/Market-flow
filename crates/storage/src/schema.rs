@@ -42,6 +42,18 @@ CREATE TABLE IF NOT EXISTS turnover_snapshots (
     PRIMARY KEY (symbol, ts)
 );";
 
+/// Обезличенные сделки (тиковая лента) — основа footprint/дельты и заполнения
+/// симулятора исполнения. Append-only: один тик — одна строка. `buyer_initiated`
+/// (сторона-агрессор) может быть `NULL`, если биржа её не отдаёт.
+pub const DDL_TRADES: &str = "\
+CREATE TABLE IF NOT EXISTS trades (
+    symbol           TEXT NOT NULL,
+    ts               BIGINT NOT NULL,    -- время сделки, UNIX-секунды UTC
+    price            DOUBLE NOT NULL,
+    size             DOUBLE NOT NULL,
+    buyer_initiated  BOOLEAN             -- true=покупка(агрессор-бид), NULL=неизвестно
+);";
+
 /// Редактируемая таблица классификации секторов (тикер/ISIN → сектор).
 pub const DDL_SECTOR_MAP: &str = "\
 CREATE TABLE IF NOT EXISTS sector_map (
@@ -58,14 +70,18 @@ CREATE TABLE IF NOT EXISTS schema_version (
 
 /// Текущая версия схемы. Повышается при изменении DDL, чтобы [`crate::migrate`]
 /// знал, нужно ли применять обновления к существующей БД.
-pub const SCHEMA_VERSION: i32 = 1;
+///
+/// v2 — добавлена таблица `trades` (тиковая лента для footprint/дельты и
+/// симулятора исполнения).
+pub const SCHEMA_VERSION: i32 = 2;
 
 /// Полный набор DDL таблиц данных в порядке применения. Версия схемы
 /// (`schema_version`) применяется отдельно миграцией.
-pub const ALL_DDL: [&str; 4] = [
+pub const ALL_DDL: [&str; 5] = [
     DDL_INSTRUMENTS,
     DDL_BARS,
     DDL_TURNOVER_SNAPSHOTS,
+    DDL_TRADES,
     DDL_SECTOR_MAP,
 ];
 
@@ -75,11 +91,12 @@ mod tests {
 
     #[test]
     fn ddl_is_present_and_keyed() {
-        assert_eq!(ALL_DDL.len(), 4);
+        assert_eq!(ALL_DDL.len(), 5);
         for ddl in ALL_DDL {
             assert!(ddl.contains("CREATE TABLE IF NOT EXISTS"));
         }
         assert!(DDL_BARS.contains("PRIMARY KEY (symbol, timeframe, ts)"));
+        assert!(DDL_TRADES.contains("buyer_initiated"));
     }
 
     #[test]

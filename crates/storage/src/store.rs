@@ -10,7 +10,7 @@
 //! (`data::MarketData`) и асинхронный планировщик живут выше, в `app`. Сюда
 //! приходят уже доменные типы.
 
-use domain::{Bar, Instrument, TimeFrame};
+use domain::{Bar, Instrument, TimeFrame, Trade};
 use serde::{Deserialize, Serialize};
 
 use crate::StorageError;
@@ -97,6 +97,20 @@ pub trait Store {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<TurnoverSnapshot>, StorageError>;
+
+    /// Дописать обезличенные сделки (тиковую ленту) инструмента. Append-only:
+    /// каждый тик — отдельная строка (в отличие от баров/снимков, тики не
+    /// перезаписываются по ключу). Возвращает число записанных строк.
+    fn insert_trades(&mut self, symbol: &str, trades: &[Trade]) -> Result<usize, StorageError>;
+
+    /// Сделки инструмента в `[from_ts, to_ts]` (включительно), по возрастанию
+    /// `ts`; внутри одной секунды сохраняется порядок поступления.
+    fn trades(
+        &self,
+        symbol: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<Trade>, StorageError>;
 
     /// Заменить/дополнить таблицу классификации секторов. Возвращает число строк.
     fn upsert_sector_map(&mut self, entries: &[SectorEntry]) -> Result<usize, StorageError>;
