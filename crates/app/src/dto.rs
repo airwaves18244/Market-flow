@@ -198,6 +198,7 @@ pub struct TurnoverByClassPoint {
     pub equity: f64,
     pub future: f64,
     pub bond: f64,
+    pub fx: f64,
 }
 
 /// Ребро перетока доли между классами активов (Sankey).
@@ -210,6 +211,35 @@ pub struct FlowEdgeDto {
     pub to: String,
     /// Вес перетока — сдвиг доли (0..1).
     pub weight: f64,
+}
+
+// ── Вкладка «Сводка» (Summary) — режим рынка по кросс-актив потокам ─────────
+
+/// Направленный нетто-поток одного класса активов за период (для «карты
+/// больших денег»: знаковая величина, в ₽млрд).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassFlowDto {
+    /// Код класса: `equity|future|bond|fx`.
+    pub asset_class: String,
+    /// Нетто-поток: `> 0` — приток, `< 0` — отток (₽млрд).
+    pub net_flow: f64,
+}
+
+/// Сигнал режима рынка для вкладки «Сводка».
+///
+/// Числовая основа решения «куда идут большие деньги»: режим, уверенность и
+/// нетто-потоки по классам. Текстовые пояснения (тезис / решения / риски)
+/// собирает фронт по коду режима — бэкенд отдаёт только сигнал.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegimeSignalDto {
+    /// Код режима: `riskOn|riskOff|neutral`.
+    pub regime: String,
+    /// Уверенность сигнала, 0..100.
+    pub conviction: u8,
+    /// Нетто-потоки по классам (для диаграммы перетоков и таблицы).
+    pub class_flows: Vec<ClassFlowDto>,
 }
 
 // ── Фаза 7 — live-панели (Time&Sales / DOM / алёрты) ───────────────────────

@@ -1,7 +1,7 @@
 // Зеркало DTO из Rust-ядра (crates/app/src/dto.rs). Поля — camelCase,
 // как сериализует serde с `rename_all = "camelCase"`.
 
-export type AssetClass = "equity" | "future" | "bond";
+export type AssetClass = "equity" | "future" | "bond" | "fx";
 export type TimeFrame = "m1" | "m5" | "m15" | "h1" | "d1";
 
 export interface InstrumentDto {
@@ -105,12 +105,31 @@ export interface TurnoverByClassPoint {
   equity: number;
   future: number;
   bond: number;
+  fx: number;
 }
 
 export interface FlowEdgeDto {
   from: string;
   to: string;
   weight: number;
+}
+
+// ── Вкладка «Сводка» (Summary) — режим рынка по кросс-актив потокам ─────────
+
+export type Regime = "riskOn" | "riskOff" | "neutral";
+
+/** Направленный нетто-поток одного класса активов (₽млрд, знаковый). */
+export interface ClassFlowDto {
+  assetClass: string;
+  /** > 0 — приток, < 0 — отток. */
+  netFlow: number;
+}
+
+/** Сигнал режима рынка: режим + уверенность (0..100) + потоки по классам. */
+export interface RegimeSignalDto {
+  regime: Regime;
+  conviction: number;
+  classFlows: ClassFlowDto[];
 }
 
 // ── Фаза 7 — live-панели (Time&Sales / DOM / алёрты) ──────────────────────

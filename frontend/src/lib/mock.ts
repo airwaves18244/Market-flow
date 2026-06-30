@@ -12,6 +12,7 @@ import type {
   FutureGroupDto,
   InstrumentDto,
   OrderBookDto,
+  RegimeSignalDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
@@ -91,11 +92,25 @@ const yields: YieldCurvePoint[] = [
 ];
 
 const crossAssetSummary: CrossAssetSummaryDto = {
-  total: 142_800_000,
+  total: 157_800_000,
   shares: [
-    { assetClass: "equity", turnover: 42_800_000, share: 0.3 },
-    { assetClass: "future", turnover: 85_700_000, share: 0.6 },
-    { assetClass: "bond", turnover: 14_300_000, share: 0.1 },
+    { assetClass: "equity", turnover: 42_800_000, share: 0.271 },
+    { assetClass: "future", turnover: 85_700_000, share: 0.543 },
+    { assetClass: "bond", turnover: 14_300_000, share: 0.091 },
+    { assetClass: "fx", turnover: 15_000_000, share: 0.095 },
+  ],
+};
+
+// Сводка «куда идут большие деньги»: защитная ротация (Risk-OFF) — отток из
+// акций/фьючерсов в облигации и валюту (мок зеркалит прототип дизайна).
+const regimeSignal: RegimeSignalDto = {
+  regime: "riskOff",
+  conviction: 76,
+  classFlows: [
+    { assetClass: "equity", netFlow: -86 },
+    { assetClass: "future", netFlow: -9 },
+    { assetClass: "bond", netFlow: 52 },
+    { assetClass: "fx", netFlow: 44 },
   ],
 };
 
@@ -110,7 +125,8 @@ function genTimeline(): TurnoverByClassPoint[] {
       ts: start + i * day,
       equity: 50_000_000 * (1 - 0.4 * t) + Math.random() * 4_000_000,
       future: 60_000_000 * (1 + 0.5 * t) + Math.random() * 4_000_000,
-      bond: 14_000_000 + Math.random() * 2_000_000,
+      bond: 14_000_000 * (1 + 0.3 * t) + Math.random() * 2_000_000,
+      fx: 10_000_000 * (1 + 0.5 * t) + Math.random() * 2_000_000,
     });
   }
   return out;
@@ -275,6 +291,8 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return genTimeline() as unknown as T;
     case "flow_sankey":
       return flowSankey as unknown as T;
+    case "summary":
+      return regimeSignal as unknown as T;
     case "latest_trades": {
       const sym = String(args?.symbol ?? "SBER@MISX");
       const limit = Number(args?.limit ?? 50);

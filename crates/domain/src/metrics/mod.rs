@@ -7,12 +7,14 @@
 //! - [`sector`] — роллапы метрик по секторам;
 //! - [`rrg`] — секторная ротация в стиле RRG (RS-Ratio / RS-Momentum);
 //! - [`crossasset`] — доли оборота по классам активов и матрица перетоков;
+//! - [`regime`] — режим рынка (Risk-ON/OFF/Neutral) по кросс-актив потокам;
 //! - [`alerts`] — алёрты по рыночным условиям (цена/изменение), edge-triggered.
 
 pub mod alerts;
 pub mod breadth;
 pub mod crossasset;
 pub mod flow;
+pub mod regime;
 pub mod rrg;
 pub mod sector;
 pub mod turnover;

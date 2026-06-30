@@ -4,12 +4,14 @@ export const ASSET_LABEL: Record<string, string> = {
   equity: "Акции",
   future: "Фьючерсы",
   bond: "Облигации",
+  fx: "Валюта · FX",
 };
 
 export const ASSET_COLOR: Record<string, string> = {
   equity: "#4f9cf9",
   future: "#26a69a",
   bond: "#f5a623",
+  fx: "#a78bfa",
 };
 
 export function assetLabel(code: string): string {

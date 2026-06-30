@@ -162,3 +162,58 @@
   ошибок/пустоты в панелях (алёрты, стакан, лента).
 - ⏳ Финальная сборка MSI/NSIS (`cargo tauri build`) и иконки — требуют
   десктопного окружения (webkit2gtk) вне кросс-платформенного CI.
+
+## Фаза 9 — Дизайн-итерация: оболочка + Сводка / Бэктест / Торговля
+
+Источник правды — экспорт из Claude Design (`frontend/design/`,
+см. `frontend/design/README.md`). Эта фаза приводит фронт к дизайну (рабочие
+пространства в левом рейле, глобальный период, статус READ-ONLY) и добавляет три
+новые вкладки. Бэкенд новых вкладок сведён из `frontend/design/roadmap_design.md`.
+
+### 9.0 — Оболочка по дизайну ✅
+- ✅ `App.svelte` переписан в shell: верхняя панель (бренд, глобальный период
+  `1Д/1Н/1М/3М/YTD/1Г`, LIVE, READ-ONLY), левый рейл из 10 рабочих пространств,
+  статус-бар. Период считает окно `[fromTs,toTs]` и переинициирует аналитику.
+- ✅ Существующие панели разнесены по пространствам (Обзор/Секторы/Потоки/Лента/
+  Фьючерсы/Облигации/Настройки) без потери функций.
+
+### 9.1 — Сводка (Summary) — «куда идут большие деньги» ✅ (ядро) / ⏳ (FX-ингест)
+- ✅ Новый класс актива `AssetClass::Fx` (валютный спот) — `code/from_code/ALL`,
+  учитывается в donut/gauge/timeline/Sankey (доля 0, пока нет FX-данных).
+- ✅ Чистый классификатор `domain::metrics::regime`: Risk-ON/OFF/Neutral +
+  conviction (0..100) по нетто-потокам классов; детерминирован, юнит-тесты.
+- ✅ IPC `summary(fromTs,toTs) -> RegimeSignalDto` (`api::summary` →
+  `class_net_flow` + `assess_regime`); регистрация в Tauri; зеркало в
+  `frontend` (`types`/`ipc`/`mock`) + компонент `SummaryPanel.svelte`
+  (режим, conviction, нетто-потоки по классам, решения, риски).
+- ⏳ Ингест FX-спота в `data` (`classify.rs`/`market.rs`, борд `CETS`,
+  USD/RUB·CNY/RUB·EUR/RUB): сейчас `CURRENCY → None`. После ингеста сигнал
+  начнёт учитывать реальные FX-потоки без правок аналитики.
+- ⏳ Обогащение драйверов сигнала (breadth/CVD/MFI/кривая ОФЗ/RUB) в `regime`.
+
+### 9.2 — Бэктест (Backtest) — ⏳ прототип без бэкенда
+- ✅ Фронт `BacktestPanel.svelte`: пресеты, параметры, кривая капитала vs IMOEX,
+  статистика (CAGR/Sharpe/MaxDD/винрейт/сделки/бенчмарк), доходность по месяцам.
+  Результат симулируется детерминированным сид-генератором в UI.
+- ⏳ Бэкенд (`domain/backtest/` или новый крейт): `StrategyDef`, event-driven
+  движок по сохранённым барам (DuckDB), метрики (CAGR/Sharpe/Sortino/MaxDD/
+  винрейт/profit factor/экспозиция/сделки/мес. матрица); IPC
+  `backtest_run(StrategyDef,fromTs,toTs) -> BacktestResult` (+ `backtest:tick`);
+  бенчмарк IMOEX и запрос OHLCV по вселенной с датным диапазоном в `storage`.
+
+### 9.3 — Торговля (Live trading) — ⏳ прототип, нарушает READ-ONLY
+- ✅ Фронт `TradePanel.svelte`: тикет заявки (купля/продажа, тип, лоты, цена,
+  оценка), позиции, активные заявки, счёт. Сабмит отклоняется (READ-ONLY).
+- ⏳ Бэкенд за явным флагом `trading` (READ-ONLY по умолчанию):
+  `AccountsService`/`OrdersService` Finam (place/cancel/replace, статусы,
+  позиции, портфель, покуп. способность); доменная валидация заявок и P&L;
+  IPC `place_order`/`cancel_order`/`positions`/`working_orders`/
+  `account_summary` + события `order:update`/`position:update`/`account:update`;
+  безопасность: подтверждение, rate-limit, kill-switch, paper-trading,
+  аудит-лог, секреты в ОС-keyring.
+
+### 9.x — Сквозное
+- ⏳ Реальные per-panel период-контролы (как в дизайне) поверх глобального.
+- ⏳ Бамп схемы `storage` при добавлении FX (новый класс в DTO/Sankey/donut).
+- Дисциплина слоёв неизменна: `domain` чистый (regime/backtest CI-тестируемы),
+  адаптеры — в `data`/`storage`/`app`.

@@ -14,8 +14,9 @@ use domain::TimeFrame;
 
 use crate::dto::{
     AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
-    FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto, RrgSectorDto, SectorEntryDto,
-    SectorRow, TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto, RegimeSignalDto, RrgSectorDto,
+    SectorEntryDto, SectorRow, TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint,
+    YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -140,6 +141,11 @@ fn flow_sankey(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<Ve
 }
 
 #[tauri::command]
+fn summary(state: State<AppState>, from_ts: i64, to_ts: i64) -> CmdResult<RegimeSignalDto> {
+    state.summary(from_ts, to_ts).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn alerts_scan(
     state: State<AppState>,
     rules: Vec<AlertRuleInput>,
@@ -231,6 +237,7 @@ pub fn run() {
             cross_asset_summary,
             turnover_timeline,
             flow_sankey,
+            summary,
             alerts_scan,
             latest_trades,
             order_book

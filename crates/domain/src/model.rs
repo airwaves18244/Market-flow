@@ -6,8 +6,14 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Класс актива. Соответствует четырём представлениям терминала плюс
-/// агрегирующее «сумма всех».
+/// Класс актива. Соответствует представлениям терминала плюс агрегирующее
+/// «сумма всех».
+///
+/// `Fx` (валютный спот: USD/RUB, CNY/RUB, EUR/RUB) добавлен для кросс-актив
+/// анализа потоков (вкладка «Сводка» / Summary): «куда уходят большие деньги».
+/// Ингест FX-инструментов из Finam (`MarketDataService`, борд `CETS`) — задача
+/// слоя `data` (см. `ROADMAP.md`); доменный тип готов уже сейчас, поэтому
+/// аналитика и DTO считают FX наравне с остальными классами.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetClass {
@@ -17,11 +23,18 @@ pub enum AssetClass {
     Future,
     /// Облигации (ОФЗ, корпоративные).
     Bond,
+    /// Валютный спот (FX): USD/RUB, CNY/RUB, EUR/RUB (борд `CETS`).
+    Fx,
 }
 
 impl AssetClass {
     /// Все классы активов в стабильном порядке (для итерации в дашборде).
-    pub const ALL: [AssetClass; 3] = [AssetClass::Equity, AssetClass::Future, AssetClass::Bond];
+    pub const ALL: [AssetClass; 4] = [
+        AssetClass::Equity,
+        AssetClass::Future,
+        AssetClass::Bond,
+        AssetClass::Fx,
+    ];
 
     /// Короткий машинный код класса.
     pub fn code(self) -> &'static str {
@@ -29,15 +42,17 @@ impl AssetClass {
             AssetClass::Equity => "equity",
             AssetClass::Future => "future",
             AssetClass::Bond => "bond",
+            AssetClass::Fx => "fx",
         }
     }
 
-    /// Разобрать класс актива из кода (`equity|future|bond`).
+    /// Разобрать класс актива из кода (`equity|future|bond|fx`).
     pub fn from_code(code: &str) -> Option<AssetClass> {
         Some(match code {
             "equity" => AssetClass::Equity,
             "future" => AssetClass::Future,
             "bond" => AssetClass::Bond,
+            "fx" => AssetClass::Fx,
             _ => return None,
         })
     }

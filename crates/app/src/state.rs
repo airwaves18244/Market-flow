@@ -16,8 +16,8 @@ use storage::{StorageError, Store};
 use crate::api;
 use crate::dto::{
     AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
-    FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    FlowEdgeDto, FutureGroupDto, InstrumentDto, RegimeSignalDto, RrgSectorDto, SectorEntryDto,
+    SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 
 /// Разделяемое состояние терминала.
@@ -174,6 +174,12 @@ impl AppState {
 
     pub fn flow_sankey(&self, from_ts: i64, to_ts: i64) -> Result<Vec<FlowEdgeDto>, StorageError> {
         self.read(|s| api::flow_sankey(s, from_ts, to_ts))
+    }
+
+    /// Сигнал режима рынка для вкладки «Сводка» (Risk-ON/OFF/Neutral +
+    /// уверенность + нетто-потоки по классам).
+    pub fn summary(&self, from_ts: i64, to_ts: i64) -> Result<RegimeSignalDto, StorageError> {
+        self.read(|s| api::summary(s, from_ts, to_ts))
     }
 
     /// Прогон правил алёртов по сохранённым барам (replay-проверка правил).

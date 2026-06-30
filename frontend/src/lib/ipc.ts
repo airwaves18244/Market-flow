@@ -15,6 +15,7 @@ import type {
   FutureGroupDto,
   InstrumentDto,
   OrderBookDto,
+  RegimeSignalDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
@@ -79,6 +80,10 @@ export const ipc = {
 
   flowSankey: (fromTs: number, toTs: number) =>
     invoke<FlowEdgeDto[]>("flow_sankey", { fromTs, toTs }),
+
+  // ── Вкладка «Сводка» — режим рынка по кросс-актив потокам ────────────────
+  summary: (fromTs: number, toTs: number) =>
+    invoke<RegimeSignalDto>("summary", { fromTs, toTs }),
 
   // ── Фаза 7 — live-панели ────────────────────────────────────────────────
   // Time&Sales и DOM в боевом режиме приходят live-push событиями

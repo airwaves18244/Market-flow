@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+<template id="__bundler_thumbnail" data-bg-color="#0b0d12">
+  <svg viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+    <rect width="120" height="80" fill="#0b0d12"/>
+    <rect x="8" y="8" width="104" height="6" rx="2" fill="#151823"/>
+    <rect x="8" y="18" width="28" height="54" rx="3" fill="#11131a"/>
+    <rect x="40" y="18" width="82" height="26" rx="3" fill="#11131a"/>
+    <rect x="40" y="48" width="82" height="24" rx="3" fill="#11131a"/>
+    <polyline points="44,66 52,58 60,62 68,54 76,56 84,48 92,52 100,46 108,50 116,44" fill="none" stroke="#a78bfa" stroke-width="1.5"/>
+    <rect x="12" y="22" width="20" height="3" rx="1" fill="#a78bfa" opacity=".5"/>
+    <rect x="12" y="28" width="20" height="3" rx="1" fill="#4ade80" opacity=".5"/>
+    <rect x="12" y="34" width="20" height="3" rx="1" fill="#5b9bf0" opacity=".5"/>
+    <rect x="12" y="40" width="20" height="3" rx="1" fill="#f87171" opacity=".5"/>
+    <circle cx="16" cy="10" r="2" fill="#4ade80"/>
+  </svg>
+</template>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#0b0d12}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:5px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2)}
+::-webkit-scrollbar-track{background:transparent}
+::selection{background:rgba(167,139,250,.35)}
+@keyframes mfpulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes mfflash{0%{background:rgba(167,139,250,.18)}100%{background:transparent}}
+input::placeholder{color:rgba(255,255,255,.28)}
+</style>
+</helmet>
+<div data-screen-label="Terminal" style="--bg:#0b0d12;--bg2:#0e1016;--panel:#11131a;--panel2:#151823;--raised:#191c27;--line:rgba(255,255,255,.07);--line2:rgba(255,255,255,.12);--txt:rgba(255,255,255,.92);--txt2:rgba(255,255,255,.55);--txt3:rgba(255,255,255,.34);--up:#4ade80;--dn:#f87171;--acc:#a78bfa;--info:#5b9bf0;--warn:#e0a23a;--sans:'IBM Plex Sans','Helvetica Neue',Arial,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;height:100vh;width:100%;display:flex;flex-direction:column;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:13px;overflow:hidden;-webkit-font-smoothing:antialiased">
+
+  <div style="height:46px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;background:linear-gradient(180deg,#13161f,#0e1016);border-bottom:1px solid var(--line2)">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:22px;height:22px;display:flex;flex-direction:column;justify-content:center;gap:2.5px">
+        <div style="height:3px;width:62%;background:var(--up);border-radius:1px"></div>
+        <div style="height:3px;width:100%;background:var(--acc);border-radius:1px"></div>
+        <div style="height:3px;width:42%;background:var(--dn);border-radius:1px"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;line-height:1.05">
+        <span style="font-size:12.5px;font-weight:700;letter-spacing:.05em">MARKET TERMINAL</span>
+        <span style="font-size:8px;color:var(--txt3);letter-spacing:.26em;text-transform:uppercase">Оборот · потоки · Finam</span>
+      </div>
+    </div>
+    <div style="flex:1;max-width:380px;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px">
+      <span style="color:var(--txt3);font-size:13px;line-height:1">⌕</span>
+      <input placeholder="Поиск инструмента · SBER@MISX" style="flex:1;background:none;border:none;outline:none;color:var(--txt);font-family:var(--sans);font-size:12px">
+      <span style="font-family:var(--mono);font-size:9px;color:var(--txt3);border:1px solid var(--line);border-radius:3px;padding:1px 5px">/</span>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;align-items:center;gap:7px">
+      <span style="font-size:8.5px;color:var(--txt3);text-transform:uppercase;letter-spacing:.1em">Период</span>
+      <div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:2px"><sc-for list="{{ gTabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div>
+    </div>
+    <div style="width:1px;height:22px;background:var(--line)"></div>
+    <div style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--txt2)">
+      <span style="width:7px;height:7px;border-radius:50%;background:var(--up);animation:mfpulse 2s infinite"></span>
+      <span style="font-family:var(--mono);color:var(--txt)">LIVE</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;color:var(--txt2)">
+      <span style="color:var(--txt)">{{ clock }}</span><span style="color:var(--txt3)">МСК</span>
+    </div>
+    <div style="display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden">
+      <button onClick="{{ setRu }}" style="{{ ruStyle }}">RU</button>
+      <button onClick="{{ setEn }}" style="{{ enStyle }}">EN</button>
+    </div>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <div style="width:64px;flex:none;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:6px 0;overflow-y:auto">
+      <sc-for list="{{ rail }}" as="it" hint-placeholder-count="10">
+        <button onClick="{{ it.onClick }}" style="{{ it.style }}">
+          <span style="display:flex;align-items:center;justify-content:center;height:17px">{{ it.iconEl }}</span>
+          <span style="font-size:8.5px;font-weight:600;text-align:center;line-height:1.05">{{ it.ru }}</span>
+          <span style="font-size:7px;color:var(--txt3);text-transform:uppercase;letter-spacing:.03em;text-align:center;line-height:1">{{ it.en }}</span>
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0;min-height:0">
+      <div style="height:38px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--line);background:var(--bg2)">
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span style="font-size:14px;font-weight:600">{{ activeRu }}</span>
+          <span style="font-size:9.5px;color:var(--txt3);text-transform:uppercase;letter-spacing:.12em">{{ activeEn }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--txt3)">{{ instrCount }} инстр · {{ sectorCount }} секторов</span>
+          <span style="font-family:var(--mono);font-size:8.5px;color:var(--txt3)">диапазон по умолчанию · {{ gRangeLabel }}</span>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--txt3)">{{ sessionStr }}</span>
+        </div>
+      </div>
+
+      <div data-screen-label="{{ activeEn }}" style="flex:1;min-height:0;overflow:auto;font-size:{{ baseFs }}">
+
+        <sc-if value="{{ wsOverview }}" hint-placeholder-val="{{ true }}">
+        <div style="height:100%;display:grid;grid-template-columns:1fr 344px;grid-template-rows:auto minmax(0,1.45fr) minmax(0,0.95fr);gap:8px;padding:8px">
+
+          <div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(6,1fr);gap:8px">
+            <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6">
+              <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:9px 12px;display:flex;flex-direction:column;gap:3px;min-width:0">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px">
+                  <span style="font-size:9.5px;color:var(--txt2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ k.ru }}</span>
+                  <span style="font-size:7.5px;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;flex:none">{{ k.en }}</span>
+                </div>
+                <span style="font-family:var(--mono);font-size:19px;font-weight:600;letter-spacing:-.01em">{{ k.val }}</span>
+                <span style="font-family:var(--mono);font-size:10px;{{ k.deltaStyle }}">{{ k.delta }}</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="grid-column:1;grid-row:2;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none">
+              <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Карта оборота</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Turnover map · {{ pc.treemap.lbl }}</span></div>
+              <div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.treemap.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.treemap.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1" title="Сбросить к глобальному">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.treemap.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div>
+            </div>
+            <div style="flex:1;min-height:0;padding:6px">{{ treemapEl }}</div>
+          </div>
+
+          <div style="grid-column:2;grid-row:2;display:flex;flex-direction:column;gap:8px;min-height:0">
+            <div style="flex:1.5;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Вотчлист</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Watchlist</span></div>
+                <div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.watch.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.watch.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.watch.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div>
+              </div>
+              <div style="display:grid;grid-template-columns:46px 1fr 62px 52px 54px;gap:6px;padding:5px 10px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:8px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;flex:none"><span>Тикер</span><span>Имя</span><span style="text-align:right">Цена</span><span style="text-align:right">{{ pc.watch.col }}</span><span style="text-align:right">тренд</span></div>
+              <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+                <sc-for list="{{ watch }}" as="w" hint-placeholder-count="9">
+                  <div onClick="{{ w.onClick }}" style="{{ w.rowStyle }}">
+                    <span style="font-family:var(--mono);font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px"><span style="width:5px;height:5px;border-radius:1px;{{ w.dotStyle }}"></span>{{ w.t }}</span>
+                    <span style="font-size:10px;color:var(--txt2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ w.n }}</span>
+                    <span style="font-family:var(--mono);font-size:11px;text-align:right">{{ w.lastStr }}</span>
+                    <span style="font-family:var(--mono);font-size:10.5px;text-align:right;{{ w.chgStyle }}">{{ w.chgStr }}</span>
+                    <span style="display:flex;justify-content:flex-end;align-items:center">{{ w.sparkEl }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="flex:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:center;justify-content:space-between">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Движения</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Top movers · {{ pc.movers.lbl }}</span></div>
+                <div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.movers.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.movers.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.movers.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div>
+              </div>
+              <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;min-height:0">
+                <div style="border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0">
+                  <div style="padding:5px 10px;font-size:9px;color:var(--up);font-weight:600;letter-spacing:.04em">▲ Рост · Gainers</div>
+                  <div style="flex:1;overflow-y:auto"><sc-for list="{{ gainers }}" as="g" hint-placeholder-count="5"><div style="display:flex;justify-content:space-between;padding:3px 10px;font-family:var(--mono);font-size:10.5px"><span style="font-weight:600">{{ g.t }}</span><span style="color:var(--up)">{{ g.chgStr }}</span></div></sc-for></div>
+                </div>
+                <div style="display:flex;flex-direction:column;min-height:0">
+                  <div style="padding:5px 10px;font-size:9px;color:var(--dn);font-weight:600;letter-spacing:.04em">▼ Падение · Losers</div>
+                  <div style="flex:1;overflow-y:auto"><sc-for list="{{ losers }}" as="l" hint-placeholder-count="5"><div style="display:flex;justify-content:space-between;padding:3px 10px;font-family:var(--mono);font-size:10.5px"><span style="font-weight:600">{{ l.t }}</span><span style="color:var(--dn)">{{ l.chgStr }}</span></div></sc-for></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:1/-1;grid-row:3;display:grid;grid-template-columns:1.7fr 1fr 1.1fr 1.1fr;gap:8px;min-height:0">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Оборот за период</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Turnover</span></div><div style="display:flex;align-items:center;gap:5px"><span style="font-family:var(--mono);font-size:11px;color:var(--acc)">{{ turnNow }}</span><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.area.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+              <div style="flex:1;min-height:0;padding:4px">{{ areaEl }}</div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Классы активов</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Asset mix</span></div>
+              <div style="flex:1;display:flex;align-items:center;gap:8px;padding:6px 10px;min-height:0">
+                <div style="flex:none">{{ donutEl }}</div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
+                  <sc-for list="{{ assetsLegend }}" as="a" hint-placeholder-count="3"><div style="display:flex;align-items:center;gap:6px;font-size:10px"><span style="width:8px;height:8px;border-radius:2px;{{ a.dotStyle }}"></span><span style="flex:1;color:var(--txt2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.ru }}</span><span style="font-family:var(--mono);font-weight:600">{{ a.pct }}</span></div></sc-for>
+                </div>
+              </div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Общий оборот</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Total</span></div>
+              <div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:6px">{{ gaugeEl }}</div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Ширина рынка</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Breadth</span></div><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.breadth.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div>
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:10px;padding:12px 12px">
+                <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:var(--mono);font-size:24px;font-weight:600;color:var(--up)">{{ adRatio }}</span><span style="font-size:9px;color:var(--txt3)">A/D ratio</span></div>
+                <div style="display:flex;height:8px;border-radius:3px;overflow:hidden;background:var(--line)"><div style="{{ brUpW }};background:var(--up)"></div><div style="{{ brUnW }};background:var(--txt3)"></div><div style="{{ brDnW }};background:var(--dn)"></div></div>
+                <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9.5px"><span style="color:var(--up)">▲ {{ brAdv }}</span><span style="color:var(--txt3)">● {{ brUnch }}</span><span style="color:var(--dn)">{{ brDec }} ▼</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsSectors }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:grid;grid-template-columns:1.05fr 1fr;grid-template-rows:minmax(0,1.35fr) minmax(0,1fr);gap:8px;padding:8px">
+          <div style="grid-column:1;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Ротация секторов · RRG</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Sector rotation</span></div><div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.rrg.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.rrg.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.rrg.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="flex:1;min-height:0;padding:6px">{{ rrgEl }}</div>
+          </div>
+          <div style="grid-column:2;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Доходность секторов</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Performance heatmap</span></div><span style="font-family:var(--mono);font-size:8px;color:var(--txt3)">подсветка активного периода</span></div>
+            <div style="flex:1;min-height:0;overflow:auto;padding:8px 10px">
+              <div style="display:grid;grid-template-columns:1.4fr repeat(5,1fr);gap:4px;align-items:center">
+                <span style="font-family:var(--mono);font-size:8px;color:var(--txt3);text-transform:uppercase"></span>
+                <sc-for list="{{ heatCols }}" as="hc" hint-placeholder-count="5"><span style="font-family:var(--mono);font-size:9px;text-align:center;{{ hc.style }}">{{ hc.k }}</span></sc-for>
+                <sc-for list="{{ heatRows }}" as="hr" hint-placeholder-count="8">
+                  <span style="font-size:10px;color:var(--txt2);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="width:7px;height:7px;border-radius:2px;background:{{ hr.c }};flex:none"></span>{{ hr.ru }}</span>
+                  <sc-for list="{{ hr.cells }}" as="cl" hint-placeholder-count="5"><span style="font-family:var(--mono);font-size:10px;font-weight:600;text-align:center;padding:7px 2px;border-radius:3px;{{ cl.style }}">{{ cl.str }}</span></sc-for>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          <div style="grid-column:1/-1;grid-row:2;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Роллап по секторам</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Sector rollup · взвешено по обороту · {{ pc.sectab.lbl }}</span></div><div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.sectab.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.sectab.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.sectab.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="display:grid;grid-template-columns:1.6fr 70px 1.3fr 80px 70px 80px 80px 130px;gap:8px;padding:6px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:8px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;flex:none"><span>Сектор · Sector</span><span style="text-align:right">Изм%</span><span>Доля оборота</span><span style="text-align:right">Ширина</span><span style="text-align:right">MFI</span><span style="text-align:right">RS-Ratio</span><span style="text-align:right">RS-Mom</span><span style="text-align:center">Квадрант</span></div>
+            <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+              <sc-for list="{{ sectorRows }}" as="s" hint-placeholder-count="8">
+                <div style="display:grid;grid-template-columns:1.6fr 70px 1.3fr 80px 70px 80px 80px 130px;gap:8px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line)">
+                  <span style="display:flex;align-items:center;gap:8px;font-size:11px"><span style="width:9px;height:9px;border-radius:2px;{{ s.dotStyle }};flex:none"></span><span style="font-weight:500">{{ s.ru }}</span><span style="color:var(--txt3);font-size:9px">{{ s.en }}</span></span>
+                  <span style="font-family:var(--mono);font-size:11px;text-align:right;{{ s.chgStyle }}">{{ s.chgStr }}</span>
+                  <span style="display:flex;align-items:center;gap:7px"><span style="flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden"><span style="display:block;height:100%;{{ s.shareW }}"></span></span><span style="font-family:var(--mono);font-size:10px;color:var(--txt2);width:30px;text-align:right">{{ s.share }}</span></span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;{{ s.breadthStyle }}">{{ s.breadth }}</span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;{{ s.mfiStyle }}">{{ s.mfi }}</span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--txt2)">{{ s.rs }}</span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--txt2)">{{ s.rm }}</span>
+                  <span style="display:flex;justify-content:center"><span style="font-size:9px;font-family:var(--mono);padding:2px 8px;border-radius:10px;{{ s.qStyle }}">{{ s.qru }}</span></span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsFlows }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:grid;grid-template-columns:1.45fr 1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,1fr);gap:8px;padding:8px">
+          <div style="grid-column:1;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Матрица перетоков</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Cross-asset flow · Sankey</span></div><div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.sankey.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.sankey.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.sankey.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="flex:1;min-height:0;padding:8px">{{ sankeyEl }}</div>
+          </div>
+          <div style="grid-column:2;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Чистый денежный поток</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Net money flow · {{ pc.netflow.lbl }}</span></div><div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.netflow.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.netflow.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.netflow.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:6px 12px">
+              <sc-for list="{{ netFlows }}" as="f" hint-placeholder-count="12">
+                <div style="display:grid;grid-template-columns:48px 1fr 1fr 52px;align-items:center;gap:4px;padding:3px 0">
+                  <span style="font-family:var(--mono);font-size:10.5px;font-weight:600">{{ f.t }}</span>
+                  <div style="display:flex;justify-content:flex-end;height:13px"><sc-if value="{{ f.neg }}" hint-placeholder-val="{{ false }}"><span style="height:100%;border-radius:2px 0 0 2px;{{ f.barStyle }}"></span></sc-if></div>
+                  <div style="display:flex;justify-content:flex-start;height:13px;border-left:1px solid var(--line2)"><sc-if value="{{ f.pos }}" hint-placeholder-val="{{ false }}"><span style="height:100%;border-radius:0 2px 2px 0;{{ f.barStyle }}"></span></sc-if></div>
+                  <span style="font-family:var(--mono);font-size:10px;text-align:right;{{ f.valStyle }}">{{ f.nfStr }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="grid-column:1;grid-row:2;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Кумулятивная дельта объёма</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">CVD · IMOEX</span></div><div style="display:flex;align-items:center;gap:6px"><span style="font-family:var(--mono);font-size:11px;color:var(--up)">{{ cvdNow }}</span><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.cvd.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="flex:1;min-height:0;padding:4px">{{ cvdEl }}</div>
+          </div>
+          <div style="grid-column:2;grid-row:2;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Индекс денежного потока</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">MFI · по секторам</span></div><span style="font-family:var(--mono);font-size:8px;color:var(--txt3)">30 / 70</span></div>
+            <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:6px 12px">
+              <sc-for list="{{ mfiRows }}" as="m" hint-placeholder-count="8">
+                <div style="display:grid;grid-template-columns:90px 1fr 36px 72px;align-items:center;gap:8px;padding:4px 0">
+                  <span style="font-size:10px;color:var(--txt2);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="width:7px;height:7px;border-radius:2px;{{ m.dotStyle }};flex:none"></span>{{ m.ru }}</span>
+                  <div style="position:relative;height:7px;background:var(--line);border-radius:3px;overflow:hidden"><span style="position:absolute;left:30%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18)"></span><span style="position:absolute;left:70%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18)"></span><span style="display:block;height:100%;border-radius:3px;{{ m.barStyle }}"></span></div>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right">{{ m.mfi }}</span>
+                  <span style="font-size:8.5px;text-align:right;{{ m.zoneStyle }}">{{ m.zone }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsLive }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:grid;grid-template-columns:1.55fr 250px 286px;grid-template-rows:minmax(0,1.75fr) minmax(0,0.7fr);gap:8px;padding:8px">
+          <div style="grid-column:1;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--line);flex:none">
+              <div style="display:flex;align-items:baseline;gap:10px"><span style="font-family:var(--mono);font-size:15px;font-weight:600">{{ symTicker }}</span><span style="font-family:var(--mono);font-size:9px;color:var(--txt3)">{{ symBoard }}</span><span style="font-size:10px;color:var(--txt2)">{{ symName }}</span></div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ ivTabs }}" as="t" hint-placeholder-count="5"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div>
+                <span style="font-family:var(--mono);font-size:17px;font-weight:600">{{ symLastStr }}</span><span style="font-family:var(--mono);font-size:12px;{{ symChgStyle }}">{{ symChgStr }}</span>
+              </div>
+            </div>
+            <div style="flex:1;min-height:0;padding:6px 4px 4px">{{ candleEl }}</div>
+          </div>
+
+          <div style="grid-column:2;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Стакан</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">DOM</span></div><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ depthTabs }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div>
+            <div style="flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden">
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;min-height:0">
+                <sc-for list="{{ bookAsks }}" as="a" hint-placeholder-count="11"><div style="position:relative;display:grid;grid-template-columns:1fr auto;gap:8px;padding:2px 10px;font-family:var(--mono);font-size:10.5px"><span style="position:absolute;right:0;top:1px;bottom:1px;background:rgba(248,113,113,.16);border-radius:2px;{{ a.barStyle }}"></span><span style="color:var(--dn);position:relative;z-index:1">{{ a.priceStr }}</span><span style="color:var(--txt2);position:relative;z-index:1;text-align:right">{{ a.sizeStr }}</span></div></sc-for>
+              </div>
+              <div style="flex:none;display:flex;align-items:center;justify-content:center;gap:8px;padding:5px 10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg2);font-family:var(--mono);font-size:9.5px;color:var(--txt3)"><span style="color:var(--txt2)">спред</span>{{ spreadStr }}</div>
+              <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0">
+                <sc-for list="{{ bookBids }}" as="b" hint-placeholder-count="11"><div style="position:relative;display:grid;grid-template-columns:1fr auto;gap:8px;padding:2px 10px;font-family:var(--mono);font-size:10.5px"><span style="position:absolute;right:0;top:1px;bottom:1px;background:rgba(74,222,128,.16);border-radius:2px;{{ b.barStyle }}"></span><span style="color:var(--up);position:relative;z-index:1">{{ b.priceStr }}</span><span style="color:var(--txt2);position:relative;z-index:1;text-align:right">{{ b.sizeStr }}</span></div></sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="grid-column:3;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Лента сделок</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Time &amp; Sales</span></div><span style="width:6px;height:6px;border-radius:50%;background:var(--up);animation:mfpulse 2s infinite"></span></div>
+            <div style="display:grid;grid-template-columns:62px 1fr 52px 24px;gap:6px;padding:4px 10px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:8px;color:var(--txt3);text-transform:uppercase;flex:none"><span>Время</span><span style="text-align:right">Цена</span><span style="text-align:right">Объём</span><span></span></div>
+            <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+              <sc-for list="{{ tapeRows }}" as="p" hint-placeholder-count="18"><div style="{{ p.rowStyle }}"><span style="color:var(--txt3)">{{ p.timeStr }}</span><span style="{{ p.priceStyle }}">{{ p.priceStr }}</span><span style="color:var(--txt2);text-align:right">{{ p.sizeStr }}</span><span style="{{ p.sideStyle }}">{{ p.side }}</span></div></sc-for>
+            </div>
+          </div>
+
+          <div style="grid-column:1/-1;grid-row:2;display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Правила алёртов</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Alert rules · edge-triggered</span></div><span style="font-family:var(--mono);font-size:8.5px;color:var(--acc)">+ новое</span></div>
+              <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+                <sc-for list="{{ alertRules }}" as="r" hint-placeholder-count="5"><div style="display:grid;grid-template-columns:54px 1fr 110px 70px;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="font-family:var(--mono);font-size:11px;font-weight:600">{{ r.sym }}</span><span style="font-family:var(--mono);font-size:10px;color:var(--txt2)">{{ r.cond }}</span><span style="font-size:9.5px;color:var(--txt3)">{{ r.kind }}</span><span style="display:flex;align-items:center;gap:6px;justify-content:flex-end;font-size:9.5px;{{ r.statusStyle }}"><span style="width:5px;height:5px;border-radius:50%;{{ r.dotStyle }}"></span>{{ r.status }}</span></div></sc-for>
+              </div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:baseline;gap:7px;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><span style="font-size:11px;font-weight:600">Срабатывания</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Triggers</span></div>
+              <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+                <sc-for list="{{ alertTriggers }}" as="g" hint-placeholder-count="5"><div style="display:flex;align-items:center;gap:10px;padding:5px 12px;border-bottom:1px solid var(--line)"><span style="width:3px;align-self:stretch;border-radius:2px;{{ g.barStyle }}"></span><span style="font-family:var(--mono);font-size:9.5px;color:var(--txt3);flex:none">{{ g.t }}</span><span style="font-family:var(--mono);font-size:11px;font-weight:600;flex:none;{{ g.symStyle }}">{{ g.sym }}</span><span style="font-size:10px;color:var(--txt2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ g.msg }}</span></div></sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsFutures }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:grid;grid-template-columns:1.05fr 1fr;grid-template-rows:minmax(0,1.25fr) minmax(0,1fr);gap:8px;padding:8px">
+          <div style="grid-column:1;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Группы фьючерсов</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Treemap · по обороту</span></div><div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.futmap.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.futmap.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.futmap.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="flex:1;min-height:0;padding:6px">{{ futTreemapEl }}</div>
+          </div>
+          <div style="grid-column:2;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Открытый интерес</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Open interest · динамика</span></div>
+            <div style="flex:1;min-height:0;padding:6px">{{ oiBarsEl }}</div>
+          </div>
+          <div style="grid-column:1/-1;grid-row:2;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Роллап по группам</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Futures rollup · {{ pc.futtab.lbl }}</span></div><div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.futtab.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.futtab.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.futtab.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="display:grid;grid-template-columns:1.4fr 70px 80px 1.2fr 90px 100px;gap:8px;padding:6px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:8px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;flex:none"><span>Группа · Group</span><span style="text-align:right">Контр.</span><span style="text-align:right">Изм%</span><span>Оборот</span><span style="text-align:right">Чист.поток</span><span style="text-align:right">Откр.интерес</span></div>
+            <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+              <sc-for list="{{ futRows }}" as="f" hint-placeholder-count="6">
+                <div style="display:grid;grid-template-columns:1.4fr 70px 80px 1.2fr 90px 100px;gap:8px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line)">
+                  <span style="display:flex;align-items:center;gap:8px;font-size:11px"><span style="font-family:var(--mono);font-weight:600">{{ f.g }}</span><span style="color:var(--txt3);font-size:9px">{{ f.name }}</span></span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--txt2)">{{ f.contracts }}</span>
+                  <span style="font-family:var(--mono);font-size:11px;text-align:right;{{ f.chgStyle }}">{{ f.chgStr }}</span>
+                  <span style="display:flex;align-items:center;gap:7px"><span style="flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden"><span style="display:block;height:100%;{{ f.turnW }}"></span></span><span style="font-family:var(--mono);font-size:10px;color:var(--txt2);width:46px;text-align:right">{{ f.turnStr }}</span></span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;{{ f.nfStyle }}">{{ f.nfStr }}</span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--txt)">{{ f.oiStr }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsBonds }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:grid;grid-template-columns:1.1fr 1fr;grid-template-rows:minmax(0,1.1fr) minmax(0,1fr);gap:8px;padding:8px">
+          <div style="grid-column:1;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Кривая доходности</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Yield curve · ОФЗ</span></div><span style="font-family:var(--mono);font-size:8.5px;color:var(--txt3)">срок → доходность, %</span></div>
+            <div style="flex:1;min-height:0;padding:6px">{{ yieldEl }}</div>
+          </div>
+          <div style="grid-column:2;grid-row:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Срок vs доходность</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Дюрация по эмитентам</span></div>
+            <div style="flex:1;min-height:0;padding:6px">{{ durScatterEl }}</div>
+          </div>
+          <div style="grid-column:1/-1;grid-row:2;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--line);flex:none"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Эмитенты облигаций</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Bond issuers · {{ pc.bondtab.lbl }}</span></div><div style="display:flex;align-items:center;gap:5px"><sc-if value="{{ pc.bondtab.over }}" hint-placeholder-val="{{ false }}"><button onClick="{{ pc.bondtab.onReset }}" style="border:none;background:none;color:var(--acc);cursor:pointer;font-size:12px;padding:0 2px;line-height:1">↺</button></sc-if><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ pc.bondtab.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div></div>
+            <div style="display:grid;grid-template-columns:1.4fr 70px 1.2fr 90px 90px 110px;gap:8px;padding:6px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:8px;color:var(--txt3);text-transform:uppercase;letter-spacing:.04em;flex:none"><span>Эмитент · Issuer</span><span style="text-align:right">Выпуск.</span><span>Оборот</span><span style="text-align:right">Чист.поток</span><span style="text-align:right">Дох-ть %</span><span style="text-align:right">Дюрация, лет</span></div>
+            <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+              <sc-for list="{{ bondRows }}" as="b" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:1.4fr 70px 1.2fr 90px 90px 110px;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)">
+                  <span style="display:flex;align-items:center;gap:8px;font-size:11px"><span style="width:9px;height:9px;border-radius:2px;background:var(--info);flex:none"></span><span style="font-weight:500">{{ b.iss }}</span><span style="color:var(--txt3);font-size:9px">{{ b.en }}</span></span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--txt2)">{{ b.n }}</span>
+                  <span style="display:flex;align-items:center;gap:7px"><span style="flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden"><span style="display:block;height:100%;{{ b.turnW }}"></span></span><span style="font-family:var(--mono);font-size:10px;color:var(--txt2);width:46px;text-align:right">{{ b.turnStr }}</span></span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;{{ b.nfStyle }}">{{ b.nfStr }}</span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--warn)">{{ b.yldStr }}</span>
+                  <span style="font-family:var(--mono);font-size:10.5px;text-align:right;color:var(--txt)">{{ b.durStr }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsSummary }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:grid;grid-template-rows:auto minmax(0,1.3fr) minmax(0,1fr);gap:8px;padding:8px">
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:12px 16px;display:flex;align-items:center;gap:18px">
+            <div style="display:flex;flex-direction:column;gap:3px;min-width:230px">
+              <span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.12em">Режим рынка · {{ sumPeriodLbl }}</span>
+              <span style="font-size:20px;font-weight:700;color:{{ regimeColor }}">{{ regimeRu }}</span>
+            </div>
+            <div style="width:1px;align-self:stretch;background:var(--line)"></div>
+            <span style="flex:1;font-size:13px;color:var(--txt);line-height:1.4;text-wrap:pretty">{{ regimeThesis }}</span>
+            <div style="display:flex;align-items:center;gap:5px"><span style="font-size:8.5px;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em">Период</span><div style="display:flex;gap:1px;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px"><sc-for list="{{ sumPeriodTabs.tabs }}" as="t" hint-placeholder-count="6"><button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.k }}</button></sc-for></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:8px;min-height:0">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Карта больших денег</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Where big money moves · нетто, ₽млрд</span></div>
+              <div style="flex:1;min-height:0;padding:8px">{{ regimeFlowEl }}</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+              <div style="flex:none;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column">
+                <div style="padding:7px 11px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Уверенность сигнала</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Conviction</span></div>
+                <div style="height:118px;padding:4px">{{ convGaugeEl }}</div>
+              </div>
+              <div style="flex:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+                <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Нетто-поток по классам</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Net by class</span></div>
+                <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:9px 12px;display:flex;flex-direction:column;gap:10px">
+                  <sc-for list="{{ classNetRows }}" as="c" hint-placeholder-count="4">
+                    <div style="display:grid;grid-template-columns:96px 1fr 1fr 84px;align-items:center;gap:6px">
+                      <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt2)"><span style="width:8px;height:8px;border-radius:2px;{{ c.dot }};flex:none"></span>{{ c.ru }}</span>
+                      <div style="display:flex;justify-content:flex-end;height:12px"><sc-if value="{{ c.neg }}" hint-placeholder-val="{{ false }}"><span style="height:100%;border-radius:2px 0 0 2px;{{ c.barStyle }}"></span></sc-if></div>
+                      <div style="display:flex;justify-content:flex-start;height:12px;border-left:1px solid var(--line2)"><sc-if value="{{ c.pos }}" hint-placeholder-val="{{ false }}"><span style="height:100%;border-radius:0 2px 2px 0;{{ c.barStyle }}"></span></sc-if></div>
+                      <span style="font-family:var(--mono);font-size:11px;text-align:right;{{ c.vStyle }}">{{ c.vStr }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Ключевые сигналы</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Drivers</span></div>
+              <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+                <sc-for list="{{ signals }}" as="s" hint-placeholder-count="6"><div style="display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--line)"><span style="font-size:11px;color:var(--txt2)">{{ s.label }}</span><span style="font-family:var(--mono);font-size:11px;color:var(--txt)">{{ s.val }}</span><span style="font-size:8.5px;font-family:var(--mono);padding:2px 8px;border-radius:10px;{{ s.dirStyle }}">{{ s.dirRu }}</span></div></sc-for>
+              </div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:7px"><span style="font-size:11px;font-weight:600">Что это значит · решения</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Decision aid</span></div>
+              <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:9px 13px;display:flex;flex-direction:column;gap:8px">
+                <sc-for list="{{ decisions }}" as="d" hint-placeholder-count="4"><div style="display:flex;gap:9px;align-items:flex-start"><span style="color:{{ regimeColor }};font-size:13px;line-height:1.2;flex:none">→</span><span style="font-size:11.5px;color:var(--txt);line-height:1.35;text-wrap:pretty">{{ d }}</span></div></sc-for>
+                <div style="margin-top:4px;padding-top:8px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px">
+                  <span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em">Риски · на что смотреть</span>
+                  <sc-for list="{{ risks }}" as="r" hint-placeholder-count="3"><div style="display:flex;gap:9px;align-items:flex-start"><span style="color:var(--warn);font-size:11px;flex:none">⚠</span><span style="font-size:10.5px;color:var(--txt2);line-height:1.35">{{ r }}</span></div></sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsBacktest }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:grid;grid-template-columns:300px 1fr;gap:8px;padding:8px">
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+            <div style="padding:8px 12px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:center;justify-content:space-between"><span style="font-size:11px;font-weight:600">Стратегия</span><span style="font-family:var(--mono);font-size:8px;color:var(--warn);border:1px solid rgba(224,162,58,.4);border-radius:3px;padding:1px 6px">ПРОТОТИП</span></div>
+            <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px;display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;flex-direction:column;gap:7px"><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Пресет</span><sc-for list="{{ btPresetRows }}" as="p" hint-placeholder-count="3"><button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.ru }}</button></sc-for></div>
+              <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Параметры</span>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--txt2)"><span>Период</span><span style="font-family:var(--mono);color:var(--txt)">{{ gRangeLabel }} · из шапки</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--txt2)"><span>Капитал</span><span style="font-family:var(--mono);color:var(--txt)">₽{{ btCapital }}</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--txt2)"><span>Сайзинг</span><span style="font-family:var(--mono);color:var(--txt)">риск 1% / сделка</span></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--txt2)"><span>Комиссия</span><span style="font-family:var(--mono);color:var(--txt)">0.04%</span></div>
+              </div>
+              <button onClick="{{ runBt }}" style="width:100%;border:none;border-radius:7px;padding:11px;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;color:#0b0d12;background:var(--acc)">▶ Запустить бэктест</button>
+              <span style="font-size:9.5px;color:var(--txt3);line-height:1.4;text-wrap:pretty">Прототип: результат симулируется в UI. Реальный движок будет считать на сохранённых барах (DuckDB) — см. roadmap_design.md.</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-rows:auto minmax(0,1.5fr) minmax(0,1fr);gap:8px;min-height:0">
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px">
+              <sc-for list="{{ btStats }}" as="s" hint-placeholder-count="6"><div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:9px 11px;display:flex;flex-direction:column;gap:3px"><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em">{{ s.k }}</span><span style="font-family:var(--mono);font-size:18px;font-weight:600;{{ s.vStyle }}">{{ s.v }}</span></div></sc-for>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Кривая капитала</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Equity curve vs IMOEX</span></div><div style="display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:9px"><span style="display:flex;align-items:center;gap:5px;color:var(--txt2)"><span style="width:14px;height:2px;background:var(--acc)"></span>стратегия</span><span style="display:flex;align-items:center;gap:5px;color:var(--txt3)"><span style="width:14px;border-top:2px dashed currentColor"></span>IMOEX</span></div></div>
+              <div style="flex:1;min-height:0;padding:6px">{{ equityCurveEl }}</div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Доходность по месяцам</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Monthly returns, %</span></div>
+              <div style="flex:1;min-height:0;overflow:auto;padding:8px 12px">
+                <div style="display:grid;grid-template-columns:46px repeat(12,1fr);gap:3px;align-items:center">
+                  <span></span><sc-for list="{{ btMonthLabels }}" as="m" hint-placeholder-count="12"><span style="font-family:var(--mono);font-size:9px;color:var(--txt3);text-align:center">{{ m }}</span></sc-for>
+                  <sc-for list="{{ btYears }}" as="y" hint-placeholder-count="2">
+                    <span style="font-family:var(--mono);font-size:10px;color:var(--txt2)">{{ y.yr }}</span>
+                    <sc-for list="{{ y.cells }}" as="cl" hint-placeholder-count="12"><span style="font-family:var(--mono);font-size:9.5px;font-weight:600;text-align:center;padding:6px 1px;border-radius:3px;{{ cl.style }}">{{ cl.str }}</span></sc-for>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsTrade }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:flex;flex-direction:column;gap:8px;padding:8px;min-height:0">
+          <div style="flex:none;display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--warn);background:rgba(224,162,58,.08);border:1px solid rgba(224,162,58,.25);border-radius:6px;padding:8px 12px"><span style="width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none"></span><span>Прототип торгового терминала · заявки симулируются и НЕ отправляются на биржу (текущая сборка — READ-ONLY).</span></div>
+          <div style="flex:1;display:grid;grid-template-columns:288px 1fr 250px;gap:8px;min-height:0">
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:8px 12px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;justify-content:space-between"><span style="font-size:11px;font-weight:600">Заявка</span><span style="font-family:var(--mono);font-size:10px;color:var(--txt3)">{{ order.sym }}@MISX</span></div>
+              <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px;display:flex;flex-direction:column;gap:12px">
+                <div style="display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden"><button onClick="{{ order.onBuy }}" style="{{ order.buyStyle }}">Купить</button><button onClick="{{ order.onSell }}" style="{{ order.sellStyle }}">Продать</button></div>
+                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Тип</span><div style="display:flex;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px"><sc-for list="{{ order.types }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.onClick }}" style="{{ t.style }};flex:1">{{ t.k }}</button></sc-for></div></div>
+                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Количество, лотов</span><div style="display:flex;align-items:center;border:1px solid var(--line);border-radius:6px;overflow:hidden"><button onClick="{{ order.onMinus }}" style="border:none;background:var(--bg);color:var(--txt);font-size:15px;padding:7px 14px;cursor:pointer">−</button><span style="flex:1;text-align:center;font-family:var(--mono);font-size:14px;font-weight:600">{{ order.qty }}</span><button onClick="{{ order.onPlus }}" style="border:none;background:var(--bg);color:var(--txt);font-size:15px;padding:7px 14px;cursor:pointer">+</button></div></div>
+                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Цена</span><div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:6px;padding:8px 11px"><span style="font-family:var(--mono);font-size:13px;font-weight:600">{{ order.price }}</span><span style="font-size:9px;color:var(--txt3)">₽ · посл.</span></div></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;font-size:10.5px;color:var(--txt2);padding-top:2px"><span>Оценочно</span><span style="font-family:var(--mono);font-size:12px;color:var(--txt)">{{ order.est }}</span></div>
+                <button onClick="{{ order.onSubmit }}" style="{{ order.submitStyle }}">{{ order.submitLabel }}</button>
+                <sc-if value="{{ orderMsg }}" hint-placeholder-val="{{ false }}"><div style="font-size:10px;color:var(--dn);background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:8px 10px;line-height:1.35">{{ orderMsg }}</div></sc-if>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-rows:1.3fr 1fr;gap:8px;min-height:0">
+              <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+                <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:center;justify-content:space-between"><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Позиции</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Positions</span></div><span style="font-family:var(--mono);font-size:11px;{{ totPnlStyle }}">{{ totPnlStr }}</span></div>
+                <div style="display:grid;grid-template-columns:60px 56px 1fr 1fr 1fr 64px;gap:6px;padding:5px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:8px;color:var(--txt3);text-transform:uppercase;flex:none"><span>Тикер</span><span style="text-align:right">Кол-во</span><span style="text-align:right">Средн.</span><span style="text-align:right">Цена</span><span style="text-align:right">PnL</span><span style="text-align:right">%</span></div>
+                <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+                  <sc-for list="{{ posRows }}" as="p" hint-placeholder-count="5"><div style="display:grid;grid-template-columns:60px 56px 1fr 1fr 1fr 64px;gap:6px;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px"><span style="font-weight:600">{{ p.sym }}</span><span style="text-align:right;color:var(--txt2)">{{ p.qty }}</span><span style="text-align:right;color:var(--txt2)">{{ p.avg }}</span><span style="text-align:right">{{ p.last }}</span><span style="text-align:right;{{ p.pnlStyle }}">{{ p.pnlStr }}</span><span style="text-align:right;{{ p.pctStyle }}">{{ p.pctStr }}</span></div></sc-for>
+                </div>
+              </div>
+              <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+                <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Активные заявки</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Working orders</span></div>
+                <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden">
+                  <sc-for list="{{ ordRows }}" as="o" hint-placeholder-count="3"><div style="display:grid;grid-template-columns:62px 56px 1fr 64px 48px 70px;gap:6px;align-items:center;padding:6px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10.5px"><span style="color:var(--txt3)">{{ o.t }}</span><span style="font-weight:600">{{ o.sym }}</span><span style="{{ o.sideStyle }}">{{ o.side }}</span><span style="color:var(--txt2)">{{ o.type }}</span><span style="text-align:right;color:var(--txt2)">{{ o.qty }}</span><span style="text-align:right">{{ o.price }}</span></div></sc-for>
+                </div>
+              </div>
+            </div>
+            <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+              <div style="padding:7px 11px;border-bottom:1px solid var(--line);flex:none;display:flex;align-items:baseline;gap:8px"><span style="font-size:11px;font-weight:600">Счёт</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em">Account</span></div>
+              <div style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:6px 13px">
+                <sc-for list="{{ acct }}" as="a" hint-placeholder-count="5"><div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line)"><span style="font-size:10.5px;color:var(--txt2)">{{ a.k }}</span><span style="font-family:var(--mono);font-size:12px;font-weight:600;{{ a.style }}">{{ a.v }}</span></div></sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ wsSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;overflow-y:auto;padding:14px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-content:start">
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:14px 16px;display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:12px;font-weight:600">Представление</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">View settings</span></div>
+            <sc-for list="{{ settingsRows }}" as="s" hint-placeholder-count="3">
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font-size:11px;color:var(--txt2)">{{ s.ru }}</span><span style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--acc)">{{ s.val }}</span></div>
+                <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--mono);font-size:8.5px;color:var(--txt3)">{{ s.min }}</span><div style="flex:1;height:5px;background:var(--line);border-radius:3px;position:relative"><span style="position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--acc);{{ s.fillW }}"></span><span style="position:absolute;top:-3px;width:11px;height:11px;border-radius:50%;background:var(--txt);border:2px solid var(--acc);{{ s.knobX }}"></span></div><span style="font-family:var(--mono);font-size:8.5px;color:var(--txt3)">{{ s.max }}</span></div>
+                <div style="display:flex;gap:6px"><sc-for list="{{ s.steps }}" as="o" hint-placeholder-count="4"><button onClick="{{ o.onClick }}" style="{{ o.style }}">{{ o.k }}</button></sc-for></div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:12px;font-weight:600">Данные и соединение</span><span style="font-size:9px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em">Data &amp; feed</span></div>
+            <sc-for list="{{ feedRows }}" as="r" hint-placeholder-count="6"><div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)"><span style="font-size:10.5px;color:var(--txt2)">{{ r.k }}</span><span style="font-family:var(--mono);font-size:10.5px;{{ r.vStyle }}">{{ r.v }}</span></div></sc-for>
+            <div style="margin-top:4px;display:flex;align-items:center;gap:8px;font-size:10px;color:var(--warn);background:rgba(224,162,58,.08);border:1px solid rgba(224,162,58,.25);border-radius:6px;padding:8px 11px"><span style="width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none"></span><span>READ-ONLY v1 — терминал только читает данные и считает метрики, заявки не выставляются.</span></div>
+          </div>
+        </div>
+        </sc-if>
+
+      </div>
+    </div>
+  </div>
+
+  <div style="height:25px;flex:none;display:flex;align-items:center;gap:18px;padding:0 14px;background:var(--bg2);border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--txt2)">
+    <span><span style="color:var(--txt3)">данные</span> {{ clock }}</span>
+    <span><span style="color:var(--txt3)">задержка</span> 38 ms</span>
+    <span><span style="color:var(--txt3)">лимит API</span> {{ rateStr }}</span>
+    <span><span style="color:var(--txt3)">DuckDB</span> schema v7</span>
+    <span><span style="color:var(--txt3)">инстр.</span> {{ instrCount }}</span>
+    <span><span style="color:var(--txt3)">источник</span> Finam Trade API · gRPC</span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--warn)"><span style="width:6px;height:6px;border-radius:50%;background:var(--warn)"></span>READ-ONLY v1 · только чтение</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;language&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;ru&quot;,&quot;en&quot;],&quot;default&quot;:&quot;ru&quot;,&quot;tsType&quot;:&quot;'ru'|'en'&quot;,&quot;section&quot;:&quot;Language&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#a78bfa&quot;,&quot;options&quot;:[&quot;#a78bfa&quot;,&quot;#5b9bf0&quot;,&quot;#4cc2b4&quot;,&quot;#e0a23a&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;accentUp&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#4ade80&quot;,&quot;options&quot;:[&quot;#4ade80&quot;,&quot;#26a96c&quot;,&quot;#3fb950&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;accentDown&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#f87171&quot;,&quot;options&quot;:[&quot;#f87171&quot;,&quot;#e5484d&quot;,&quot;#ff5c5c&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:70,&quot;min&quot;:0,&quot;max&quot;:100,&quot;step&quot;:10,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Layout&quot;},&quot;showSparklines&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layout&quot;}}">
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    this.C = {txt:'rgba(255,255,255,.92)',txt2:'rgba(255,255,255,.55)',txt3:'rgba(255,255,255,.34)',up:'#4ade80',dn:'#f87171',acc:'#a78bfa',info:'#5b9bf0',warn:'#e0a23a',grid:'rgba(255,255,255,.06)',bg:'#0b0d12'};
+    this.workspaces = [
+      {id:'overview',ru:'Обзор',en:'Overview',icon:'grid'},
+      {id:'summary',ru:'Сводка',en:'Summary',icon:'summary'},
+      {id:'sectors',ru:'Секторы',en:'Sectors',icon:'layers'},
+      {id:'flows',ru:'Потоки',en:'Flows',icon:'flow'},
+      {id:'live',ru:'Лента',en:'Tape & DOM',icon:'pulse'},
+      {id:'futures',ru:'Фьючерсы',en:'Futures',icon:'fut'},
+      {id:'bonds',ru:'Облигации',en:'Bonds',icon:'bond'},
+      {id:'backtest',ru:'Бэктест',en:'Backtest',icon:'replay'},
+      {id:'trade',ru:'Торговля',en:'Trade',icon:'trade'},
+      {id:'settings',ru:'Настройки',en:'Settings',icon:'gear'},
+    ];
+    // Канонические диапазоны (как fromTs/toTs в IPC). h = индекс горизонта в массивах доходностей.
+    this.RK=['d','w','m','q','ytd','y'];
+    this.RLAB={ru:{d:'1Д',w:'1Н',m:'1М',q:'3М',ytd:'YTD',y:'1Г'},en:{d:'1D',w:'1W',m:'1M',q:'3M',ytd:'YTD',y:'1Y'}};
+    this.HZN={d:0,w:1,m:2,q:3,ytd:4,y:4};
+    this.RF={d:0.5,w:0.74,m:1,q:1.45,ytd:1.95,y:2.4};
+    this.BR={d:[152,96,18],w:[168,82,15],m:[187,94,21],q:[204,86,13],ytd:[166,118,22],y:[179,104,20]};
+    this.IDX={d:0.84,w:1.9,m:3.4,q:6.1,ytd:9.7,y:14.2};
+    // Интервалы свечей = TimeFrame ядра (m1/m5/m15/h1/d1).
+    this.IV=[{k:'m1',ru:'1м',en:'1m'},{k:'m5',ru:'5м',en:'5m'},{k:'m15',ru:'15м',en:'15m'},{k:'h1',ru:'1Ч',en:'1h'},{k:'d1',ru:'1Д',en:'1D'}];
+    this.sectors=[
+      {id:'oil',ru:'Нефтегаз',en:'Oil & Gas',c:'#e0a23a',chg:0.4,share:31,breadth:58,mfi:54,rs:101.2,rm:99.0,ret:[0.4,1.8,3.2,-2.1,12.4]},
+      {id:'fin',ru:'Финансы',en:'Financials',c:'#5b9bf0',chg:1.1,share:22,breadth:66,mfi:61,rs:102.4,rm:101.8,ret:[1.1,2.9,6.1,9.4,24.7]},
+      {id:'metal',ru:'Металлы',en:'Metals',c:'#8aa0b4',chg:-0.7,share:15,breadth:41,mfi:43,rs:98.2,rm:97.5,ret:[-0.7,-1.4,-3.8,-6.2,-9.1]},
+      {id:'it',ru:'IT',en:'IT',c:'#a78bfa',chg:2.2,share:9,breadth:71,mfi:67,rs:103.1,rm:102.6,ret:[2.2,5.1,9.8,14.2,31.5]},
+      {id:'cons',ru:'Потреб.',en:'Consumer',c:'#4cc2b4',chg:-0.2,share:7,breadth:49,mfi:48,rs:99.1,rm:100.4,ret:[-0.2,0.6,1.9,3.1,7.4]},
+      {id:'util',ru:'Энергетика',en:'Utilities',c:'#9bcf5f',chg:0.5,share:5,breadth:55,mfi:52,rs:99.6,rm:98.8,ret:[0.5,1.1,-0.8,2.4,5.6]},
+      {id:'telecom',ru:'Телеком',en:'Telecom',c:'#ef7a8b',chg:-0.3,share:6,breadth:44,mfi:46,rs:98.7,rm:101.1,ret:[-0.3,-0.9,1.2,0.4,3.8]},
+      {id:'transport',ru:'Транспорт',en:'Transport',c:'#f0a35f',chg:1.3,share:5,breadth:60,mfi:58,rs:100.8,rm:102.0,ret:[1.3,3.4,5.6,7.1,16.2]},
+    ];
+    this.sectors.forEach(s=>{ const tr=[]; for(let i=4;i>=1;i--){ tr.push({rs:s.rs-(s.rs-100)*i*0.16-Math.sin(i)*0.18, rm:s.rm-(s.rm-100)*i*0.16+Math.cos(i)*0.18}); } tr.push({rs:s.rs,rm:s.rm}); s.trail=tr; });
+    this.instr=[
+      {t:'SBER',n:'Сбербанк',sec:'fin',last:308.5,chg:1.8,turn:42.3,dp:2},
+      {t:'YDEX',n:'Яндекс',sec:'it',last:4380,chg:2.6,turn:21.4,dp:0},
+      {t:'GAZP',n:'Газпром',sec:'oil',last:128.74,chg:-0.6,turn:28.1,dp:2},
+      {t:'LKOH',n:'Лукойл',sec:'oil',last:7120,chg:0.9,turn:24.7,dp:0},
+      {t:'GMKN',n:'Норникель',sec:'metal',last:158.2,chg:-1.4,turn:18.9,dp:1},
+      {t:'ROSN',n:'Роснефть',sec:'oil',last:565.3,chg:0.4,turn:15.2,dp:1},
+      {t:'NVTK',n:'Новатэк',sec:'oil',last:1042,chg:-0.8,turn:12.3,dp:0},
+      {t:'PLZL',n:'Полюс',sec:'metal',last:14250,chg:1.1,turn:11.6,dp:0},
+      {t:'TATN',n:'Татнефть',sec:'oil',last:712.5,chg:0.2,turn:9.8,dp:1},
+      {t:'VTBR',n:'ВТБ',sec:'fin',last:0.0214,chg:3.2,turn:8.7,dp:4},
+      {t:'MOEX',n:'Мосбиржа',sec:'fin',last:232.1,chg:0.7,turn:7.9,dp:1},
+      {t:'MGNT',n:'Магнит',sec:'cons',last:5180,chg:-0.3,turn:6.4,dp:0},
+      {t:'PHOR',n:'ФосАгро',sec:'metal',last:6740,chg:-0.5,turn:4.2,dp:0},
+      {t:'SNGS',n:'Сургут',sec:'oil',last:28.4,chg:1.9,turn:5.6,dp:2},
+      {t:'CHMF',n:'Северсталь',sec:'metal',last:1180,chg:-0.9,turn:4.9,dp:0},
+      {t:'MTSS',n:'МТС',sec:'telecom',last:198.7,chg:-0.2,turn:5.1,dp:1},
+      {t:'ALRS',n:'Алроса',sec:'metal',last:54.8,chg:2.1,turn:3.3,dp:2},
+      {t:'AFLT',n:'Аэрофлот',sec:'transport',last:64.2,chg:1.3,turn:3.0,dp:2},
+    ];
+    this.instr.forEach(i=>{ const m=[1,2.05,4.3,6.6,11.5]; i.rets=m.map((f,idx)=> +(i.chg*f + Math.sin(idx*1.3+i.turn)*0.7).toFixed(2)); i.spark=this.genSpark(i.chg); });
+    // Классы активов: equity / future / bond (как в crossasset). Фьючерсы доминируют по обороту.
+    this.assets=[
+      {ru:'Акции',en:'Equities',v:30,c:'#a78bfa'},
+      {ru:'Фьючерсы',en:'Futures',v:60,c:'#5b9bf0'},
+      {ru:'Облигации',en:'Bonds',v:10,c:'#4cc2b4'},
+    ];
+    this.flows=[{s:0,t:1,v:12},{s:2,t:1,v:3},{s:0,t:2,v:2},{s:1,t:0,v:5}];
+    // Фьючерсы — группы (turnover/netFlow/change/openInterest как в FutureGroupDto).
+    this.futures=[
+      {g:'Si',name:'USD/RUB',contracts:12,turn:45,nf:2.0,chg:1.2,oi:280},
+      {g:'Ri',name:'Индекс РТС',contracts:8,turn:28,nf:1.2,chg:1.8,oi:150},
+      {g:'ED',name:'EUR/USD',contracts:5,turn:15,nf:0.5,chg:-0.5,oi:85},
+      {g:'Gd',name:'Золото',contracts:4,turn:12,nf:-0.3,chg:-0.8,oi:55},
+      {g:'Br',name:'Brent',contracts:6,turn:18,nf:0.8,chg:0.6,oi:96},
+      {g:'NG',name:'Природный газ',contracts:3,turn:7,nf:-0.4,chg:-1.4,oi:38},
+    ];
+    this.futures.forEach(f=>{ const m=[1,1.9,3.6,5.2,8.4]; f.rets=m.map((x,idx)=>+(f.chg*x+Math.sin(idx+f.turn)*0.5).toFixed(2)); });
+    // Облигации — эмитенты (avgYield/weightedDuration как в BondIssuerDto).
+    this.bonds=[
+      {iss:'ОФЗ',en:'OFZ',n:18,turn:8.5,nf:0.2,yld:5.2,dur:3.5},
+      {iss:'Газпром',en:'Gaz',n:12,turn:6.2,nf:-0.1,yld:5.8,dur:2.8},
+      {iss:'Лукойл',en:'Luk',n:9,turn:4.1,nf:0.15,yld:6.1,dur:4.2},
+      {iss:'Сбербанк',en:'Ber',n:6,turn:2.8,nf:0.05,yld:6.5,dur:5.1},
+    ];
+    this.yieldCurve=[{m:0.25,y:4.5},{m:0.5,y:4.7},{m:1,y:5.1},{m:2,y:5.6},{m:3,y:5.9},{m:5,y:6.2},{m:7,y:6.4},{m:10,y:6.5}];
+    this.turnSeries=Array.from({length:34},(_,i)=>Math.max(8,45+30*Math.cos(2*Math.PI*i/33)+(Math.sin(i*1.7)*6)));
+    this.cvdSeries=(()=>{ let v=0; const a=[]; for(let i=0;i<46;i++){ v+= Math.sin(i*0.42)*3 + (i>24?1.6:-0.7) + (Math.sin(i*1.9)*1.5); a.push(v); } return a; })();
+    this.candles=this.genCandles(304,60,'d1');
+    this.fx=[
+      {p:'USD/RUB',last:92.4,chg:0.6,turn:38,dp:2},
+      {p:'CNY/RUB',last:12.74,chg:0.4,turn:22,dp:2},
+      {p:'EUR/RUB',last:100.1,chg:0.5,turn:9,dp:2},
+    ];
+    this.classes=[
+      {id:'eq',ru:'Акции',en:'Equities',c:'#a78bfa'},
+      {id:'fut',ru:'Фьючерсы',en:'Futures',c:'#5b9bf0'},
+      {id:'bond',ru:'Облигации',en:'Bonds',c:'#4cc2b4'},
+      {id:'fx',ru:'Валюта · FX',en:'FX spot',c:'#e0a23a'},
+    ];
+    this.classFlowsH=[
+      {eq:14,fut:5,bond:-7,fx:-8},
+      {eq:9,fut:3,bond:-4,fx:-5},
+      {eq:-48,fut:-3,bond:34,fx:22},
+      {eq:-86,fut:-9,bond:52,fx:44},
+      {eq:-120,fut:-14,bond:70,fx:70},
+    ];
+    this.positions=[
+      {sym:'SBER',qty:120,avg:298.4,last:308.5,dp:2},
+      {sym:'YDEX',qty:30,avg:4510,last:4380,dp:0},
+      {sym:'LKOH',qty:8,avg:6980,last:7120,dp:0},
+      {sym:'GMKN',qty:200,avg:152.0,last:158.2,dp:1},
+      {sym:'GAZP',qty:500,avg:131.2,last:128.74,dp:2},
+    ];
+    this.orders=[
+      {t:'18:11:50',sym:'SBER',side:'Купля',type:'Лимит',qty:50,price:308.40},
+      {t:'17:40:20',sym:'LKOH',side:'Купля',type:'Стоп',qty:5,price:7100},
+      {t:'17:22:11',sym:'GMKN',side:'Продажа',type:'Лимит',qty:100,price:159.0},
+    ];
+    this.btPresets=[
+      {ru:'Ротация в ОФЗ при Risk-OFF',en:'Bond rotation on outflow'},
+      {ru:'Секторный моментум · RRG-лидеры',en:'Sector momentum · RRG'},
+      {ru:'Пробой на аномальном объёме',en:'Unusual-volume breakout'},
+    ];
+    this.state={ws:'overview',lang:props.language||'ru',gRange:'m',pRange:{},iv:'d1',sym:'SBER',clock:'',rate:142,last:308.5,depth:11,tape:this.genTape(308.5),book:this.makeBook(308.5),
+      tapeLimit:50,domDepth:11,topMoversLimit:10,order:{side:'buy',type:'limit',qty:10},orderMsg:'',bt:{preset:0,capital:1000000,seed:3}};
+  }
+  componentDidMount(){
+    this.tick=()=>{ const d=new Date(); const u=d.getTime()+d.getTimezoneOffset()*60000+3*3600000; const m=new Date(u); const p=n=>String(n).padStart(2,'0'); this.setState({clock:p(m.getHours())+':'+p(m.getMinutes())+':'+p(m.getSeconds()),rate:138+Math.floor(Math.random()*20)}); };
+    this.tick(); this.timer=setInterval(this.tick,1000);
+    this.mkt=setInterval(()=>{ const s=this.state; const st=this.priceStep(s.last); const dir=Math.random()>0.5?1:-1; const last=+(s.last+dir*st*(Math.random()<0.25?2:1)).toFixed(4); const print={price:last,size:Math.round(Math.random()*600+10),side:dir>0?'B':'S',t:Date.now()}; const tape=[print].concat(s.tape).slice(0,40); const book=Math.random()<0.5?this.makeBook(last):s.book; this.setState({last,tape,book}); },1300);
+  }
+  componentWillUnmount(){ if(this.timer) clearInterval(this.timer); if(this.mkt) clearInterval(this.mkt); }
+  el(tag,props,kids){ return React.createElement(tag,props,kids); }
+  // ── диапазоны / периоды ───────────────────────────────────────────────
+  rangeOf(id){ return this.state.pRange[id]||this.state.gRange; }
+  setGlobal(k){ this.setState({gRange:k}); }
+  setPanel(id,k){ this.setState(s=>({pRange:Object.assign({},s.pRange,{[id]:k})})); }
+  resetPanel(id){ this.setState(s=>{ const p=Object.assign({},s.pRange); delete p[id]; return {pRange:p}; }); }
+  pillStyle(active){ return 'border:none;background:'+(active?'rgba(167,139,250,.20)':'transparent')+';color:'+(active?this.C.txt:this.C.txt3)+";font-family:'IBM Plex Mono',monospace;font-size:9px;padding:2px 5px;border-radius:3px;cursor:pointer;letter-spacing:.02em"; }
+  pc(id){
+    const lang=this.state.lang, lab=this.RLAB[lang], cur=this.rangeOf(id), over=!!this.state.pRange[id];
+    const tabs=this.RK.map(k=>({k:lab[k],onClick:()=>this.setPanel(id,k),style:this.pillStyle(k===cur)}));
+    return {tabs,over,onReset:()=>this.resetPanel(id),lbl:lab[cur]+(over?'':' · глоб.'),col:lab[cur]};
+  }
+  // ── графики ───────────────────────────────────────────────────────────
+  candleEl(){
+    const W=640,H=320,pH=H*0.72,vTop=H*0.8,vH=H*0.18,C=this.C,cs=this.candles,n=cs.length;
+    const lo=Math.min.apply(null,cs.map(c=>c.l)),hi=Math.max.apply(null,cs.map(c=>c.h)),vMax=Math.max.apply(null,cs.map(c=>c.v));
+    const cw=W/n,bw=cw*0.6; const cx=i=>i*cw+cw/2; const Y=p=>8+pH-((p-lo)/((hi-lo)||1))*(pH-12);
+    const kids=[];
+    for(let g=0;g<5;g++){ const yy=8+g/4*(pH-12); kids.push(this.el('line',{key:'g'+g,x1:0,y1:yy,x2:W,y2:yy,stroke:C.grid,strokeWidth:1})); }
+    cs.forEach((c,i)=>{ const up=c.c>=c.o; const col=up?C.up:C.dn; const x=cx(i);
+      kids.push(this.el('line',{key:'w'+i,x1:x,y1:Y(c.h),x2:x,y2:Y(c.l),stroke:col,strokeWidth:1}));
+      const yt=Y(Math.max(c.o,c.c)),yb=Y(Math.min(c.o,c.c));
+      kids.push(this.el('rect',{key:'b'+i,x:x-bw/2,y:yt,width:bw,height:Math.max(1,yb-yt),fill:col}));
+      const vh=c.v/vMax*vH; kids.push(this.el('rect',{key:'v'+i,x:x-bw/2,y:vTop+vH-vh,width:bw,height:vh,fill:col,fillOpacity:0.32}));
+    });
+    const lc=cs[n-1].c, ly=Y(lc);
+    kids.push(this.el('line',{key:'ll',x1:0,y1:ly,x2:W,y2:ly,stroke:C.acc,strokeWidth:1,strokeDasharray:'4 3'}));
+    kids.push(this.el('rect',{key:'lb',x:W-52,y:ly-8,width:52,height:16,fill:C.acc}));
+    kids.push(this.el('text',{key:'lt',x:W-26,y:ly+4,textAnchor:'middle',fill:'#0b0d12',fontSize:10,fontWeight:600,fontFamily:'IBM Plex Mono'},lc.toFixed(2)));
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'none',style:{display:'block'}},kids);
+  }
+  genSpark(chg){ const n=14; const arr=[]; let v=100; for(let i=0;i<n;i++){ v+= (chg/n) + (Math.sin(i*2.3+chg)*1.4); arr.push(v); } return arr; }
+  fmtP(n,dp){ return n.toLocaleString('ru-RU',{minimumFractionDigits:dp,maximumFractionDigits:dp}); }
+  fmtPct(p){ return (p>=0?'+':'')+p.toFixed(2)+'%'; }
+  fmtRub(b){ const ru=this.state.lang==='ru'; return b>=1000? '₽'+(b/1000).toFixed(2)+(ru?' трлн':'T') : '₽'+b.toFixed(1)+(ru?' млрд':'B'); }
+  lerp(a,b,t){ const pa=[parseInt(a.slice(1,3),16),parseInt(a.slice(3,5),16),parseInt(a.slice(5,7),16)]; const pb=[parseInt(b.slice(1,3),16),parseInt(b.slice(3,5),16),parseInt(b.slice(5,7),16)]; const c=pa.map((x,i)=>Math.round(x+(pb[i]-x)*t)); return 'rgb('+c[0]+','+c[1]+','+c[2]+')'; }
+  colorForPct(p){ const t=Math.min(Math.abs(p)/3,1); return p>=0? this.lerp('#171b24','#2c9c63',t) : this.lerp('#171b24','#c8423d',t); }
+  binaryTreemap(items,x,y,w,h){
+    if(items.length===1) return [Object.assign({},items[0],{x,y,w,h})];
+    const total=items.reduce((s,i)=>s+i.value,0); let acc=0,split=0;
+    for(let i=0;i<items.length;i++){ acc+=items[i].value; if(acc>=total/2){ split=i+1; break; } }
+    split=Math.max(1,Math.min(items.length-1,split));
+    const a=items.slice(0,split), b=items.slice(split);
+    const frac=a.reduce((s,i)=>s+i.value,0)/total;
+    if(w>=h){ const wa=w*frac; return this.binaryTreemap(a,x,y,wa,h).concat(this.binaryTreemap(b,x+wa,y,w-wa,h)); }
+    const ha=h*frac; return this.binaryTreemap(a,x,y,w,ha).concat(this.binaryTreemap(b,x,y+ha,w,h-ha));
+  }
+  treemapFrom(items,maxScale){
+    const W=1000,H=620; const cells=this.binaryTreemap(items.slice().sort((a,b)=>b.value-a.value),0,0,W,H);
+    const kids=cells.map((c,i)=>{ const big=c.w>58&&c.h>34; const med=c.w>40&&c.h>22;
+      return this.el('g',{key:i},[
+        this.el('rect',{key:'r',x:c.x+1,y:c.y+1,width:Math.max(0,c.w-2),height:Math.max(0,c.h-2),rx:2,fill:this.colorForPct(c.chg)}),
+        big?this.el('text',{key:'t',x:c.x+7,y:c.y+18,fill:'rgba(255,255,255,.95)',fontSize:15,fontWeight:600,fontFamily:'IBM Plex Mono'},c.t):null,
+        big?this.el('text',{key:'p',x:c.x+7,y:c.y+34,fill:'rgba(255,255,255,.7)',fontSize:11,fontFamily:'IBM Plex Mono'},this.fmtPct(c.chg)):null,
+        (!big&&med)?this.el('text',{key:'m',x:c.x+c.w/2,y:c.y+c.h/2+4,textAnchor:'middle',fill:'rgba(255,255,255,.85)',fontSize:11,fontWeight:600,fontFamily:'IBM Plex Mono'},c.t):null,
+      ]);
+    });
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'none',style:{display:'block'}},kids);
+  }
+  areaEl(){
+    const W=600,H=200,s=this.turnSeries,n=s.length,mn=Math.min.apply(null,s),mx=Math.max.apply(null,s);
+    const X=i=>i/(n-1)*W, Y=v=>H-8-((v-mn)/(mx-mn))*(H-26);
+    let line='M'+X(0)+' '+Y(s[0]); s.forEach((v,i)=>{ if(i) line+=' L'+X(i)+' '+Y(v); });
+    const area=line+' L'+W+' '+H+' L0 '+H+' Z';
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'none',style:{display:'block'}},[
+      this.el('defs',{key:'d'},this.el('linearGradient',{id:'agrad',x1:0,y1:0,x2:0,y2:1},[this.el('stop',{key:0,offset:'0%','stopColor':this.C.acc,'stopOpacity':0.34}),this.el('stop',{key:1,offset:'100%','stopColor':this.C.acc,'stopOpacity':0})])),
+      this.el('path',{key:'a',d:area,fill:'url(#agrad)'}),
+      this.el('path',{key:'l',d:line,fill:'none',stroke:this.C.acc,strokeWidth:2,vectorEffect:'non-scaling-stroke'}),
+    ]);
+  }
+  donutEl(){
+    const size=120,r=48,cw=16,cx=size/2,cy=size/2,C=2*Math.PI*r,total=this.assets.reduce((s,a)=>s+a.v,0); let acc=0;
+    const segs=this.assets.map((a,i)=>{ const dash=a.v/total*C; const e=this.el('circle',{key:i,cx,cy,r,fill:'none',stroke:a.c,strokeWidth:cw,strokeDasharray:dash+' '+(C-dash),strokeDashoffset:-acc,transform:'rotate(-90 '+cx+' '+cy+')'}); acc+=dash; return e; });
+    return this.el('svg',{viewBox:'0 0 '+size+' '+size,width:120,height:120},[
+      ...segs,
+      this.el('text',{key:'v',x:cx,y:cy-1,textAnchor:'middle',fill:'rgba(255,255,255,.92)',fontSize:14,fontWeight:600,fontFamily:'IBM Plex Mono'},this.fmtRub(this.totalTurn())),
+      this.el('text',{key:'l',x:cx,y:cy+13,textAnchor:'middle',fill:'rgba(255,255,255,.4)',fontSize:8,fontFamily:'IBM Plex Mono',letterSpacing:'.04em'},'TURNOVER'),
+    ]);
+  }
+  gaugeEl(){
+    const W=220,H=140,cx=W/2,cy=H-14,r=84,C=this.C;
+    const total=this.totalTurn(), frac=Math.min(total/4200,1);
+    const a0=Math.PI, a1=Math.PI+Math.PI*frac;
+    const pt=(ang,rad)=>[cx+Math.cos(ang)*rad,cy+Math.sin(ang)*rad];
+    const arc=(s,e,rad)=>{ const [x0,y0]=pt(s,rad),[x1,y1]=pt(e,rad); const large=(e-s)>Math.PI?1:0; return 'M'+x0+' '+y0+' A'+rad+' '+rad+' 0 '+large+' 1 '+x1+' '+y1; };
+    const kids=[
+      this.el('path',{key:'bg',d:arc(Math.PI,2*Math.PI,r),fill:'none',stroke:'rgba(255,255,255,.08)',strokeWidth:13,strokeLinecap:'round'}),
+      this.el('path',{key:'fg',d:arc(a0,a1,r),fill:'none',stroke:C.acc,strokeWidth:13,strokeLinecap:'round'}),
+      this.el('text',{key:'v',x:cx,y:cy-22,textAnchor:'middle',fill:C.txt,fontSize:22,fontWeight:600,fontFamily:'IBM Plex Mono'},this.fmtRub(total)),
+      this.el('text',{key:'l',x:cx,y:cy-6,textAnchor:'middle',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono',letterSpacing:'.04em'},'оборот всех классов'),
+    ];
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'xMidYMid meet',style:{display:'block'}},kids);
+  }
+  totalTurn(){ return +(1840*this.RF[this.state.gRange]).toFixed(0); }
+  sankeyEl(){
+    const W=520,H=280,pad=16,nw=12,gap=14,n=this.assets.length;
+    const srcOut=this.assets.map((_,i)=>this.flows.filter(f=>f.s===i).reduce((s,f)=>s+f.v,0));
+    const tgtIn=this.assets.map((_,i)=>this.flows.filter(f=>f.t===i).reduce((s,f)=>s+f.v,0));
+    const totalFlow=this.flows.reduce((s,f)=>s+f.v,0);
+    const availH=H-(n-1)*gap-18, scale=availH/Math.max(totalFlow, this.assets.reduce((mx,_,i)=>Math.max(mx,srcOut[i],tgtIn[i]),1)*1.2);
+    const lx=pad, rx=W-pad-nw; let ly=18, ry=18; const L=[],R=[];
+    this.assets.forEach((a,i)=>{ const h=Math.max(10,srcOut[i]*scale); L.push({y0:ly,y1:ly+h,a}); ly+=h+gap; });
+    this.assets.forEach((a,i)=>{ const h=Math.max(10,tgtIn[i]*scale); R.push({y0:ry,y1:ry+h,a}); ry+=h+gap; });
+    const sc=L.map(o=>o.y0), tc=R.map(o=>o.y0); const ribs=[];
+    this.flows.forEach((f,i)=>{ const h=f.v*scale; const y0a=sc[f.s],y0b=y0a+h; sc[f.s]+=h; const y1a=tc[f.t],y1b=y1a+h; tc[f.t]+=h; const x0=lx+nw,x1=rx,xm=(x0+x1)/2;
+      ribs.push(this.el('path',{key:'rib'+i,d:'M'+x0+','+y0a+' C'+xm+','+y0a+' '+xm+','+y1a+' '+x1+','+y1a+' L'+x1+','+y1b+' C'+xm+','+y1b+' '+xm+','+y0b+' '+x0+','+y0b+' Z',fill:this.assets[f.s].c,fillOpacity:0.26})); });
+    const nodes=[];
+    L.forEach((o,i)=>{ nodes.push(this.el('rect',{key:'ln'+i,x:lx,y:o.y0,width:nw,height:o.y1-o.y0,rx:2,fill:o.a.c})); nodes.push(this.el('text',{key:'lt'+i,x:lx,y:o.y0-4,fill:'rgba(255,255,255,.6)',fontSize:9,fontFamily:'IBM Plex Sans'},this.state.lang==='ru'?o.a.ru:o.a.en)); });
+    R.forEach((o,i)=>{ nodes.push(this.el('rect',{key:'rn'+i,x:rx,y:o.y0,width:nw,height:o.y1-o.y0,rx:2,fill:o.a.c})); nodes.push(this.el('text',{key:'rt'+i,x:rx+nw,y:o.y0-4,textAnchor:'end',fill:'rgba(255,255,255,.6)',fontSize:9,fontFamily:'IBM Plex Sans'},this.state.lang==='ru'?o.a.ru:o.a.en)); });
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'xMidYMid meet',style:{display:'block'}},ribs.concat(nodes));
+  }
+  sparkEl(series){
+    const W=52,H=20,mn=Math.min.apply(null,series),mx=Math.max.apply(null,series),up=series[series.length-1]>=series[0];
+    const X=i=>i/(series.length-1)*W, Y=v=>H-2-((v-mn)/((mx-mn)||1))*(H-4);
+    let d='M'+X(0)+' '+Y(series[0]); series.forEach((v,i)=>{ if(i) d+=' L'+X(i)+' '+Y(v); });
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:W,height:H},this.el('path',{d,fill:'none',stroke:up?this.C.up:this.C.dn,strokeWidth:1.4,strokeLinejoin:'round'}));
+  }
+  yieldEl(){
+    const W=560,H=300,padL=40,padB=28,padT=14,C=this.C,cv=this.yieldCurve,n=cv.length;
+    const ys=cv.map(p=>p.y), ymn=Math.min.apply(null,ys)-0.3, ymx=Math.max.apply(null,ys)+0.3;
+    const X=i=>padL+i/(n-1)*(W-padL-12), Y=v=>padT+(1-(v-ymn)/(ymx-ymn))*(H-padT-padB);
+    const kids=[];
+    for(let g=0;g<4;g++){ const yy=padT+g/3*(H-padT-padB); kids.push(this.el('line',{key:'g'+g,x1:padL,y1:yy,x2:W-12,y2:yy,stroke:C.grid,strokeWidth:1})); kids.push(this.el('text',{key:'gl'+g,x:padL-6,y:yy+3,textAnchor:'end',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono'},(ymx-(ymx-ymn)*g/3).toFixed(1))); }
+    let line='M'+X(0)+' '+Y(cv[0].y); cv.forEach((p,i)=>{ if(i) line+=' L'+X(i)+' '+Y(p.y); });
+    const area=line+' L'+X(n-1)+' '+(H-padB)+' L'+X(0)+' '+(H-padB)+' Z';
+    kids.push(this.el('defs',{key:'d'},this.el('linearGradient',{id:'ygrad',x1:0,y1:0,x2:0,y2:1},[this.el('stop',{key:0,offset:'0%','stopColor':C.info,'stopOpacity':0.28}),this.el('stop',{key:1,offset:'100%','stopColor':C.info,'stopOpacity':0})])));
+    kids.push(this.el('path',{key:'a',d:area,fill:'url(#ygrad)'}));
+    kids.push(this.el('path',{key:'l',d:line,fill:'none',stroke:C.info,strokeWidth:2,vectorEffect:'non-scaling-stroke'}));
+    cv.forEach((p,i)=>{ kids.push(this.el('circle',{key:'p'+i,cx:X(i),cy:Y(p.y),r:3,fill:C.info,stroke:'#0b0d12',strokeWidth:1.5}));
+      kids.push(this.el('text',{key:'x'+i,x:X(i),y:H-padB+14,textAnchor:'middle',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono'},(p.m<1?p.m:p.m+'л'))); });
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'none',style:{display:'block'}},kids);
+  }
+  durScatterEl(){
+    const W=420,H=300,padL=42,padB=30,padT=12,C=this.C,bs=this.bonds;
+    const dmn=2,dmx=6,ymn=4.8,ymx=7;
+    const X=d=>padL+(d-dmn)/(dmx-dmn)*(W-padL-14), Y=v=>padT+(1-(v-ymn)/(ymx-ymn))*(H-padT-padB);
+    const kids=[];
+    for(let g=0;g<4;g++){ const yy=padT+g/3*(H-padT-padB); kids.push(this.el('line',{key:'g'+g,x1:padL,y1:yy,x2:W-12,y2:yy,stroke:C.grid,strokeWidth:1})); kids.push(this.el('text',{key:'gl'+g,x:padL-6,y:yy+3,textAnchor:'end',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono'},(ymx-(ymx-ymn)*g/3).toFixed(1))); }
+    bs.forEach((b,i)=>{ const x=X(b.dur),y=Y(b.yld),r=6+b.turn*0.8;
+      kids.push(this.el('circle',{key:'c'+i,cx:x,cy:y,r,fill:C.info,fillOpacity:0.22,stroke:C.info,strokeWidth:1.4}));
+      kids.push(this.el('text',{key:'t'+i,x:x,y:y-r-4,textAnchor:'middle',fill:C.txt2,fontSize:9,fontWeight:600,fontFamily:'IBM Plex Mono'},b.iss)); });
+    kids.push(this.el('text',{key:'ax',x:W-12,y:H-8,textAnchor:'end',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono'},'дюрация, лет →'));
+    kids.push(this.el('text',{key:'ay',x:padL,y:padT+2,fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono'},'↑ доходность %'));
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'xMidYMid meet',style:{display:'block'}},kids);
+  }
+  oiBarsEl(){
+    const W=440,H=300,padL=10,padB=26,padT=12,C=this.C,fs=this.futures.slice().sort((a,b)=>b.oi-a.oi),n=fs.length;
+    const mx=Math.max.apply(null,fs.map(f=>f.oi))*1.1;
+    const bw=(W-padL-12)/n*0.6, gap=(W-padL-12)/n;
+    const kids=[];
+    fs.forEach((f,i)=>{ const x=padL+i*gap+gap*0.2; const h=(f.oi/mx)*(H-padT-padB); const y=H-padB-h; const col=f.chg>=0?C.up:C.dn;
+      kids.push(this.el('rect',{key:'b'+i,x:x,y:y,width:bw,height:h,rx:2,fill:col,fillOpacity:0.5}));
+      kids.push(this.el('text',{key:'v'+i,x:x+bw/2,y:y-4,textAnchor:'middle',fill:C.txt2,fontSize:9,fontFamily:'IBM Plex Mono'},f.oi+'k'));
+      kids.push(this.el('text',{key:'l'+i,x:x+bw/2,y:H-padB+14,textAnchor:'middle',fill:C.txt3,fontSize:9,fontWeight:600,fontFamily:'IBM Plex Mono'},f.g)); });
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'none',style:{display:'block'}},kids);
+  }
+  priceStep(mid){ return mid<1?0.0005:mid<10?0.005:mid<100?0.02:mid<1000?0.05:1; }
+  genCandles(start,n,iv){ const vol={m1:0.004,m5:0.006,m15:0.009,h1:0.013,d1:0.013}[iv]||0.013; let c=start; const arr=[]; for(let i=0;i<n;i++){ const o=c; const mv=(Math.random()-0.46)*start*vol; const cl=Math.max(start*0.7,o+mv); const hi=Math.max(o,cl)+Math.random()*start*vol*0.5; const lo=Math.min(o,cl)-Math.random()*start*vol*0.5; arr.push({o,h:hi,l:lo,c:cl,v:Math.random()*100+40}); c=cl; } return arr; }
+  makeBook(mid){ const st=this.priceStep(mid); const d=this.state?this.state.depth:11; const asks=[],bids=[]; for(let i=1;i<=d;i++){ asks.push({price:mid+st*i,size:Math.round(Math.random()*900+60)}); bids.push({price:mid-st*i,size:Math.round(Math.random()*900+60)}); } return {asks,bids,st}; }
+  genTape(mid){ const st=this.priceStep(mid); const arr=[]; let t=Date.now(); for(let i=0;i<24;i++){ const dir=Math.random()>0.5?1:-1; arr.push({price:mid+dir*st*Math.floor(Math.random()*3),size:Math.round(Math.random()*500+10),side:dir>0?'B':'S',t}); t-=Math.random()*4000+800; } return arr; }
+  setIv(iv){ const sym=this.instr.find(i=>i.t===this.state.sym)||this.instr[0]; this.candles=this.genCandles(sym.last>1?sym.last:300,60,iv); this.setState({iv}); }
+  setDepth(d){ this.setState({depth:d,book:this.makeBook(this.state.last)}); }
+  cvdEl(){
+    const W=600,H=200,s=this.cvdSeries,n=s.length,mn=Math.min.apply(null,s.concat([0])),mx=Math.max.apply(null,s.concat([0])); const C=this.C;
+    const X=i=>i/(n-1)*W, Y=v=>H-8-((v-mn)/((mx-mn)||1))*(H-22);
+    let line='M'+X(0)+' '+Y(s[0]); s.forEach((v,i)=>{ if(i) line+=' L'+X(i)+' '+Y(v); });
+    const z=Y(0); const area=line+' L'+W+' '+z+' L0 '+z+' Z';
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'none',style:{display:'block'}},[
+      this.el('defs',{key:'d'},this.el('linearGradient',{id:'cgrad',x1:0,y1:0,x2:0,y2:1},[this.el('stop',{key:0,offset:'0%','stopColor':C.up,'stopOpacity':0.3}),this.el('stop',{key:1,offset:'100%','stopColor':C.up,'stopOpacity':0})])),
+      this.el('path',{key:'a',d:area,fill:'url(#cgrad)'}),
+      this.el('line',{key:'z',x1:0,y1:z,x2:W,y2:z,stroke:'rgba(255,255,255,.2)',strokeWidth:1,strokeDasharray:'3 3'}),
+      this.el('path',{key:'l',d:line,fill:'none',stroke:C.up,strokeWidth:2,vectorEffect:'non-scaling-stroke'}),
+    ]);
+  }
+  rrgEl(){
+    const W=440,H=440,pad=42,lo=96.5,hi=103.5; const C=this.C;
+    const X=v=>pad+(v-lo)/(hi-lo)*(W-pad*1.3), Y=v=>H-pad-(v-lo)/(hi-lo)*(H-pad*1.3);
+    const cx=X(100),cy=Y(100); const kids=[];
+    const q=[['#2c9c63',cx,0,W-cx,cy],['#c8423d',0,cy,cx,H-cy],['#3a6da8',0,0,cx,cy],['#b08a2a',cx,cy,W-cx,H-cy]];
+    q.forEach((r,i)=>kids.push(this.el('rect',{key:'q'+i,x:r[1],y:r[2],width:r[3],height:r[4],fill:r[0],fillOpacity:0.07})));
+    kids.push(this.el('line',{key:'vx',x1:cx,y1:8,x2:cx,y2:H-20,stroke:C.grid,strokeWidth:1}));
+    kids.push(this.el('line',{key:'hz',x1:20,y1:cy,x2:W-8,y2:cy,stroke:C.grid,strokeWidth:1}));
+    const lang=this.state.lang;
+    const labs=lang==='ru'?[['Лидеры',W-12,18,'end','#4ade80'],['Снижение',W-12,H-10,'end','#e0a23a'],['Улучшение',14,18,'start','#5b9bf0'],['Отставание',14,H-10,'start','#f87171']]:[['Leading',W-12,18,'end','#4ade80'],['Weakening',W-12,H-10,'end','#e0a23a'],['Improving',14,18,'start','#5b9bf0'],['Lagging',14,H-10,'start','#f87171']];
+    labs.forEach((l,i)=>kids.push(this.el('text',{key:'L'+i,x:l[1],y:l[2],textAnchor:l[3],fill:l[4],fillOpacity:0.8,fontSize:10,fontWeight:600,fontFamily:'IBM Plex Sans'},l[0])));
+    this.sectors.forEach((s,i)=>{
+      const pts=s.trail.map(p=>[X(p.rs),Y(p.rm)]);
+      let d='M'+pts[0][0]+' '+pts[0][1]; pts.forEach((p,j)=>{ if(j) d+=' L'+p[0]+' '+p[1]; });
+      kids.push(this.el('path',{key:'t'+i,d,fill:'none',stroke:s.c,strokeWidth:1.5,strokeOpacity:0.45}));
+      pts.slice(0,-1).forEach((p,j)=>kids.push(this.el('circle',{key:'d'+i+'_'+j,cx:p[0],cy:p[1],r:1.6,fill:s.c,fillOpacity:0.35})));
+      const last=pts[pts.length-1];
+      kids.push(this.el('circle',{key:'h'+i,cx:last[0],cy:last[1],r:6,fill:s.c,stroke:'#0b0d12',strokeWidth:1.5}));
+      kids.push(this.el('text',{key:'n'+i,x:last[0]+9,y:last[1]+4,fill:'rgba(255,255,255,.82)',fontSize:10,fontWeight:600,fontFamily:'IBM Plex Mono'},s.id.toUpperCase()));
+    });
+    kids.push(this.el('text',{key:'ax',x:W-8,y:cy-6,textAnchor:'end',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono'},'RS-Ratio →'));
+    kids.push(this.el('text',{key:'ay',x:cx+6,y:16,fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono'},'↑ RS-Momentum'));
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'xMidYMid meet',style:{display:'block'}},kids);
+  }
+  icon(name){
+    const S=k=>this.el('svg',{viewBox:'0 0 18 18',width:16,height:16,fill:'none',stroke:'currentColor',strokeWidth:1.4,strokeLinecap:'round',strokeLinejoin:'round'},k);
+    const R=(x,y,w,h)=>this.el('rect',{key:x+'-'+y,x,y,width:w,height:h,rx:1});
+    const P=(d,k)=>this.el('path',{key:k||d,d});
+    const D=(x,y,k)=>this.el('circle',{key:k||(x+'-'+y),cx:x,cy:y,r:1.5,fill:'currentColor',stroke:'none'});
+    switch(name){
+      case 'grid': return S([R(2,2,5.5,5.5),R(10.5,2,5.5,5.5),R(2,10.5,5.5,5.5),R(10.5,10.5,5.5,5.5)]);
+      case 'layers': return S([P('M9 2 L16 6 L9 10 L2 6 Z','a'),P('M2 9.5 L9 13.5 L16 9.5','b'),P('M2 13 L9 17 L16 13','c')]);
+      case 'flow': return S([P('M3 5 C9 5 9 9 15 9','a'),P('M3 13 C9 13 9 9 15 9','b'),D(3,5,'d1'),D(3,13,'d2'),D(15,9,'d3')]);
+      case 'pulse': return S([this.el('polyline',{key:'p',points:'2,9 5,9 7,4 10,14 12,9 16,9'})]);
+      case 'fut': return S([R(2.5,9,3,6.5),R(7.5,4.5,3,11),R(12.5,7,3,8.5)]);
+      case 'bond': return S([this.el('circle',{key:'o',cx:9,cy:9,r:6.5}),P('M6 12 L12 6','s'),this.el('circle',{key:'d1',cx:6.6,cy:6.6,r:1,fill:'currentColor'}),this.el('circle',{key:'d2',cx:11.4,cy:11.4,r:1,fill:'currentColor'})]);
+      case 'summary': return S([this.el('circle',{key:'o',cx:9,cy:9,r:6.5}),this.el('circle',{key:'i',cx:9,cy:9,r:3}),this.el('circle',{key:'d',cx:9,cy:9,r:1,fill:'currentColor',stroke:'none'})]);
+      case 'replay': return S([P('M15 9 A6 6 0 1 1 9 3','a'),P('M9 1 L9 5 L13 5','b'),this.el('path',{key:'tri',d:'M7.5 6.5 L11 9 L7.5 11.5 Z',fill:'currentColor',stroke:'none'})]);
+      case 'trade': return S([P('M5 12 V4','a'),P('M3 6 L5 4 L7 6','b'),P('M13 6 V14','c'),P('M11 12 L13 14 L15 12','d')]);
+      case 'gear': return S([P('M2 5 H16','a'),P('M2 9 H16','b'),P('M2 13 H16','c'),this.el('circle',{key:'k1',cx:12,cy:5,r:1.7,fill:'currentColor',stroke:'currentColor'}),this.el('circle',{key:'k2',cx:6,cy:9,r:1.7,fill:'currentColor',stroke:'currentColor'}),this.el('circle',{key:'k3',cx:13,cy:13,r:1.7,fill:'currentColor',stroke:'currentColor'})]);
+      default: return S([R(3,3,12,12)]);
+    }
+  }
+  regimeOf(f){ const C=this.C; const defIn=f.bond+f.fx; if(f.eq<-10&&defIn>0) return {key:'off',ru:'Risk-OFF · уход из риска',en:'Risk-OFF · de-risking',c:C.dn,thesisRu:'Крупный капитал выходит из акций в облигации и валюту — защитная ротация.',thesisEn:'Big money rotating out of equities into bonds and FX — defensive.'}; if(f.eq>10&&f.bond<0) return {key:'on',ru:'Risk-ON · аппетит к риску',en:'Risk-ON · risk appetite',c:C.up,thesisRu:'Деньги перетекают в акции из облигаций — растёт аппетит к риску.',thesisEn:'Money flowing into equities out of bonds — appetite rising.'}; return {key:'neu',ru:'Нейтрально · ротация внутри классов',en:'Neutral · intra-class rotation',c:C.warn,thesisRu:'Явного межклассового перетока нет — деньги перекладываются внутри классов.',thesisEn:'No clear cross-asset rotation — money shifts within classes.'}; }
+  arcGaugeEl(val,max,color,big,sub){ const W=200,H=128,cx=W/2,cy=H-12,r=78,C=this.C; const frac=Math.max(0,Math.min(val/max,1)); const a0=Math.PI,a1=Math.PI+Math.PI*frac; const pt=(a,rad)=>[cx+Math.cos(a)*rad,cy+Math.sin(a)*rad]; const arc=(s,e,rad)=>{ const A=pt(s,rad),B=pt(e,rad); const lg=(e-s)>Math.PI?1:0; return 'M'+A[0]+' '+A[1]+' A'+rad+' '+rad+' 0 '+lg+' 1 '+B[0]+' '+B[1]; }; return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'xMidYMid meet',style:{display:'block'}},[ this.el('path',{key:'bg',d:arc(Math.PI,2*Math.PI,r),fill:'none',stroke:'rgba(255,255,255,.08)',strokeWidth:13,strokeLinecap:'round'}), this.el('path',{key:'fg',d:arc(a0,a1,r),fill:'none',stroke:color,strokeWidth:13,strokeLinecap:'round'}), this.el('text',{key:'v',x:cx,y:cy-20,textAnchor:'middle',fill:C.txt,fontSize:26,fontWeight:600,fontFamily:'IBM Plex Mono'},big), this.el('text',{key:'l',x:cx,y:cy-4,textAnchor:'middle',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono',letterSpacing:'.04em'},sub) ]); }
+  regimeFlowEl(f){
+    const W=560,H=320,C=this.C,lang=this.state.lang;
+    const cls=this.classes.map(c=>({c,v:f[c.id]}));
+    const outs=cls.filter(x=>x.v<0).sort((a,b)=>a.v-b.v);
+    const ins=cls.filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+    const nh=58,nw=152,lx=18,rx=W-18-nw;
+    const place=(arr,x)=>{ const gap=(H-arr.length*nh)/(arr.length+1); arr.forEach((o,i)=>{ o.x=x; o.y=gap+(gap+nh)*i; }); };
+    place(outs,lx); place(ins,rx);
+    const totalIn=ins.reduce((s,o)=>s+o.v,0)||1;
+    let maxAmt=1; outs.forEach(s=>ins.forEach(d=>{ maxAmt=Math.max(maxAmt,(-s.v)*(d.v/totalIn)); }));
+    const kids=[];
+    outs.forEach(src=>{ ins.forEach((dst,j)=>{ const amt=(-src.v)*(dst.v/totalIn); if(amt<0.5) return; const x0=src.x+nw,y0=src.y+nh/2,x1=dst.x,y1=dst.y+nh/2,xm=(x0+x1)/2,w=Math.max(2.5,amt/maxAmt*46); kids.push(this.el('path',{key:'r'+src.c.id+j,d:'M'+x0+','+(y0-w/2)+' C'+xm+','+(y0-w/2)+' '+xm+','+(y1-w/2)+' '+x1+','+(y1-w/2)+' L'+x1+','+(y1+w/2)+' C'+xm+','+(y1+w/2)+' '+xm+','+(y0+w/2)+' '+x0+','+(y0+w/2)+' Z',fill:src.c.c,fillOpacity:0.26})); }); });
+    const node=o=>this.el('g',{key:o.c.id},[
+      this.el('rect',{key:'b',x:o.x,y:o.y,width:nw,height:nh,rx:7,fill:'#11131a',stroke:o.c.c,strokeOpacity:0.5,strokeWidth:1.4}),
+      this.el('rect',{key:'a',x:o.x,y:o.y,width:4,height:nh,rx:2,fill:o.c.c}),
+      this.el('text',{key:'n',x:o.x+15,y:o.y+23,fill:C.txt,fontSize:13,fontWeight:600,fontFamily:'IBM Plex Sans'},lang==='ru'?o.c.ru:o.c.en),
+      this.el('text',{key:'v',x:o.x+15,y:o.y+43,fill:o.v>=0?C.up:C.dn,fontSize:14,fontWeight:600,fontFamily:'IBM Plex Mono'},(o.v>=0?'+':'')+'₽'+o.v+' млрд'),
+    ]);
+    outs.forEach(o=>kids.push(node(o))); ins.forEach(o=>kids.push(node(o)));
+    kids.push(this.el('text',{key:'lo',x:lx,y:13,fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono',letterSpacing:'.05em'},lang==='ru'?'ОТТОК':'OUTFLOW'));
+    kids.push(this.el('text',{key:'li',x:rx+nw,y:13,textAnchor:'end',fill:C.txt3,fontSize:9,fontFamily:'IBM Plex Mono',letterSpacing:'.05em'},lang==='ru'?'ПРИТОК':'INFLOW'));
+    return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'xMidYMid meet',style:{display:'block'}},kids);
+  }
+  genEquity(seed){ const n=180; let s=100,b=100; const st=[],bn=[]; let r=seed*1000+7; const rnd=()=>{ r=(r*9301+49297)%233280; return r/233280; }; for(let i=0;i<n;i++){ s*=1+(rnd()-0.45)*0.02+0.0013; b*=1+(rnd()-0.48)*0.018+0.0006; st.push(s); bn.push(b); } return {st,bn}; }
+  equityCurveEl(st,bn){ const W=640,H=300,C=this.C,n=st.length,padB=52; const all=st.concat(bn),mn=Math.min.apply(null,all),mx=Math.max.apply(null,all); const X=i=>i/(n-1)*W,Y=v=>8+(1-(v-mn)/((mx-mn)||1))*(H-padB-8); let peak=st[0]; const dd=st.map(v=>{ peak=Math.max(peak,v); return (v-peak)/peak; }); const ddmn=Math.min.apply(null,dd)||-0.0001; const ddTop=H-padB+8,ddH=padB-14; const Yd=v=>ddTop+(v/ddmn)*ddH; const lineOf=arr=>{ let d='M'+X(0)+' '+Y(arr[0]); arr.forEach((v,i)=>{ if(i) d+=' L'+X(i)+' '+Y(v); }); return d; }; let ddP='M'+X(0)+' '+ddTop; dd.forEach((v,i)=>{ ddP+=' L'+X(i)+' '+Yd(v); }); ddP+=' L'+X(n-1)+' '+ddTop+' Z'; return this.el('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:'100%',preserveAspectRatio:'none',style:{display:'block'}},[ this.el('defs',{key:'d'},this.el('linearGradient',{id:'eqg',x1:0,y1:0,x2:0,y2:1},[this.el('stop',{key:0,offset:'0%',stopColor:C.acc,stopOpacity:0.22}),this.el('stop',{key:1,offset:'100%',stopColor:C.acc,stopOpacity:0})])), this.el('path',{key:'ea',d:lineOf(st)+' L'+X(n-1)+' '+Y(mn)+' L'+X(0)+' '+Y(mn)+' Z',fill:'url(#eqg)'}), this.el('path',{key:'b',d:lineOf(bn),fill:'none',stroke:C.txt3,strokeWidth:1.5,strokeDasharray:'4 3',vectorEffect:'non-scaling-stroke'}), this.el('path',{key:'s',d:lineOf(st),fill:'none',stroke:C.acc,strokeWidth:2,vectorEffect:'non-scaling-stroke'}), this.el('line',{key:'sep',x1:0,y1:ddTop,x2:W,y2:ddTop,stroke:C.grid,strokeWidth:1}), this.el('path',{key:'dd',d:ddP,fill:C.dn,fillOpacity:0.22}), this.el('text',{key:'t1',x:5,y:H-12,fill:C.dn,fontSize:9,fontFamily:'IBM Plex Mono'},'просадка') ]); }
+  oSide(s){ this.setState(st=>({order:Object.assign({},st.order,{side:s})})); }
+  oType(t){ this.setState(st=>({order:Object.assign({},st.order,{type:t})})); }
+  oQty(d){ this.setState(st=>({order:Object.assign({},st.order,{qty:Math.max(1,st.order.qty+d)})})); }
+  submitOrder(){ const ru=this.state.lang==='ru'; this.setState({orderMsg: ru?'Заявка отклонена · прототип READ-ONLY (бэкенд не подключён).':'Order rejected · READ-ONLY prototype (no backend).'}); }
+  runBt(){ this.setState(s=>({bt:Object.assign({},s.bt,{seed:s.bt.seed+1})})); }
+  setBtPreset(i){ this.setState(s=>({bt:Object.assign({},s.bt,{preset:i})})); }
+  renderVals(){
+    this.C.up=this.props.accentUp||'#4ade80'; this.C.dn=this.props.accentDown||'#f87171'; this.C.acc=this.props.accent||'#a78bfa';
+    const lang=this.state.lang, ws=this.state.ws, C=this.C, lab=this.RLAB[lang];
+    const density=this.props.density==null?70:this.props.density;
+    const baseFs=(density>=80?12:density>=45?13:14)+'px';
+    const active=this.workspaces.find(w=>w.id===ws)||this.workspaces[0];
+    const railBtn=act=>'position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 7px;border:none;border-left:2px solid '+(act?C.acc:'transparent')+';background:'+(act?'rgba(167,139,250,.10)':'transparent')+';color:'+(act?C.txt:'rgba(255,255,255,.42)')+';cursor:pointer;font-family:var(--sans);width:100%';
+    const rail=this.workspaces.map(w=>({ru:w.ru,en:w.en,iconEl:this.icon(w.icon),onClick:()=>this.setState({ws:w.id}),style:railBtn(w.id===ws)}));
+    const gTabs=this.RK.map(k=>({k:lab[k],onClick:()=>this.setGlobal(k),style:this.pillStyle(k===this.state.gRange)}));
+    const langBtn=act=>'border:none;background:'+(act?'rgba(167,139,250,.2)':'transparent')+';color:'+(act?C.txt:C.txt3)+';font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 9px;cursor:pointer';
+    const ds=p=>'color:'+(p>0?C.up:p<0?C.dn:C.txt2);
+    // период-контролы для всех аналитических панелей
+    const pcIds=['treemap','watch','movers','area','breadth','rrg','sectab','sankey','netflow','cvd','futmap','futtab','bondtab','sumflow'];
+    const pc={}; pcIds.forEach(id=>pc[id]=this.pc(id));
+
+    // ── горизонты по панелям
+    const hOf=id=>this.HZN[this.rangeOf(id)];
+    const rfOf=id=>this.RF[this.rangeOf(id)];
+
+    // KPI (глобальный период)
+    const gh=this.HZN[this.state.gRange];
+    const brG=this.BR[this.state.gRange]; const adv=brG[0],dec=brG[1],unch=brG[2];
+    const kpis=[
+      {ru:'Оборот рынка',en:'Turnover',val:this.fmtRub(this.totalTurn()),delta:'период '+lab[this.state.gRange]+' · все классы',deltaStyle:'color:'+C.acc},
+      {ru:'Ширина A/D',en:'Breadth',val:adv+' / '+dec,delta:'+'+(adv/dec).toFixed(2)+' · '+Math.round(adv/(adv+dec+unch)*100)+'% растущих',deltaStyle:'color:'+(adv>=dec?C.up:C.dn)},
+      {ru:'IMOEX',en:'MOEX',val:'3 284.6',delta:this.fmtPct(this.IDX[this.state.gRange]),deltaStyle:'color:'+(this.IDX[this.state.gRange]>=0?C.up:C.dn)},
+      {ru:'RTSI',en:'RTS',val:'1 142.3',delta:this.fmtPct(this.IDX[this.state.gRange]*1.18),deltaStyle:'color:'+C.up},
+      {ru:'Аном. объём',en:'Unusual',val:'14',delta:'инстр. · scan',deltaStyle:'color:'+C.warn},
+      {ru:'Алёрты',en:'Alerts',val:'6',delta:'активных · live',deltaStyle:'color:'+C.acc},
+    ];
+    const secMap={}; this.sectors.forEach(s=>secMap[s.id]=s);
+
+    // вотчлист — горизонт панели
+    const hW=hOf('watch');
+    const sorted=[...this.instr].sort((a,b)=>b.turn-a.turn);
+    const showSpark=this.props.showSparklines!==false;
+    const watch=sorted.slice(0,Math.min(12,this.instr.length)).map(i=>{ const ch=i.rets[hW]; return {t:i.t,n:i.n,lastStr:this.fmtP(i.last,i.dp),chgStr:this.fmtPct(ch),chgStyle:ds(ch),onClick:()=>this.setState({sym:i.t}),rowStyle:'display:grid;grid-template-columns:46px 1fr 62px 52px 54px;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--line);cursor:pointer'+(i.t===this.state.sym?';background:rgba(167,139,250,.07)':''),dotStyle:'background:'+(secMap[i.sec]?secMap[i.sec].c:C.txt3),sparkEl:showSpark?this.sparkEl(i.spark):null}; });
+
+    // движения — горизонт панели
+    const hM=hOf('movers');
+    const byChg=[...this.instr].sort((a,b)=>b.rets[hM]-a.rets[hM]);
+    const gainers=byChg.slice(0,5).map(i=>({t:i.t,chgStr:this.fmtPct(i.rets[hM])}));
+    const losers=byChg.slice(-5).reverse().map(i=>({t:i.t,chgStr:this.fmtPct(i.rets[hM])}));
+
+    const totalA=this.assets.reduce((s,a)=>s+a.v,0);
+    const assetsLegend=this.assets.map(a=>({ru:lang==='ru'?a.ru:a.en,pct:Math.round(a.v/totalA*100)+'%',dotStyle:'background:'+a.c}));
+
+    // breadth панель (горизонт панели)
+    const brP=this.BR[this.rangeOf('breadth')]; const pAdv=brP[0],pDec=brP[1],pUn=brP[2],pT=pAdv+pDec+pUn;
+    const brUpW='width:'+(pAdv/pT*100)+'%', brUnW='width:'+(pUn/pT*100)+'%', brDnW='width:'+(pDec/pT*100)+'%';
+
+    // treemap (горизонт панели) — цвет по доходности периода
+    const hT=hOf('treemap');
+    const treeItems=this.instr.map(i=>({value:i.turn,t:i.t,chg:i.rets[hT]}));
+    const treemapEl=this.treemapFrom(treeItems);
+
+    // heatmap — подсветка активного столбца = период (сектора)
+    const hHeat=hOf('sectab');
+    const heatCols=(lang==='ru'?['1Д','1Н','1М','3М','YTD']:['1D','1W','1M','3M','YTD']).map((k,idx)=>({k,style:'color:'+(idx===hHeat?C.txt:C.txt3)+(idx===hHeat?';font-weight:600':'')}));
+    const heatRows=[...this.sectors].sort((a,b)=>b.ret[4]-a.ret[4]).map(s=>({ru:s.ru,en:s.en,c:s.c,cells:s.ret.map((v,idx)=>({str:(v>=0?'+':'')+v.toFixed(1),style:'background:'+this.lerp('#171b24',v>=0?'#2c9c63':'#c8423d',Math.min(Math.abs(v)/14,1))+';color:rgba(255,255,255,.9)'+(idx===hHeat?';outline:1.5px solid rgba(167,139,250,.7);outline-offset:-1.5px':'')}))}));
+
+    // net flow (горизонт панели)
+    const hNf=hOf('netflow');
+    const nfRaw=this.instr.map(i=>({t:i.t,nf:+(i.rets[hNf]*i.turn*0.42).toFixed(1)})).sort((a,b)=>b.nf-a.nf);
+    const nfMax=Math.max.apply(null,nfRaw.map(x=>Math.abs(x.nf)))||1;
+    const netFlows=nfRaw.slice(0,7).concat(nfRaw.slice(-5)).map(x=>({t:x.t,nfStr:(x.nf>=0?'+':'')+x.nf,pos:x.nf>=0,neg:x.nf<0,barStyle:'width:'+(Math.abs(x.nf)/nfMax*100)+'%;background:'+(x.nf>=0?C.up:C.dn),valStyle:'color:'+(x.nf>=0?C.up:C.dn)}));
+
+    const mfiRows=[...this.sectors].sort((a,b)=>b.mfi-a.mfi).map(s=>({ru:s.ru,dotStyle:'background:'+s.c,mfi:s.mfi.toFixed(0),barStyle:'width:'+s.mfi+'%;background:'+(s.mfi>=70?C.dn:s.mfi<=30?C.up:s.c),zone:s.mfi>=70?(lang==='ru'?'перекуплен':'overbought'):s.mfi<=30?(lang==='ru'?'перепродан':'oversold'):(lang==='ru'?'нейтр.':'neutral'),zoneStyle:'color:'+(s.mfi>=70?C.dn:s.mfi<=30?C.up:C.txt3)}));
+
+    const quad=s=>{ const lead=s.rs>=100&&s.rm>=100,weak=s.rs>=100&&s.rm<100,imp=s.rs<100&&s.rm>=100; return lead?{ru:'Лидеры',en:'Leading',c:C.up}:weak?{ru:'Снижение',en:'Weakening',c:C.warn}:imp?{ru:'Улучшение',en:'Improving',c:C.info}:{ru:'Отставание',en:'Lagging',c:C.dn}; };
+    const hSec=hOf('sectab');
+    const sectorRows=[...this.sectors].sort((a,b)=>b.share-a.share).map(s=>{ const qd=quad(s); const ch=s.ret[hSec]; return {ru:s.ru,en:s.en,dotStyle:'background:'+s.c,chgStr:this.fmtPct(ch),chgStyle:'color:'+(ch>0?C.up:ch<0?C.dn:C.txt2),share:s.share+'%',shareW:'width:'+s.share+'%;background:'+s.c,breadth:s.breadth+'%',breadthStyle:'color:'+(s.breadth>=50?C.up:C.dn),mfi:s.mfi.toFixed(0),mfiStyle:'color:'+(s.mfi>=70?C.dn:s.mfi<=30?C.up:C.txt),rs:s.rs.toFixed(1),rm:s.rm.toFixed(1),qru:lang==='ru'?qd.ru:qd.en,qStyle:'color:'+qd.c+';border:1px solid '+qd.c+'55'}; });
+
+    // фьючерсы
+    const hFut=hOf('futtab');
+    const futMax=Math.max.apply(null,this.futures.map(f=>f.turn));
+    const futTreemapEl=this.treemapFrom(this.futures.map(f=>({value:f.turn,t:f.g,chg:f.rets[hFut]})));
+    const futRows=[...this.futures].sort((a,b)=>b.turn-a.turn).map(f=>{ const ch=f.rets[hFut]; return {g:f.g,name:f.name,contracts:f.contracts,chgStr:this.fmtPct(ch),chgStyle:'color:'+(ch>0?C.up:ch<0?C.dn:C.txt2),turnStr:'₽'+f.turn+' млрд',turnW:'width:'+(f.turn/futMax*100)+'%;background:'+C.info,nfStr:(f.nf>=0?'+':'')+f.nf,nfStyle:'color:'+(f.nf>=0?C.up:C.dn),oiStr:f.oi+'k'}; });
+
+    // облигации
+    const bondMax=Math.max.apply(null,this.bonds.map(b=>b.turn));
+    const bondRows=this.bonds.map(b=>({iss:b.iss,en:b.en,n:b.n,turnStr:'₽'+b.turn+' млрд',turnW:'width:'+(b.turn/bondMax*100)+'%;background:'+C.info,nfStr:(b.nf>=0?'+':'')+b.nf,nfStyle:'color:'+(b.nf>=0?C.up:C.dn),yldStr:b.yld.toFixed(1)+'%',durStr:b.dur.toFixed(1)}));
+
+    // live
+    const dpSym=2, book=this.state.book;
+    const asksAsc=[...book.asks].sort((a,b)=>a.price-b.price), bidsDesc=[...book.bids].sort((a,b)=>b.price-a.price);
+    let cu=0; const askCum=asksAsc.map(l=>{cu+=l.size;return cu;}); cu=0; const bidCum=bidsDesc.map(l=>{cu+=l.size;return cu;});
+    const maxCum=Math.max(askCum[askCum.length-1],bidCum[bidCum.length-1])||1;
+    const bookAsks=asksAsc.map((l,i)=>({priceStr:l.price.toFixed(dpSym),sizeStr:l.size,barStyle:'width:'+(askCum[i]/maxCum*100)+'%'})).reverse();
+    const bookBids=bidsDesc.map((l,i)=>({priceStr:l.price.toFixed(dpSym),sizeStr:l.size,barStyle:'width:'+(bidCum[i]/maxCum*100)+'%'}));
+    const spread=asksAsc[0].price-bidsDesc[0].price;
+    const spreadStr=spread.toFixed(2)+'  ·  '+(spread/asksAsc[0].price*100).toFixed(3)+'%';
+    const symObj=this.instr.find(i=>i.t===this.state.sym)||this.instr[0];
+    const ivTabs=this.IV.map(o=>({k:lang==='ru'?o.ru:o.en,onClick:()=>this.setIv(o.k),style:this.pillStyle(o.k===this.state.iv)}));
+    const depthTabs=[11,20,30].map(d=>({k:d+'',onClick:()=>this.setDepth(d),style:this.pillStyle(d===this.state.depth)}));
+    const pad=x=>String(x).padStart(2,'0');
+    const tapeRows=this.state.tape.map((p,i)=>{ const d=new Date(p.t); const buy=p.side==='B'; return {timeStr:pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()),priceStr:p.price.toFixed(dpSym),sizeStr:p.size,side:buy?'П':'Пр',rowStyle:'display:grid;grid-template-columns:62px 1fr 52px 24px;gap:6px;align-items:center;padding:2.5px 10px;font-family:var(--mono);font-size:10.5px'+(i===0?';animation:mfflash 1s ease-out':''),priceStyle:'color:'+(buy?C.up:C.dn)+';text-align:right',sideStyle:'color:'+(buy?C.up:C.dn)+';text-align:center;font-size:9px'}; });
+
+    // alerts — kinds priceAbove/priceBelow/changeAbove/changeBelow
+    const KL=lang==='ru'?{pa:'цена выше',pb:'цена ниже',ca:'изм. выше',cb:'изм. ниже'}:{pa:'price above',pb:'price below',ca:'change above',cb:'change below'};
+    const alertRules=[{sym:'SBER',cond:'> 310.00',kind:KL.pa,on:true},{sym:'GAZP',cond:'< 125.00',kind:KL.pb,on:true},{sym:'YDEX',cond:'Δ > +3.0%',kind:KL.ca,on:true},{sym:'GMKN',cond:'Δ < −2.0%',kind:KL.cb,on:false},{sym:'VTBR',cond:'> 0.0220',kind:KL.pa,on:true}].map(r=>({sym:r.sym,cond:r.cond,kind:r.kind,statusStyle:'color:'+(r.on?C.up:C.txt3),status:r.on?(lang==='ru'?'активен':'on'):(lang==='ru'?'пауза':'off'),dotStyle:'background:'+(r.on?C.up:C.txt3)}));
+    const alertTriggers=[{t:'18:02:14',sym:'YDEX',msg:'Δ +2.6% · изм. выше',col:C.up},{t:'17:48:01',sym:'GAZP',msg:'цена ниже 125.00',col:C.dn},{t:'17:31:55',sym:'SNGS',msg:'цена выше 28.00',col:C.up},{t:'16:59:20',sym:'GMKN',msg:'изм. ниже −2.0%',col:C.dn},{t:'16:40:08',sym:'SBER',msg:'цена выше 310.00',col:C.up}].map(x=>({t:x.t,sym:x.sym,msg:x.msg,barStyle:'background:'+x.col,symStyle:'color:'+x.col}));
+
+    // settings
+    const mkSetting=(id,ru,val,min,max,steps)=>{ const frac=(val-min)/(max-min); return {ru,val:val+'',min:min+'',max:max+'',fillW:'width:'+(frac*100)+'%',knobX:'left:calc('+(frac*100)+'% - 5px)',steps:steps.map(o=>({k:o+'',onClick:()=>this.setState({[id]:o}),style:'border:none;background:'+(o===val?'rgba(167,139,250,.2)':'var(--bg)')+';color:'+(o===val?C.txt:C.txt3)+";font-family:'IBM Plex Mono',monospace;font-size:9.5px;padding:3px 9px;border-radius:4px;border:1px solid var(--line);cursor:pointer"}))}; };
+    const settingsRows=[
+      mkSetting('tapeLimit',lang==='ru'?'Лента сделок, строк':'Tape rows',this.state.tapeLimit,10,500,[25,50,100,200]),
+      mkSetting('domDepth',lang==='ru'?'Глубина стакана':'DOM depth',this.state.domDepth,1,50,[10,11,20,30]),
+      mkSetting('topMoversLimit',lang==='ru'?'Топ-движения, строк':'Top movers rows',this.state.topMoversLimit,1,100,[5,10,20,50]),
+    ];
+    const feedRows=[
+      {k:lang==='ru'?'Источник':'Source',v:'Finam Trade API',vStyle:'color:'+C.txt},
+      {k:lang==='ru'?'Протокол':'Protocol',v:'gRPC · HTTP/2 · TLS',vStyle:'color:'+C.txt2},
+      {k:lang==='ru'?'Хост':'Host',v:'trade-api.finam.ru:443',vStyle:'color:'+C.txt2},
+      {k:lang==='ru'?'Лимит метода':'Rate limit',v:'~200 / мин',vStyle:'color:'+C.txt2},
+      {k:lang==='ru'?'Хранилище':'Storage',v:'DuckDB · schema v7',vStyle:'color:'+C.txt2},
+      {k:lang==='ru'?'Авто-reconnect':'Auto-reconnect',v:lang==='ru'?'вкл · ~24ч':'on · ~24h',vStyle:'color:'+C.up},
+    ];
+
+    // ── Сводка денежных потоков (Summary) — куда идут большие деньги
+    const sumH=this.HZN[this.rangeOf('sumflow')];
+    const cf=this.classFlowsH[sumH];
+    const regime=this.regimeOf(cf);
+    const conv=Math.min(100,Math.round((Math.abs(cf.eq)+Math.abs(cf.bond)+Math.abs(cf.fx))/2.4));
+    const classNet=this.classes.map(c=>({ru:lang==='ru'?c.ru:c.en,v:cf[c.id],col:c.c}));
+    const netMax=Math.max.apply(null,classNet.map(x=>Math.abs(x.v)))||1;
+    const classNetRows=classNet.slice().sort((a,b)=>b.v-a.v).map(x=>({ru:x.ru,vStr:(x.v>=0?'+':'')+'₽'+x.v+' млрд',vStyle:'color:'+(x.v>=0?C.up:C.dn),pos:x.v>=0,neg:x.v<0,barStyle:'width:'+(Math.abs(x.v)/netMax*100)+'%;background:'+(x.v>=0?C.up:C.dn),dot:'background:'+x.col}));
+    const adI=this.BR[this.rangeOf('sumflow')];
+    const cvdLast=this.cvdSeries[this.cvdSeries.length-1];
+    const obCount=this.sectors.filter(s=>s.mfi>=60).length;
+    const usd=this.fx[0];
+    const dtag=o=>o==='off'?{ru:'Risk-OFF',c:C.dn}:o==='on'?{ru:'Risk-ON',c:C.up}:{ru:lang==='ru'?'нейтр.':'neutral',c:C.txt3};
+    const sig=(label,val,o)=>{ const t=dtag(o); return {label,val,dirRu:t.ru,dirStyle:'color:'+t.c+';border:1px solid '+t.c+'55'}; };
+    const signals=[
+      sig(lang==='ru'?'Ширина рынка A/D':'Breadth A/D',adI[0]+' / '+adI[1],adI[0]>=adI[1]?'on':'off'),
+      sig(lang==='ru'?'CVD по индексу':'Index CVD',(cvdLast>=0?'+':'')+cvdLast.toFixed(1),cvdLast>=0?'on':'off'),
+      sig(lang==='ru'?'Перекупленность MFI':'Overbought MFI',obCount+(lang==='ru'?' секторов':' sectors'),obCount>=4?'off':'neu'),
+      sig(lang==='ru'?'Кривая ОФЗ · спрос':'OFZ demand',lang==='ru'?'доходности ↓':'yields ↓','off'),
+      sig('USD/RUB',usd.last.toFixed(2)+' '+this.fmtPct(usd.chg),usd.chg>0?'off':'on'),
+      sig(lang==='ru'?'Нетто-поток акций':'Equity net flow',(cf.eq>=0?'+':'')+'₽'+cf.eq+' млрд',cf.eq>=0?'on':'off'),
+    ];
+    const decRu={off:['Снижать долю акций, фиксировать прибыль в перекупленных секторах','Наращивать ОФЗ — основной приток идёт в облигации, доходности снижаются','Держать валютный хедж: USD/RUB и CNY/RUB притягивают капитал','Сокращать плечо во фьючерсах на индекс'],on:['Наращивать акции — деньги возвращаются в риск из облигаций','Фокус на секторах-лидерах RRG (IT, Финансы)','Сокращать защитные ОФЗ-позиции','Допустимо умеренное плечо во фьючерсах'],neu:['Без явного межклассового сигнала — работать внутри классов','Парные идеи: лонг лидеров / шорт аутсайдеров RRG','Держать сбалансированную аллокацию','Ждать подтверждения по ширине рынка и CVD']};
+    const decEn={off:['Trim equities, take profit in overbought sectors','Add OFZ — inflows concentrate in bonds, yields falling','Keep FX hedge: USD/RUB and CNY/RUB attract capital','Cut index-futures leverage'],on:['Add equities — money rotating back into risk','Focus on RRG leaders (IT, Financials)','Reduce defensive OFZ','Moderate futures leverage acceptable'],neu:['No clear cross-asset signal — trade within classes','Pairs: long leaders / short laggards (RRG)','Keep balanced allocation','Wait for breadth/CVD confirmation']};
+    const decisions=(lang==='ru'?decRu:decEn)[regime.key];
+    const risks=lang==='ru'?['Резкий разворот RUB обнулит часть FX-притока','Навес ОФЗ-размещений Минфина давит на облигации','Тонкий рынок вечерней сессии усиливает шум потоков']:['Sharp RUB reversal can unwind FX inflow','MinFin OFZ supply pressures bonds','Thin evening session amplifies flow noise'];
+    const regimeFlowEl=this.regimeFlowEl(cf);
+    const convGaugeEl=this.arcGaugeEl(conv,100,regime.c,conv+'',lang==='ru'?'уверенность':'conviction');
+
+    // ── Backtest (прототип)
+    const eqd=this.genEquity(this.state.bt.seed); const bst=eqd.st,bbn=eqd.bn,bl=bst.length;
+    const cagr=(Math.pow(bst[bl-1]/100,252/bl)-1)*100;
+    const drets=bst.map((v,i)=>i?(v/bst[i-1]-1):0).slice(1);
+    const dmean=drets.reduce((s,x)=>s+x,0)/drets.length; const dsd=Math.sqrt(drets.reduce((s,x)=>s+(x-dmean)*(x-dmean),0)/drets.length);
+    const sharpe=dsd?dmean/dsd*Math.sqrt(252):0;
+    let bpk=bst[0],mdd=0; bst.forEach(v=>{ bpk=Math.max(bpk,v); mdd=Math.min(mdd,(v-bpk)/bpk); });
+    const winr=drets.filter(x=>x>0).length/drets.length*100;
+    const benchCagr=(Math.pow(bbn[bl-1]/100,252/bl)-1)*100;
+    const btStats=[
+      {k:'CAGR',v:(cagr>=0?'+':'')+cagr.toFixed(1)+'%',vStyle:'color:'+(cagr>=0?C.up:C.dn)},
+      {k:'Sharpe',v:sharpe.toFixed(2),vStyle:'color:'+C.txt},
+      {k:lang==='ru'?'Макс. DD':'Max DD',v:(mdd*100).toFixed(1)+'%',vStyle:'color:'+C.dn},
+      {k:lang==='ru'?'Винрейт':'Win rate',v:winr.toFixed(0)+'%',vStyle:'color:'+C.txt},
+      {k:lang==='ru'?'Сделок':'Trades',v:''+(40+this.state.bt.seed*3),vStyle:'color:'+C.txt2},
+      {k:lang==='ru'?'Бенчмарк':'Benchmark',v:(benchCagr>=0?'+':'')+benchCagr.toFixed(1)+'%',vStyle:'color:'+C.txt3},
+    ];
+    const equityCurveEl=this.equityCurveEl(bst,bbn);
+    let mseed=this.state.bt.seed*131+5; const mrnd=()=>{ mseed=(mseed*9301+49297)%233280; return mseed/233280; };
+    const months=lang==='ru'?['Я','Ф','М','А','М','И','И','А','С','О','Н','Д']:['J','F','M','A','M','J','J','A','S','O','N','D'];
+    const btYears=[2025,2026].map(yr=>({yr,cells:months.map(()=>{ const v=(mrnd()-0.45)*9; return {str:(v>=0?'+':'')+v.toFixed(1),style:'background:'+this.lerp('#171b24',v>=0?'#2c9c63':'#c8423d',Math.min(Math.abs(v)/8,1))+';color:rgba(255,255,255,.88)'}; })}));
+    const btMonthLabels=months;
+    const btPresetRows=this.btPresets.map((p,i)=>({ru:lang==='ru'?p.ru:p.en,onClick:()=>this.setBtPreset(i),style:'text-align:left;border:1px solid '+(i===this.state.bt.preset?C.acc:'rgba(255,255,255,.12)')+';background:'+(i===this.state.bt.preset?'rgba(167,139,250,.12)':'#0b0d12')+';color:'+(i===this.state.bt.preset?C.txt:C.txt2)+";font-family:'IBM Plex Sans',sans-serif;font-size:11px;padding:8px 10px;border-radius:6px;cursor:pointer"}));
+    const runBtFn=()=>this.runBt();
+
+    // ── Live trading (прототип)
+    const ord=this.state.order;
+    const oPrice=this.state.last;
+    const posRows=this.positions.map(p=>{ const pnl=(p.last-p.avg)*p.qty; const pct=(p.last/p.avg-1)*100; return {sym:p.sym,qty:p.qty,avg:this.fmtP(p.avg,p.dp),last:this.fmtP(p.last,p.dp),pnlStr:(pnl>=0?'+':'')+this.fmtP(pnl,0),pnlStyle:'color:'+(pnl>=0?C.up:C.dn),pctStr:this.fmtPct(pct),pctStyle:'color:'+(pct>=0?C.up:C.dn)}; });
+    const totPnl=this.positions.reduce((s,p)=>s+(p.last-p.avg)*p.qty,0);
+    const totVal=this.positions.reduce((s,p)=>s+p.last*p.qty,0);
+    const totPnlStr=(totPnl>=0?'+':'')+'₽'+this.fmtP(totPnl,0); const totPnlStyle='color:'+(totPnl>=0?C.up:C.dn);
+    const ordRows=this.orders.map(o=>({t:o.t,sym:o.sym,side:o.side,type:o.type,qty:o.qty,price:this.fmtP(o.price,2),sideStyle:'color:'+(o.side==='Купля'?C.up:C.dn)}));
+    const acct=[
+      {k:lang==='ru'?'Стоимость портфеля':'Portfolio value',v:'₽'+this.fmtP(totVal,0),style:'color:'+C.txt},
+      {k:lang==='ru'?'Свободные средства':'Cash',v:'₽'+this.fmtP(420000,0),style:'color:'+C.txt},
+      {k:lang==='ru'?'PnL дня':'Day PnL',v:totPnlStr,style:totPnlStyle},
+      {k:lang==='ru'?'Исп. маржа':'Margin used',v:'₽'+this.fmtP(280000,0),style:'color:'+C.txt2},
+      {k:lang==='ru'?'Покуп. способность':'Buying power',v:'₽'+this.fmtP(840000,0),style:'color:'+C.txt},
+    ];
+    const segBtn=(act,col)=>'border:none;flex:1;background:'+(act?col:'transparent')+';color:'+(act?C.txt:C.txt3)+";font-family:'IBM Plex Sans',sans-serif;font-size:11px;font-weight:600;padding:8px 0;cursor:pointer";
+    const order={
+      sym:this.state.sym, price:this.fmtP(oPrice,2), qty:ord.qty, est:'₽'+this.fmtP(oPrice*ord.qty,0),
+      buyStyle:segBtn(ord.side==='buy','rgba(74,222,128,.22)'), sellStyle:segBtn(ord.side==='sell','rgba(248,113,113,.22)'),
+      onBuy:()=>this.oSide('buy'), onSell:()=>this.oSide('sell'),
+      onPlus:()=>this.oQty(1), onMinus:()=>this.oQty(-1),
+      types:[['market',lang==='ru'?'Рыночная':'Market'],['limit',lang==='ru'?'Лимит':'Limit'],['stop',lang==='ru'?'Стоп':'Stop']].map(t=>({k:t[1],onClick:()=>this.oType(t[0]),style:this.pillStyle(ord.type===t[0])})),
+      submitStyle:"width:100%;border:none;border-radius:7px;padding:11px;font-family:'IBM Plex Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;color:#0b0d12;background:"+(ord.side==='buy'?C.up:C.dn),
+      submitLabel:(ord.side==='buy'?(lang==='ru'?'Купить ':'Buy '):(lang==='ru'?'Продать ':'Sell '))+this.state.sym,
+      onSubmit:()=>this.submitOrder(),
+    };
+    const orderMsg=this.state.orderMsg;
+
+    return {
+      candleEl:this.candleEl(), bookAsks, bookBids, spreadStr, ivTabs, depthTabs,
+      symTicker:this.state.sym, symBoard:'@MISX', symName:symObj.n, symLastStr:this.state.last.toFixed(dpSym), symChgStr:this.fmtPct(symObj.chg), symChgStyle:'color:'+(symObj.chg>=0?C.up:C.dn),
+      tapeRows, alertRules, alertTriggers,
+      clock:this.state.clock, rateStr:this.state.rate+'/200', sessionStr:'СЕССИЯ · 10:00–23:50',
+      setRu:()=>this.setState({lang:'ru'}), setEn:()=>this.setState({lang:'en'}),
+      ruStyle:langBtn(lang==='ru'), enStyle:langBtn(lang==='en'),
+      rail, gTabs, pc, baseFs, gRangeLabel:lab[this.state.gRange],
+      activeRu:active.ru, activeEn:active.en, instrCount:this.instr.length, sectorCount:this.sectors.length,
+      wsOverview:ws==='overview', wsSummary:ws==='summary', wsSectors:ws==='sectors', wsFlows:ws==='flows', wsLive:ws==='live', wsFutures:ws==='futures', wsBonds:ws==='bonds', wsBacktest:ws==='backtest', wsTrade:ws==='trade', wsSettings:ws==='settings',
+      kpis, treemapEl, areaEl:this.areaEl(), donutEl:this.donutEl(), gaugeEl:this.gaugeEl(), sankeyEl:this.sankeyEl(),
+      watch, gainers, losers, assetsLegend,
+      turnNow:this.fmtRub(this.totalTurn()), adRatio:(adv/dec).toFixed(2),
+      brUpW, brUnW, brDnW, brAdv:pAdv, brUnch:pUn, brDec:pDec,
+      rrgEl:this.rrgEl(), heatCols, heatRows, sectorRows,
+      cvdEl:this.cvdEl(), netFlows, mfiRows, cvdNow:(this.cvdSeries[this.cvdSeries.length-1]>=0?'+':'')+this.cvdSeries[this.cvdSeries.length-1].toFixed(1)+' млн лотов',
+      futTreemapEl, oiBarsEl:this.oiBarsEl(), futRows,
+      yieldEl:this.yieldEl(), durScatterEl:this.durScatterEl(), bondRows,
+      settingsRows, feedRows,
+      regimeRu:lang==='ru'?regime.ru:regime.en, regimeThesis:lang==='ru'?regime.thesisRu:regime.thesisEn, regimeColor:regime.c, conviction:conv,
+      regimeFlowEl, convGaugeEl, classNetRows, signals, decisions, risks, sumPeriodTabs:pc.sumflow, sumPeriodLbl:lab[this.rangeOf('sumflow')],
+      btStats, equityCurveEl, btYears, btMonthLabels, btPresetRows, runBt:runBtFn, btCapital:this.fmtP(this.state.bt.capital,0),
+      posRows, ordRows, acct, order, orderMsg, totPnlStr, totPnlStyle,
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -238,6 +238,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.flow_sankey(0, i64::MAX)?.len()
         );
 
+        // Вкладка «Сводка» — режим рынка по кросс-актив потокам.
+        let regime = state.summary(0, i64::MAX)?;
+        println!(
+            "  summary(): режим={} уверенность={}",
+            regime.regime, regime.conviction
+        );
+
         // Фаза 7 — live-панели: алёрты по сохранённым барам + маппинг
         // Time&Sales/DOM (живые данные приходят стримом, здесь — демо маппинга).
         let rules = vec![AlertRuleInput {

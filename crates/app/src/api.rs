@@ -10,14 +10,16 @@ use std::collections::BTreeMap;
 use domain::metrics::alerts::{AlertEngine, Observation};
 use domain::metrics::breadth::breadth;
 use domain::metrics::crossasset::{flow_matrix, turnover_shares, TurnoverShares};
+use domain::metrics::regime::{assess_regime, ClassFlows, DEFAULT_FLOW_THRESHOLD};
 use domain::metrics::sector::{rollup_by_sector, InstrumentMetric};
 use domain::{AssetClass, TimeFrame};
 use storage::{StorageError, Store};
 
 use crate::dto::{
     AlertEventDto, AlertRuleInput, AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto,
-    CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto,
-    SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    ClassFlowDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto,
+    RegimeSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, TopMoverDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
 };
 
 /// Метка сектора для инструментов без классификации.
@@ -478,6 +480,7 @@ pub fn turnover_timeline(
             equity: m.get(&AssetClass::Equity).copied().unwrap_or(0.0),
             future: m.get(&AssetClass::Future).copied().unwrap_or(0.0),
             bond: m.get(&AssetClass::Bond).copied().unwrap_or(0.0),
+            fx: m.get(&AssetClass::Fx).copied().unwrap_or(0.0),
         })
         .collect())
 }
@@ -501,6 +504,7 @@ pub fn flow_sankey(
         m.insert(AssetClass::Equity, p.equity);
         m.insert(AssetClass::Future, p.future);
         m.insert(AssetClass::Bond, p.bond);
+        m.insert(AssetClass::Fx, p.fx);
         turnover_shares(&m)
     };
 
@@ -515,6 +519,63 @@ pub fn flow_sankey(
             weight: e.weight,
         })
         .collect())
+}
+
+// ── Вкладка «Сводка» (Summary) — режим рынка по кросс-актив потокам ─────────
+
+/// Направленный нетто-поток по классам активов за окно `[from_ts, to_ts]`.
+///
+/// Суммирует `net_flow` всех снимков всех инструментов внутри окна, группируя
+/// по классу актива. Знак сохраняется (приток `> 0`, отток `< 0`) — это и есть
+/// «куда пошли деньги» в разрезе классов.
+fn class_net_flow(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<BTreeMap<AssetClass, f64>, StorageError> {
+    let mut by_class: BTreeMap<AssetClass, f64> = BTreeMap::new();
+    for inst in store.instruments()? {
+        for snap in store.snapshots(&inst.symbol, from_ts, to_ts)? {
+            *by_class.entry(inst.asset_class).or_default() += snap.net_flow;
+        }
+    }
+    Ok(by_class)
+}
+
+/// Сигнал режима рынка для вкладки «Сводка» («куда идут большие деньги»).
+///
+/// Считает направленный нетто-поток по классам в окне, пропускает его через
+/// чистый классификатор [`domain::metrics::regime`] (Risk-ON/OFF/Neutral +
+/// уверенность) и отдаёт сигнал вместе с потоками по классам. FX-класс учтён
+/// (поток `0`, пока FX-инструменты не ингестятся — см. `ROADMAP.md`); как
+/// только FX появится в хранилище, сигнал начнёт его учитывать без правок.
+pub fn summary(
+    store: &dyn Store,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<RegimeSignalDto, StorageError> {
+    let by_class = class_net_flow(store, from_ts, to_ts)?;
+    let flows = ClassFlows {
+        equity: by_class.get(&AssetClass::Equity).copied().unwrap_or(0.0),
+        future: by_class.get(&AssetClass::Future).copied().unwrap_or(0.0),
+        bond: by_class.get(&AssetClass::Bond).copied().unwrap_or(0.0),
+        fx: by_class.get(&AssetClass::Fx).copied().unwrap_or(0.0),
+    };
+    let assessment = assess_regime(&flows, DEFAULT_FLOW_THRESHOLD);
+
+    let class_flows = AssetClass::ALL
+        .iter()
+        .map(|&c| ClassFlowDto {
+            asset_class: c.code().to_string(),
+            net_flow: by_class.get(&c).copied().unwrap_or(0.0),
+        })
+        .collect();
+
+    Ok(RegimeSignalDto {
+        regime: assessment.regime.code().to_string(),
+        conviction: assessment.conviction,
+        class_flows,
+    })
 }
 
 // ── Фаза 7 — алёрты по сохранённым данным ──────────────────────────────────
@@ -832,12 +893,16 @@ mod tests {
     fn cross_asset_summary_aggregates_all_classes() {
         let store = seeded_mixed();
         let s = cross_asset_summary(&store, 0, 9).unwrap();
-        // Все три класса присутствуют (с нулевыми долями допустимо).
-        assert_eq!(s.shares.len(), 3);
+        // Все четыре класса присутствуют (с нулевыми долями допустимо).
+        assert_eq!(s.shares.len(), 4);
         let codes: Vec<&str> = s.shares.iter().map(|r| r.asset_class.as_str()).collect();
         assert!(codes.contains(&"equity"));
         assert!(codes.contains(&"future"));
         assert!(codes.contains(&"bond"));
+        assert!(codes.contains(&"fx"));
+        // FX-инструментов в хранилище нет → доля 0.
+        let fx = s.shares.iter().find(|r| r.asset_class == "fx").unwrap();
+        assert_eq!(fx.share, 0.0);
         // Общий оборот = сумма оборотов классов; доли суммируются в 1.
         assert!(s.total > 0.0);
         let share_sum: f64 = s.shares.iter().map(|r| r.share).sum();
@@ -886,6 +951,66 @@ mod tests {
             threshold: 1.0,
         }];
         assert!(alerts_scan(&store, &bogus, 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn summary_flags_risk_off_on_equity_outflow_into_bonds() {
+        use storage::store::TurnoverSnapshot;
+
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .upsert_instruments(&[
+                inst("SBER@MISX", Some("Финансы")),
+                inst_of("SU26240@MISX", None, AssetClass::Bond),
+            ])
+            .unwrap();
+
+        let snap = |ts, net_flow| TurnoverSnapshot {
+            ts,
+            turnover: 100.0,
+            net_flow,
+            change: 0.0,
+        };
+        // Акции: крупный отток; облигации: приток → защитная ротация.
+        store.insert_snapshot("SBER@MISX", &snap(1, -90.0)).unwrap();
+        store
+            .insert_snapshot("SU26240@MISX", &snap(1, 50.0))
+            .unwrap();
+
+        let s = summary(&store, 0, 9).unwrap();
+        assert_eq!(s.regime, "riskOff");
+        assert!(s.conviction > 0);
+        // Все четыре класса представлены; FX = 0 (нет инструментов).
+        assert_eq!(s.class_flows.len(), 4);
+        let eq = s
+            .class_flows
+            .iter()
+            .find(|c| c.asset_class == "equity")
+            .unwrap();
+        let bond = s
+            .class_flows
+            .iter()
+            .find(|c| c.asset_class == "bond")
+            .unwrap();
+        let fx = s
+            .class_flows
+            .iter()
+            .find(|c| c.asset_class == "fx")
+            .unwrap();
+        assert_eq!(eq.net_flow, -90.0);
+        assert_eq!(bond.net_flow, 50.0);
+        assert_eq!(fx.net_flow, 0.0);
+    }
+
+    #[test]
+    fn summary_is_neutral_on_empty_store() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        let s = summary(&store, 0, 9).unwrap();
+        assert_eq!(s.regime, "neutral");
+        assert_eq!(s.conviction, 0);
+        assert_eq!(s.class_flows.len(), 4);
     }
 
     #[test]
