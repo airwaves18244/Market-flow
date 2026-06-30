@@ -2,19 +2,28 @@
 // Позволяют разрабатывать и собирать UI до интеграции с ядром.
 
 import type {
+  AccountDto,
   AlertEventDto,
   AlertRuleInput,
+  BacktestReportDto,
   BarPoint,
   BondIssuerDto,
   BreadthDto,
   CrossAssetSummaryDto,
   FlowEdgeDto,
+  FootprintBarDto,
   FutureGroupDto,
   InstrumentDto,
   OrderBookDto,
+  OrderDto,
+  OrderInput,
+  PositionDto,
+  RobotSignalDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  StrategyDescriptorDto,
+  SubmitResultDto,
   TopMoverDto,
   TradeDto,
   TurnoverByClassPoint,
@@ -242,6 +251,247 @@ function scanAlerts(rules: AlertRuleInput[]): AlertEventDto[] {
   return out;
 }
 
+// ── V2 / Бэктестер (мок) ───────────────────────────────────────────────────
+
+const strategyDescriptors: StrategyDescriptorDto[] = [
+  {
+    id: "ma_cross",
+    label: "Пересечение скользящих (MA cross)",
+    params: [
+      { name: "fast", label: "Быстрая MA", default: 5 },
+      { name: "slow", label: "Медленная MA", default: 20 },
+      { name: "lot", label: "Лот", default: 1 },
+    ],
+  },
+  {
+    id: "same_lot",
+    label: "Равные лоты (пробой)",
+    params: [
+      { name: "lot", label: "Лот", default: 1 },
+      { name: "lookback", label: "Окно пробоя", default: 10 },
+    ],
+  },
+  {
+    id: "iceberg",
+    label: "Айсберг (набор равными клипами)",
+    params: [
+      { name: "clip", label: "Клип", default: 1 },
+      { name: "clips", label: "Число клипов", default: 5 },
+      { name: "period", label: "Период тренда", default: 20 },
+    ],
+  },
+  {
+    id: "cvd_momentum",
+    label: "Импульс дельты объёма (CVD)",
+    params: [
+      { name: "lot", label: "Лот", default: 1 },
+      { name: "period", label: "Окно дельты", default: 14 },
+    ],
+  },
+];
+
+// Простой бэктест по мок-барам: лонг при close>prev, иначе вне рынка; исполнение
+// по закрытию; считаем кривую капитала, сделки и метрики (как в Rust-отчёте).
+function mockBacktest(symbol: string, initialCapital: number): BacktestReportDto {
+  const bars = genBars(basePrice(symbol));
+  let cash = initialCapital;
+  let pos = 0;
+  let avg = 0;
+  const trades: BacktestReportDto["trades"] = [];
+  const equityCurve: BacktestReportDto["equityCurve"] = [];
+  let prev = bars[0]?.close ?? 0;
+
+  const fill = (side: "buy" | "sell", qty: number, price: number, ts: number) => {
+    const signed = side === "buy" ? qty : -qty;
+    let realized = 0;
+    if (pos === 0 || Math.sign(pos) === Math.sign(signed)) {
+      const np = pos + signed;
+      avg = (avg * Math.abs(pos) + price * qty) / Math.abs(np);
+      pos = np;
+    } else {
+      const closing = Math.min(qty, Math.abs(pos));
+      realized = closing * (price - avg) * Math.sign(pos);
+      pos += signed;
+      if (pos !== 0 && Math.sign(pos) === Math.sign(signed)) avg = price;
+    }
+    cash -= signed * price;
+    trades.push({ ts, side, qty, price, realizedPnl: realized });
+  };
+
+  for (let i = 1; i < bars.length; i++) {
+    const b = bars[i];
+    const target = b.close > prev ? 1 : 0;
+    const delta = target - pos;
+    if (Math.abs(delta) > 1e-9) fill(delta > 0 ? "buy" : "sell", Math.abs(delta), b.close, b.ts);
+    equityCurve.push({ ts: b.ts, equity: cash + pos * b.close });
+    prev = b.close;
+  }
+
+  let grossWin = 0;
+  let grossLoss = 0;
+  let wins = 0;
+  let losses = 0;
+  for (const t of trades) {
+    if (t.realizedPnl > 0) {
+      wins++;
+      grossWin += t.realizedPnl;
+    } else if (t.realizedPnl < 0) {
+      losses++;
+      grossLoss += -t.realizedPnl;
+    }
+  }
+  const finalEq = equityCurve.at(-1)?.equity ?? initialCapital;
+  const netPnl = finalEq - initialCapital;
+  let peak = -Infinity;
+  let maxDd = 0;
+  for (const p of equityCurve) {
+    if (p.equity > peak) peak = p.equity;
+    if (peak > 0) maxDd = Math.max(maxDd, (peak - p.equity) / peak);
+  }
+  return {
+    trades,
+    equityCurve,
+    metrics: {
+      netPnl,
+      returnPct: initialCapital ? netPnl / initialCapital : 0,
+      trades: trades.length,
+      wins,
+      losses,
+      winRate: wins + losses > 0 ? wins / (wins + losses) : 0,
+      profitFactor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0,
+      maxDrawdown: maxDd,
+      sharpe: 0,
+      avgWin: wins ? grossWin / wins : 0,
+      avgLoss: losses ? grossLoss / losses : 0,
+    },
+  };
+}
+
+// ── V2 / Delta (мок) ───────────────────────────────────────────────────────
+
+function mockFootprint(symbol: string): FootprintBarDto[] {
+  const bars = genBars(basePrice(symbol));
+  const tick = Math.max(0.01, basePrice(symbol) * 0.0005);
+  let cum = 0;
+  return bars.map((b) => {
+    const cells = [];
+    let bidTotal = 0;
+    let askTotal = 0;
+    const mid = Math.round(b.close / tick) * tick;
+    for (let k = -2; k <= 2; k++) {
+      const ask = Math.ceil(Math.random() * 40);
+      const bid = Math.ceil(Math.random() * 40);
+      bidTotal += bid;
+      askTotal += ask;
+      cells.push({
+        price: Number((mid + k * tick).toFixed(2)),
+        bidVolume: bid,
+        askVolume: ask,
+        delta: ask - bid,
+      });
+    }
+    const delta = askTotal - bidTotal;
+    cum += delta;
+    return { ts: b.ts, cells, bidTotal, askTotal, delta, cumulativeDelta: cum };
+  });
+}
+
+function mockRobotSignals(symbol: string): RobotSignalDto[] {
+  const bars = genBars(basePrice(symbol));
+  const out: RobotSignalDto[] = [];
+  const kinds: RobotSignalDto["kind"][] = ["same_lot", "iceberg", "absorption"];
+  for (let i = 8; i < bars.length; i += 17) {
+    const kind = kinds[i % kinds.length];
+    out.push({
+      kind,
+      ts: bars[i].ts,
+      price: Number(bars[i].close.toFixed(2)),
+      strength: 3 + (i % 5),
+      note:
+        kind === "same_lot"
+          ? "серия равных лотов"
+          : kind === "iceberg"
+            ? "доливка айсберга"
+            : "поглощение дельты",
+    });
+  }
+  return out;
+}
+
+// ── V2 / Trade (мок-симулятор) ─────────────────────────────────────────────
+
+interface MockSim {
+  cash: number;
+  realizedPnl: number;
+  positions: Map<string, { qty: number; avg: number }>;
+  orders: OrderDto[];
+  nextId: number;
+}
+const sim: MockSim = {
+  cash: 1_000_000,
+  realizedPnl: 0,
+  positions: new Map(),
+  orders: [],
+  nextId: 0,
+};
+
+function simApplyFill(symbol: string, side: "buy" | "sell", qty: number, price: number): number {
+  const p = sim.positions.get(symbol) ?? { qty: 0, avg: 0 };
+  const signed = side === "buy" ? qty : -qty;
+  let realized = 0;
+  if (p.qty === 0 || Math.sign(p.qty) === Math.sign(signed)) {
+    const np = p.qty + signed;
+    p.avg = (p.avg * Math.abs(p.qty) + price * qty) / Math.abs(np);
+    p.qty = np;
+  } else {
+    const closing = Math.min(qty, Math.abs(p.qty));
+    realized = closing * (price - p.avg) * Math.sign(p.qty);
+    p.qty += signed;
+    if (p.qty !== 0 && Math.sign(p.qty) === Math.sign(signed)) p.avg = price;
+  }
+  sim.cash -= signed * price;
+  sim.realizedPnl += realized;
+  sim.positions.set(symbol, p);
+  return realized;
+}
+
+function mockSubmit(input: OrderInput): SubmitResultDto {
+  sim.nextId += 1;
+  const id = sim.nextId;
+  const side = input.side;
+  const base = basePrice(input.symbol);
+  const order: OrderDto = {
+    id,
+    symbol: input.symbol,
+    side,
+    qty: input.qty,
+    filled: 0,
+    price: input.price ?? null,
+    kind: input.kind,
+    status: "new",
+  };
+  const fills = [];
+  if (input.kind === "market") {
+    // Рынок: исполняем сразу около опорной цены (имитация прохода стакана).
+    const px = side === "buy" ? base * 1.0005 : base * 0.9995;
+    const realized = simApplyFill(input.symbol, side, input.qty, px);
+    order.filled = input.qty;
+    order.status = "filled";
+    fills.push({
+      orderId: id,
+      ts: Math.floor(Date.now() / 1000),
+      side,
+      qty: input.qty,
+      price: Number(px.toFixed(2)),
+      realizedPnl: realized,
+    });
+  } else {
+    // Лимит/стоп: встают в блоттер.
+    sim.orders.push(order);
+  }
+  return { order, fills };
+}
+
 export async function handle<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "instruments":
@@ -289,6 +539,39 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       const rules = (args?.rules ?? []) as AlertRuleInput[];
       return scanAlerts(rules) as unknown as T;
     }
+    // ── V2 ──────────────────────────────────────────────────────────────────
+    case "list_strategies":
+      return strategyDescriptors as unknown as T;
+    case "run_backtest": {
+      const sym = String(args?.symbol ?? "SBER@MISX");
+      const cfg = (args?.config ?? {}) as { initialCapital?: number };
+      return mockBacktest(sym, cfg.initialCapital ?? 100_000) as unknown as T;
+    }
+    case "delta_footprint": {
+      const sym = String(args?.symbol ?? "SBER@MISX");
+      return mockFootprint(sym) as unknown as T;
+    }
+    case "robot_scan": {
+      const sym = String(args?.symbol ?? "SBER@MISX");
+      return mockRobotSignals(sym) as unknown as T;
+    }
+    case "submit_order":
+      return mockSubmit(args?.order as OrderInput) as unknown as T;
+    case "cancel_order": {
+      const id = Number(args?.id);
+      const idx = sim.orders.findIndex((o) => o.id === id);
+      if (idx < 0) throw new Error("заявка не найдена");
+      const [o] = sim.orders.splice(idx, 1);
+      return { ...o, status: "cancelled" } as unknown as T;
+    }
+    case "order_blotter":
+      return sim.orders as unknown as T;
+    case "positions":
+      return Array.from(sim.positions.entries())
+        .filter(([, p]) => p.qty !== 0)
+        .map(([symbol, p]) => ({ symbol, qty: p.qty, avgPrice: p.avg })) as unknown as T;
+    case "account":
+      return { cash: sim.cash, realizedPnl: sim.realizedPnl } as unknown as T;
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
   }

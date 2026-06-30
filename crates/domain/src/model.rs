@@ -43,6 +43,36 @@ impl AssetClass {
     }
 }
 
+/// Сторона сделки/заявки: покупка или продажа.
+///
+/// Общий тип для бэктестера (`backtest`) и симулятора исполнения (`trading`).
+/// Связан с агрессором ленты: `Trade.buyer_initiated == Some(true)` ≈ `Buy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Side {
+    Buy,
+    Sell,
+}
+
+impl Side {
+    /// Знак стороны: `+1` для покупки, `-1` для продажи. Удобно умножать на
+    /// объём, чтобы получить знаковую позицию/дельту.
+    pub fn sign(self) -> f64 {
+        match self {
+            Side::Buy => 1.0,
+            Side::Sell => -1.0,
+        }
+    }
+
+    /// Противоположная сторона (для закрытия позиции).
+    pub fn opposite(self) -> Side {
+        match self {
+            Side::Buy => Side::Sell,
+            Side::Sell => Side::Buy,
+        }
+    }
+}
+
 /// Тайм-фрейм бара. Соответствует `TimeFrame` в Finam Trade API.
 ///
 /// Это чистый доменный тип: код для хранения (`code`/`from_code`, колонка

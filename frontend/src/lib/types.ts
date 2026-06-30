@@ -153,3 +153,152 @@ export interface AlertRuleInput {
   kind: AlertKind;
   threshold: number;
 }
+
+// ── V2 / Бэктестер ─────────────────────────────────────────────────────────
+
+export interface StrategyParamDto {
+  name: string;
+  label: string;
+  default: number;
+}
+
+export interface StrategyDescriptorDto {
+  id: string;
+  label: string;
+  params: StrategyParamDto[];
+}
+
+export type FillTiming = "nextOpen" | "thisClose";
+
+export interface BacktestConfigInput {
+  initialCapital: number;
+  commission: number;
+  slippage: number;
+  fillTiming?: FillTiming;
+}
+
+export interface SimTradeDto {
+  ts: number;
+  /** buy|sell */
+  side: string;
+  qty: number;
+  price: number;
+  realizedPnl: number;
+}
+
+export interface EquityPointDto {
+  ts: number;
+  equity: number;
+}
+
+export interface PerfMetricsDto {
+  netPnl: number;
+  returnPct: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  sharpe: number;
+  avgWin: number;
+  avgLoss: number;
+}
+
+export interface BacktestReportDto {
+  trades: SimTradeDto[];
+  equityCurve: EquityPointDto[];
+  metrics: PerfMetricsDto;
+}
+
+// ── V2 / Delta (footprint + роботы) ─────────────────────────────────────────
+
+export interface FootprintCellDto {
+  price: number;
+  bidVolume: number;
+  askVolume: number;
+  delta: number;
+}
+
+export interface FootprintBarDto {
+  ts: number;
+  cells: FootprintCellDto[];
+  bidTotal: number;
+  askTotal: number;
+  delta: number;
+  cumulativeDelta: number;
+}
+
+export type RobotKind = "same_lot" | "iceberg" | "absorption";
+
+export interface RobotSignalDto {
+  /** same_lot|iceberg|absorption */
+  kind: string;
+  ts: number;
+  price: number;
+  strength: number;
+  note: string;
+}
+
+export interface RobotConfigInput {
+  sameLotEnabled?: boolean;
+  sameLotRun?: number;
+  lotTolerance?: number;
+  icebergEnabled?: boolean;
+  icebergVolumeMult?: number;
+  absorptionEnabled?: boolean;
+  absorptionMinDelta?: number;
+  absorptionMaxMove?: number;
+}
+
+// ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
+
+export type OrderSide = "buy" | "sell";
+export type OrderKind = "market" | "limit" | "stop";
+export type Tif = "gtc" | "day" | "ioc";
+
+/** Заявка, отправляемая в ядро (вход IPC). */
+export interface OrderInput {
+  symbol: string;
+  side: OrderSide;
+  qty: number;
+  kind: OrderKind;
+  price?: number | null;
+  tif?: Tif | null;
+}
+
+export interface OrderDto {
+  id: number;
+  symbol: string;
+  side: string;
+  qty: number;
+  filled: number;
+  price: number | null;
+  kind: string;
+  status: string;
+}
+
+export interface FillEventDto {
+  orderId: number;
+  ts: number;
+  side: string;
+  qty: number;
+  price: number;
+  realizedPnl: number;
+}
+
+export interface PositionDto {
+  symbol: string;
+  qty: number;
+  avgPrice: number;
+}
+
+export interface AccountDto {
+  cash: number;
+  realizedPnl: number;
+}
+
+export interface SubmitResultDto {
+  order: OrderDto;
+  fills: FillEventDto[];
+}

@@ -6,10 +6,23 @@
 
 use serde::{Deserialize, Serialize};
 
+use domain::backtest::{
+    BacktestConfig, BacktestReport, FillTiming, PerfMetrics, SimTrade, StrategyDescriptor,
+};
+use domain::delta::{FootprintBar, RobotConfig, RobotSignal};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
-use domain::{BookLevel, Instrument, OrderBook, Trade};
+use domain::trading::{Fill, Order, OrderType, Position, TimeInForce};
+use domain::{BookLevel, Instrument, OrderBook, Side, Trade};
 use storage::store::TurnoverSnapshot;
 use storage::SectorEntry;
+
+/// Код стороны сделки/заявки для фронта (`buy|sell`).
+fn side_code(side: Side) -> &'static str {
+    match side {
+        Side::Buy => "buy",
+        Side::Sell => "sell",
+    }
+}
 
 /// Инструмент справочника (для списков/вотчлиста).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -325,6 +338,418 @@ impl AlertRuleInput {
             _ => return None,
         };
         Some(AlertRule::new(self.symbol.clone(), condition))
+    }
+}
+
+// ── V2 / Бэктестер ─────────────────────────────────────────────────────────
+
+/// Описание параметра стратегии (для формы настроек в UI).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyParamDto {
+    pub name: String,
+    pub label: String,
+    pub default: f64,
+}
+
+/// Описание стратегии бэктестера: id, подпись и схема параметров.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyDescriptorDto {
+    pub id: String,
+    pub label: String,
+    pub params: Vec<StrategyParamDto>,
+}
+
+impl From<&StrategyDescriptor> for StrategyDescriptorDto {
+    fn from(d: &StrategyDescriptor) -> Self {
+        Self {
+            id: d.id.to_string(),
+            label: d.label.to_string(),
+            params: d
+                .params
+                .iter()
+                .map(|p| StrategyParamDto {
+                    name: p.name.to_string(),
+                    label: p.label.to_string(),
+                    default: p.default,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Параметры прогона бэктеста, приходящие с фронта (вход IPC).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacktestConfigInput {
+    pub initial_capital: f64,
+    pub commission: f64,
+    pub slippage: f64,
+    /// `nextOpen` (по умолчанию) | `thisClose`.
+    #[serde(default)]
+    pub fill_timing: Option<FillTimingInput>,
+}
+
+/// Режим момента исполнения сигнала (вход IPC).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FillTimingInput {
+    NextOpen,
+    ThisClose,
+}
+
+impl BacktestConfigInput {
+    /// Перевести в доменный конфиг бэктеста.
+    pub fn to_config(self) -> BacktestConfig {
+        BacktestConfig {
+            initial_capital: self.initial_capital,
+            commission: self.commission,
+            slippage: self.slippage,
+            fill_timing: match self.fill_timing {
+                Some(FillTimingInput::ThisClose) => FillTiming::ThisClose,
+                _ => FillTiming::NextOpen,
+            },
+        }
+    }
+}
+
+/// Одна смоделированная сделка бэктеста.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimTradeDto {
+    pub ts: i64,
+    /// `buy|sell`.
+    pub side: String,
+    pub qty: f64,
+    pub price: f64,
+    pub realized_pnl: f64,
+}
+
+impl From<&SimTrade> for SimTradeDto {
+    fn from(t: &SimTrade) -> Self {
+        Self {
+            ts: t.ts,
+            side: side_code(t.side).to_string(),
+            qty: t.qty,
+            price: t.price,
+            realized_pnl: t.realized_pnl,
+        }
+    }
+}
+
+/// Точка кривой капитала (`ts`, `equity`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct EquityPointDto {
+    pub ts: i64,
+    pub equity: f64,
+}
+
+/// Метрики эффективности стратегии.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerfMetricsDto {
+    pub net_pnl: f64,
+    pub return_pct: f64,
+    pub trades: usize,
+    pub wins: usize,
+    pub losses: usize,
+    pub win_rate: f64,
+    /// Может быть `Infinity` — сериализуется как null; фронт трактует как «∞».
+    pub profit_factor: f64,
+    pub max_drawdown: f64,
+    pub sharpe: f64,
+    pub avg_win: f64,
+    pub avg_loss: f64,
+}
+
+impl From<&PerfMetrics> for PerfMetricsDto {
+    fn from(m: &PerfMetrics) -> Self {
+        Self {
+            net_pnl: m.net_pnl,
+            return_pct: m.return_pct,
+            trades: m.trades,
+            wins: m.wins,
+            losses: m.losses,
+            win_rate: m.win_rate,
+            profit_factor: m.profit_factor,
+            max_drawdown: m.max_drawdown,
+            sharpe: m.sharpe,
+            avg_win: m.avg_win,
+            avg_loss: m.avg_loss,
+        }
+    }
+}
+
+/// Полный отчёт бэктеста для фронта.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacktestReportDto {
+    pub trades: Vec<SimTradeDto>,
+    pub equity_curve: Vec<EquityPointDto>,
+    pub metrics: PerfMetricsDto,
+}
+
+impl From<&BacktestReport> for BacktestReportDto {
+    fn from(r: &BacktestReport) -> Self {
+        Self {
+            trades: r.trades.iter().map(SimTradeDto::from).collect(),
+            equity_curve: r
+                .equity_curve
+                .iter()
+                .map(|&(ts, equity)| EquityPointDto { ts, equity })
+                .collect(),
+            metrics: PerfMetricsDto::from(&r.metrics),
+        }
+    }
+}
+
+// ── V2 / Delta (footprint + роботы) ─────────────────────────────────────────
+
+/// Ячейка footprint: объём на уровне по сторонам агрессора.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FootprintCellDto {
+    pub price: f64,
+    pub bid_volume: f64,
+    pub ask_volume: f64,
+    pub delta: f64,
+}
+
+/// Footprint одного бара для оверлея дельты.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FootprintBarDto {
+    pub ts: i64,
+    pub cells: Vec<FootprintCellDto>,
+    pub bid_total: f64,
+    pub ask_total: f64,
+    pub delta: f64,
+    pub cumulative_delta: f64,
+}
+
+impl From<&FootprintBar> for FootprintBarDto {
+    fn from(b: &FootprintBar) -> Self {
+        Self {
+            ts: b.ts,
+            cells: b
+                .cells
+                .iter()
+                .map(|c| FootprintCellDto {
+                    price: c.price,
+                    bid_volume: c.bid_volume,
+                    ask_volume: c.ask_volume,
+                    delta: c.delta(),
+                })
+                .collect(),
+            bid_total: b.bid_total,
+            ask_total: b.ask_total,
+            delta: b.delta,
+            cumulative_delta: b.cumulative_delta,
+        }
+    }
+}
+
+/// Сигнал детектирующего робота (маркер на графике дельты).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RobotSignalDto {
+    /// Вид: `same_lot|iceberg|absorption`.
+    pub kind: String,
+    pub ts: i64,
+    pub price: f64,
+    pub strength: f64,
+    pub note: String,
+}
+
+impl From<&RobotSignal> for RobotSignalDto {
+    fn from(s: &RobotSignal) -> Self {
+        Self {
+            kind: s.kind.code().to_string(),
+            ts: s.ts,
+            price: s.price,
+            strength: s.strength,
+            note: s.note.clone(),
+        }
+    }
+}
+
+/// Настройки детекторов, приходящие с фронта (вход IPC). Все поля
+/// необязательные — отсутствующие берутся из значений по умолчанию.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RobotConfigInput {
+    pub same_lot_enabled: Option<bool>,
+    pub same_lot_run: Option<usize>,
+    pub lot_tolerance: Option<f64>,
+    pub iceberg_enabled: Option<bool>,
+    pub iceberg_volume_mult: Option<f64>,
+    pub absorption_enabled: Option<bool>,
+    pub absorption_min_delta: Option<f64>,
+    pub absorption_max_move: Option<f64>,
+}
+
+impl RobotConfigInput {
+    /// Перевести в доменный конфиг, подставляя значения по умолчанию.
+    pub fn to_config(self) -> RobotConfig {
+        let d = RobotConfig::default();
+        RobotConfig {
+            same_lot_enabled: self.same_lot_enabled.unwrap_or(d.same_lot_enabled),
+            same_lot_run: self.same_lot_run.unwrap_or(d.same_lot_run),
+            lot_tolerance: self.lot_tolerance.unwrap_or(d.lot_tolerance),
+            iceberg_enabled: self.iceberg_enabled.unwrap_or(d.iceberg_enabled),
+            iceberg_volume_mult: self.iceberg_volume_mult.unwrap_or(d.iceberg_volume_mult),
+            absorption_enabled: self.absorption_enabled.unwrap_or(d.absorption_enabled),
+            absorption_min_delta: self.absorption_min_delta.unwrap_or(d.absorption_min_delta),
+            absorption_max_move: self.absorption_max_move.unwrap_or(d.absorption_max_move),
+        }
+    }
+}
+
+// ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
+
+/// Заявка на постановку, приходящая с фронта (вход IPC).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderInput {
+    pub symbol: String,
+    /// `buy|sell`.
+    pub side: String,
+    pub qty: f64,
+    /// `market|limit|stop`.
+    pub kind: String,
+    /// Цена для limit/stop.
+    pub price: Option<f64>,
+    /// `gtc|day|ioc` (по умолчанию `gtc`).
+    pub tif: Option<String>,
+}
+
+impl OrderInput {
+    /// Разобрать сторону заявки.
+    pub fn parse_side(&self) -> Option<Side> {
+        match self.side.as_str() {
+            "buy" => Some(Side::Buy),
+            "sell" => Some(Side::Sell),
+            _ => None,
+        }
+    }
+
+    /// Разобрать тип заявки.
+    pub fn parse_kind(&self) -> Option<OrderType> {
+        match self.kind.as_str() {
+            "market" => Some(OrderType::Market),
+            "limit" => Some(OrderType::Limit),
+            "stop" => Some(OrderType::Stop),
+            _ => None,
+        }
+    }
+
+    /// Разобрать TIF (по умолчанию GTC).
+    pub fn parse_tif(&self) -> TimeInForce {
+        match self.tif.as_deref() {
+            Some("ioc") => TimeInForce::Ioc,
+            Some("day") => TimeInForce::Day,
+            _ => TimeInForce::Gtc,
+        }
+    }
+}
+
+/// Заявка для блоттера.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderDto {
+    pub id: u64,
+    pub symbol: String,
+    /// `buy|sell`.
+    pub side: String,
+    pub qty: f64,
+    pub filled: f64,
+    pub price: Option<f64>,
+    /// `market|limit|stop`.
+    pub kind: String,
+    /// `new|partially_filled|filled|cancelled|rejected`.
+    pub status: String,
+}
+
+impl From<&Order> for OrderDto {
+    fn from(o: &Order) -> Self {
+        Self {
+            id: o.id,
+            symbol: o.symbol.clone(),
+            side: side_code(o.side).to_string(),
+            qty: o.qty,
+            filled: o.filled,
+            price: o.price,
+            kind: match o.kind {
+                OrderType::Market => "market",
+                OrderType::Limit => "limit",
+                OrderType::Stop => "stop",
+            }
+            .to_string(),
+            status: o.status.code().to_string(),
+        }
+    }
+}
+
+/// Факт исполнения (событие `fill:tick` и ответ на постановку).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FillEventDto {
+    pub order_id: u64,
+    pub ts: i64,
+    /// `buy|sell`.
+    pub side: &'static str,
+    pub qty: f64,
+    pub price: f64,
+    pub realized_pnl: f64,
+}
+
+impl From<&Fill> for FillEventDto {
+    fn from(f: &Fill) -> Self {
+        Self {
+            order_id: f.order_id,
+            ts: f.ts,
+            side: side_code(f.side),
+            qty: f.qty,
+            price: f.price,
+            realized_pnl: f.realized_pnl,
+        }
+    }
+}
+
+/// Позиция по инструменту для таблицы позиций.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionDto {
+    pub symbol: String,
+    pub qty: f64,
+    pub avg_price: f64,
+}
+
+/// Состояние счёта (наличность + реализованный P&L).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDto {
+    pub cash: f64,
+    pub realized_pnl: f64,
+}
+
+/// Результат постановки заявки: итог заявки + исполнения.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitResultDto {
+    pub order: OrderDto,
+    pub fills: Vec<FillEventDto>,
+}
+
+impl PositionDto {
+    /// Собрать DTO из доменной позиции.
+    pub fn new(symbol: &str, pos: &Position) -> Self {
+        Self {
+            symbol: symbol.to_string(),
+            qty: pos.qty,
+            avg_price: pos.avg_price,
+        }
     }
 }
 

@@ -13,16 +13,23 @@ use domain::TimeFrame;
 use storage::ingest::snapshot_from_bars;
 use storage::{StorageError, Store};
 
+use domain::backtest::StrategyParams;
+
 use crate::api;
 use crate::dto::{
-    AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
-    FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
+    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FootprintBarDto, FutureGroupDto,
+    InstrumentDto, OrderDto, OrderInput, PositionDto, RobotConfigInput, RobotSignalDto,
+    RrgSectorDto, SectorEntryDto, SectorRow, StrategyDescriptorDto, SubmitResultDto, TopMoverDto,
+    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
+use crate::trade::TradeSession;
 
 /// Разделяемое состояние терминала.
 pub struct AppState {
     store: Mutex<Box<dyn Store + Send>>,
+    /// Сессия симулированной торговли (paper trading).
+    trade: TradeSession,
 }
 
 // В headless-live режиме IPC-read-методы (обработчики команд) не вызываются —
@@ -33,7 +40,13 @@ impl AppState {
     pub fn new(store: impl Store + Send + 'static) -> Self {
         Self {
             store: Mutex::new(Box::new(store)),
+            trade: TradeSession::new(),
         }
+    }
+
+    /// Доступ к сессии торговли (для live-эмиттеров `on_trade`/`on_book`).
+    pub fn trade_session(&self) -> &TradeSession {
+        &self.trade
     }
 
     /// Выполнить чтение под блокировкой. Отравленный мьютекс → ошибка БД.
@@ -184,6 +197,80 @@ impl AppState {
         to_ts: i64,
     ) -> Result<Vec<AlertEventDto>, StorageError> {
         self.read(|s| api::alerts_scan(s, rules, from_ts, to_ts))
+    }
+
+    // ── V2 / Бэктестер ──────────────────────────────────────────────────────
+
+    /// Каталог встроенных стратегий бэктестера (не зависит от хранилища).
+    pub fn list_strategies(&self) -> Vec<StrategyDescriptorDto> {
+        api::list_strategies()
+    }
+
+    /// Прогон бэктеста стратегии по сохранённым барам инструмента.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_backtest(
+        &self,
+        symbol: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+        strategy_id: &str,
+        params: &StrategyParams,
+        config: &BacktestConfigInput,
+    ) -> Result<BacktestReportDto, StorageError> {
+        self.read(|s| api::run_backtest(s, symbol, tf, from_ts, to_ts, strategy_id, params, config))
+    }
+
+    // ── V2 / Delta ──────────────────────────────────────────────────────────
+
+    /// Footprint/дельта инструмента по сохранённым тиковым сделкам.
+    pub fn delta_footprint(
+        &self,
+        symbol: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+        tick_size: f64,
+    ) -> Result<Vec<FootprintBarDto>, StorageError> {
+        self.read(|s| api::delta_footprint(s, symbol, tf, from_ts, to_ts, tick_size))
+    }
+
+    /// Прогон детектирующих роботов по сохранённой ленте инструмента.
+    pub fn robot_scan(
+        &self,
+        symbol: &str,
+        from_ts: i64,
+        to_ts: i64,
+        config: &RobotConfigInput,
+    ) -> Result<Vec<RobotSignalDto>, StorageError> {
+        self.read(|s| api::robot_scan(s, symbol, from_ts, to_ts, config))
+    }
+
+    // ── V2 / Trade (симулятор исполнения) ────────────────────────────────────
+
+    /// Поставить заявку в симулятор. `Err` — причина отклонения/ошибки ввода.
+    pub fn submit_order(&self, input: &OrderInput) -> Result<SubmitResultDto, String> {
+        self.trade.submit(input)
+    }
+
+    /// Отменить активную заявку.
+    pub fn cancel_order(&self, id: u64) -> Result<OrderDto, String> {
+        self.trade.cancel(id)
+    }
+
+    /// Активные заявки (блоттер).
+    pub fn order_blotter(&self) -> Vec<OrderDto> {
+        self.trade.orders()
+    }
+
+    /// Открытые позиции.
+    pub fn positions(&self) -> Vec<PositionDto> {
+        self.trade.positions()
+    }
+
+    /// Состояние счёта.
+    pub fn account(&self) -> AccountDto {
+        self.trade.account()
     }
 }
 

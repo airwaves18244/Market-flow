@@ -13,6 +13,7 @@ mod api;
 mod dto;
 mod state;
 mod telemetry;
+mod trade;
 
 // Планировщик ингеста — сервис, который потребляет десктопный рантайм (связка с
 // живым `data::MarketData`) и юнит-тесты. В headless-сборке часть его API
@@ -122,6 +123,19 @@ fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
         w.bars(sym, TimeFrame::D1, &bars)?;
         w.snapshot_from_bars(sym, &bars, 3)?;
     }
+
+    // V2 — демо-лента сделок для footprint/дельты и детектирующих роботов:
+    // серия из шести равных лотов по 10 на первом дневном баре (ts=1).
+    let demo_trades: Vec<Trade> = (0..6)
+        .map(|i| Trade {
+            ts: 1,
+            price: 300.0 + (i % 2) as f64,
+            size: 10.0,
+            buyer_initiated: Some(i % 3 != 0),
+        })
+        .collect();
+    w.trades("SBER@MISX", &demo_trades)?;
+
     Ok(store)
 }
 
@@ -272,6 +286,97 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             book.bids.len(),
             book.asks.len()
         );
+
+        // V2 — бэктестер + Delta (footprint/дельта и роботы) на MemStore.
+        println!(
+            "  list_strategies(): {} стратегий",
+            state.list_strategies().len()
+        );
+        let bt_cfg = dto::BacktestConfigInput {
+            initial_capital: 100_000.0,
+            commission: 0.0,
+            slippage: 0.0,
+            fill_timing: None,
+        };
+        let report = state.run_backtest(
+            "SBER@MISX",
+            TimeFrame::D1,
+            0,
+            i64::MAX,
+            "ma_cross",
+            &domain::backtest::StrategyParams::new(),
+            &bt_cfg,
+        )?;
+        println!(
+            "  run_backtest(ma_cross): {} сделок, P&L={:+.0}",
+            report.trades.len(),
+            report.metrics.net_pnl
+        );
+        let fp = state.delta_footprint("SBER@MISX", TimeFrame::D1, 0, i64::MAX, 1.0)?;
+        let total_delta: f64 = fp.iter().map(|b| b.delta).sum();
+        println!(
+            "  delta_footprint(SBER@MISX): {} баров, суммарная дельта={:+.0}",
+            fp.len(),
+            total_delta
+        );
+        let signals =
+            state.robot_scan("SBER@MISX", 0, i64::MAX, &dto::RobotConfigInput::default())?;
+        println!(
+            "  robot_scan(SBER@MISX): {} сигналов роботов",
+            signals.len()
+        );
+
+        // V2 — симулятор торговли: подаём стакан, ставим рыночную заявку.
+        state.trade_session().on_book(&OrderBook {
+            ts: 3,
+            bids: vec![BookLevel {
+                price: 304.5,
+                size: 100.0,
+            }],
+            asks: vec![BookLevel {
+                price: 305.5,
+                size: 100.0,
+            }],
+        });
+        match state.submit_order(&dto::OrderInput {
+            symbol: "SBER@MISX".into(),
+            side: "buy".into(),
+            qty: 10.0,
+            kind: "market".into(),
+            price: None,
+            tif: None,
+        }) {
+            Ok(res) => println!(
+                "  submit_order(market buy 10): статус={}, исполнений={}",
+                res.order.status,
+                res.fills.len()
+            ),
+            Err(e) => println!("  submit_order: отклонено — {e}"),
+        }
+        println!(
+            "  positions(): {} | account.cash={:.0} | blotter={}",
+            state.positions().len(),
+            state.account().cash,
+            state.order_blotter().len()
+        );
+        // Резервная лимитка + отмена; прокрутка ленты через симулятор.
+        if let Ok(res) = state.submit_order(&dto::OrderInput {
+            symbol: "SBER@MISX".into(),
+            side: "buy".into(),
+            qty: 5.0,
+            kind: "limit".into(),
+            price: Some(300.0),
+            tif: None,
+        }) {
+            let _ = state.cancel_order(res.order.id);
+        }
+        let sim_fills = state.trade_session().on_trade(&Trade {
+            ts: 4,
+            price: 305.5,
+            size: 5.0,
+            buyer_initiated: Some(true),
+        });
+        println!("  sim on_trade: {} исполнений по ленте", sim_fills.len());
 
         Ok(())
     }

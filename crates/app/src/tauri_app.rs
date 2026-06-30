@@ -10,12 +10,16 @@
 
 use tauri::{Emitter, State};
 
+use domain::backtest::StrategyParams;
 use domain::TimeFrame;
 
 use crate::dto::{
-    AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
-    FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto, RrgSectorDto, SectorEntryDto,
-    SectorRow, TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
+    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FillEventDto, FlowEdgeDto, FootprintBarDto,
+    FutureGroupDto, InstrumentDto, OrderBookDto, OrderDto, OrderInput, PositionDto,
+    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    StrategyDescriptorDto, SubmitResultDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -151,6 +155,94 @@ fn alerts_scan(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn list_strategies(state: State<AppState>) -> CmdResult<Vec<StrategyDescriptorDto>> {
+    Ok(state.list_strategies())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn run_backtest(
+    state: State<AppState>,
+    symbol: String,
+    timeframe: String,
+    from_ts: i64,
+    to_ts: i64,
+    strategy_id: String,
+    params: StrategyParams,
+    config: BacktestConfigInput,
+) -> CmdResult<BacktestReportDto> {
+    let tf = TimeFrame::from_code(&timeframe)
+        .ok_or_else(|| format!("неизвестный тайм-фрейм: {timeframe}"))?;
+    state
+        .run_backtest(&symbol, tf, from_ts, to_ts, &strategy_id, &params, &config)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delta_footprint(
+    state: State<AppState>,
+    symbol: String,
+    timeframe: String,
+    from_ts: i64,
+    to_ts: i64,
+    tick_size: f64,
+) -> CmdResult<Vec<FootprintBarDto>> {
+    let tf = TimeFrame::from_code(&timeframe)
+        .ok_or_else(|| format!("неизвестный тайм-фрейм: {timeframe}"))?;
+    state
+        .delta_footprint(&symbol, tf, from_ts, to_ts, tick_size)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn robot_scan(
+    state: State<AppState>,
+    symbol: String,
+    from_ts: i64,
+    to_ts: i64,
+    config: RobotConfigInput,
+) -> CmdResult<Vec<RobotSignalDto>> {
+    state
+        .robot_scan(&symbol, from_ts, to_ts, &config)
+        .map_err(|e| e.to_string())
+}
+
+// ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
+
+#[tauri::command]
+fn submit_order(state: State<AppState>, order: OrderInput) -> CmdResult<SubmitResultDto> {
+    state.submit_order(&order)
+}
+
+#[tauri::command]
+fn cancel_order(state: State<AppState>, id: u64) -> CmdResult<OrderDto> {
+    state.cancel_order(id)
+}
+
+#[tauri::command]
+fn order_blotter(state: State<AppState>) -> CmdResult<Vec<OrderDto>> {
+    Ok(state.order_blotter())
+}
+
+#[tauri::command]
+fn positions(state: State<AppState>) -> CmdResult<Vec<PositionDto>> {
+    Ok(state.positions())
+}
+
+#[tauri::command]
+fn account(state: State<AppState>) -> CmdResult<AccountDto> {
+    Ok(state.account())
+}
+
+/// Отправить во фронт исполнение симулятора (канал `fill:tick`). Точка
+/// интеграции для live-стрима: эмиттеры `emit_trade`/`emit_order_book` сначала
+/// прокидывают тик в `state.trade_session()`, а полученные исполнения — сюда.
+#[allow(dead_code)]
+pub fn emit_fill(app: &tauri::AppHandle, fill: &FillEventDto) -> CmdResult<()> {
+    app.emit("fill:tick", fill).map_err(|e| e.to_string())
+}
+
 /// Лента сделок (Time&Sales). В store-backed сборке тиковые сделки не
 /// сохраняются, поэтому первичный ответ пуст — живые сделки приходят событием
 /// `trade:tick` (см. [`emit_trade`]) из live-стрима `subscribe_trades`.
@@ -232,6 +324,15 @@ pub fn run() {
             turnover_timeline,
             flow_sankey,
             alerts_scan,
+            list_strategies,
+            run_backtest,
+            delta_footprint,
+            robot_scan,
+            submit_order,
+            cancel_order,
+            order_blotter,
+            positions,
+            account,
             latest_trades,
             order_book
         ])

@@ -19,6 +19,7 @@ pub mod endpoint;
 pub mod grpc;
 #[cfg(feature = "grpc")]
 pub mod market;
+pub mod orders;
 pub mod rate;
 pub mod secret;
 #[cfg(feature = "grpc")]
@@ -32,6 +33,9 @@ pub use endpoint::Method;
 pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
 #[cfg(feature = "grpc")]
 pub use market::FinamMarketData;
+#[cfg(feature = "live-trading")]
+pub use orders::FinamOrderRouter;
+pub use orders::{OrderRouter, RouterError, SimOrderRouter};
 pub use rate::RateLimiter;
 #[cfg(feature = "keyring")]
 pub use secret::KeyringSecretStore;

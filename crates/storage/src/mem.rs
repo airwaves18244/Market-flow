@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use domain::{Bar, Instrument, TimeFrame};
+use domain::{Bar, Instrument, TimeFrame, Trade};
 
 use crate::schema::SCHEMA_VERSION;
 use crate::store::{SectorEntry, Store, TurnoverSnapshot};
@@ -24,6 +24,9 @@ pub struct MemStore {
     bars: HashMap<(String, &'static str), BTreeMap<i64, Bar>>,
     /// symbol → (ts → snapshot).
     snapshots: HashMap<String, BTreeMap<i64, TurnoverSnapshot>>,
+    /// symbol → (ts → сделки на этой секунде, в порядке поступления). Тики
+    /// append-only, поэтому внутри секунды держим `Vec`, а не перезапись.
+    trades: HashMap<String, BTreeMap<i64, Vec<Trade>>>,
     sector_map: HashMap<String, SectorEntry>,
 }
 
@@ -115,6 +118,26 @@ impl Store for MemStore {
             .get(symbol)
             .into_iter()
             .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, s)| *s))
+            .collect())
+    }
+
+    fn insert_trades(&mut self, symbol: &str, trades: &[Trade]) -> Result<usize, StorageError> {
+        let by_ts = self.trades.entry(symbol.to_string()).or_default();
+        for t in trades {
+            by_ts.entry(t.ts).or_default().push(*t);
+        }
+        Ok(trades.len())
+    }
+
+    fn trades(&self, symbol: &str, from_ts: i64, to_ts: i64) -> Result<Vec<Trade>, StorageError> {
+        Ok(self
+            .trades
+            .get(symbol)
+            .into_iter()
+            .flat_map(|m| {
+                m.range(from_ts..=to_ts)
+                    .flat_map(|(_, v)| v.iter().copied())
+            })
             .collect())
     }
 
@@ -229,6 +252,36 @@ mod tests {
         let got = s.snapshots("SBER@MISX", 0, 200).unwrap();
         assert_eq!(got, vec![snap]);
         assert!(s.snapshots("SBER@MISX", 101, 200).unwrap().is_empty());
+    }
+
+    #[test]
+    fn trades_append_and_range_ordered() {
+        let mut s = MemStore::new();
+        let t = |ts: i64, price: f64, size: f64, bi: Option<bool>| Trade {
+            ts,
+            price,
+            size,
+            buyer_initiated: bi,
+        };
+        // вставляем вразнобой, в т.ч. два тика на одной секунде (append, не upsert)
+        s.insert_trades(
+            "SBER@MISX",
+            &[t(3, 30.0, 1.0, Some(true)), t(1, 10.0, 2.0, None)],
+        )
+        .unwrap();
+        s.insert_trades(
+            "SBER@MISX",
+            &[t(2, 20.0, 3.0, Some(false)), t(2, 21.0, 4.0, Some(true))],
+        )
+        .unwrap();
+
+        let got = s.trades("SBER@MISX", 1, 3).unwrap();
+        // 4 тика по возрастанию ts; внутри ts=2 — порядок поступления (20,21)
+        let prices: Vec<f64> = got.iter().map(|t| t.price).collect();
+        assert_eq!(prices, vec![10.0, 20.0, 21.0, 30.0]);
+        // окно усекает
+        assert_eq!(s.trades("SBER@MISX", 2, 2).unwrap().len(), 2);
+        assert!(s.trades("GAZP@MISX", 0, 9).unwrap().is_empty());
     }
 
     #[test]
