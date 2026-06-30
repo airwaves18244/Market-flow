@@ -13,5 +13,6 @@ pub mod backtest;
 pub mod delta;
 pub mod metrics;
 pub mod model;
+pub mod trading;
 
 pub use model::{AssetClass, Bar, BookLevel, Instrument, OrderBook, Quote, Side, TimeFrame, Trade};

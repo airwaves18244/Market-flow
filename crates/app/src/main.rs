@@ -13,6 +13,7 @@ mod api;
 mod dto;
 mod state;
 mod telemetry;
+mod trade;
 
 // Планировщик ингеста — сервис, который потребляет десктопный рантайм (связка с
 // живым `data::MarketData`) и юнит-тесты. В headless-сборке часть его API
@@ -320,6 +321,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         let signals = state.robot_scan("SBER@MISX", 0, i64::MAX, &dto::RobotConfigInput::default())?;
         println!("  robot_scan(SBER@MISX): {} сигналов роботов", signals.len());
+
+        // V2 — симулятор торговли: подаём стакан, ставим рыночную заявку.
+        state.trade_session().on_book(&OrderBook {
+            ts: 3,
+            bids: vec![BookLevel {
+                price: 304.5,
+                size: 100.0,
+            }],
+            asks: vec![BookLevel {
+                price: 305.5,
+                size: 100.0,
+            }],
+        });
+        match state.submit_order(&dto::OrderInput {
+            symbol: "SBER@MISX".into(),
+            side: "buy".into(),
+            qty: 10.0,
+            kind: "market".into(),
+            price: None,
+            tif: None,
+        }) {
+            Ok(res) => println!(
+                "  submit_order(market buy 10): статус={}, исполнений={}",
+                res.order.status,
+                res.fills.len()
+            ),
+            Err(e) => println!("  submit_order: отклонено — {e}"),
+        }
+        println!(
+            "  positions(): {} | account.cash={:.0} | blotter={}",
+            state.positions().len(),
+            state.account().cash,
+            state.order_blotter().len()
+        );
+        // Резервная лимитка + отмена; прокрутка ленты через симулятор.
+        if let Ok(res) = state.submit_order(&dto::OrderInput {
+            symbol: "SBER@MISX".into(),
+            side: "buy".into(),
+            qty: 5.0,
+            kind: "limit".into(),
+            price: Some(300.0),
+            tif: None,
+        }) {
+            let _ = state.cancel_order(res.order.id);
+        }
+        let sim_fills = state.trade_session().on_trade(&Trade {
+            ts: 4,
+            price: 305.5,
+            size: 5.0,
+            buyer_initiated: Some(true),
+        });
+        println!("  sim on_trade: {} исполнений по ленте", sim_fills.len());
 
         Ok(())
     }

@@ -14,11 +14,12 @@ use domain::backtest::StrategyParams;
 use domain::TimeFrame;
 
 use crate::dto::{
-    AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint, BondIssuerDto,
-    BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FootprintBarDto, FutureGroupDto, InstrumentDto,
-    OrderBookDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    StrategyDescriptorDto, TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint,
-    YieldCurvePoint,
+    AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
+    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FillEventDto, FlowEdgeDto, FootprintBarDto,
+    FutureGroupDto, InstrumentDto, OrderBookDto, OrderDto, OrderInput, PositionDto,
+    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    StrategyDescriptorDto, SubmitResultDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -207,6 +208,41 @@ fn robot_scan(
         .map_err(|e| e.to_string())
 }
 
+// ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
+
+#[tauri::command]
+fn submit_order(state: State<AppState>, order: OrderInput) -> CmdResult<SubmitResultDto> {
+    state.submit_order(&order)
+}
+
+#[tauri::command]
+fn cancel_order(state: State<AppState>, id: u64) -> CmdResult<OrderDto> {
+    state.cancel_order(id)
+}
+
+#[tauri::command]
+fn order_blotter(state: State<AppState>) -> CmdResult<Vec<OrderDto>> {
+    Ok(state.order_blotter())
+}
+
+#[tauri::command]
+fn positions(state: State<AppState>) -> CmdResult<Vec<PositionDto>> {
+    Ok(state.positions())
+}
+
+#[tauri::command]
+fn account(state: State<AppState>) -> CmdResult<AccountDto> {
+    Ok(state.account())
+}
+
+/// Отправить во фронт исполнение симулятора (канал `fill:tick`). Точка
+/// интеграции для live-стрима: эмиттеры `emit_trade`/`emit_order_book` сначала
+/// прокидывают тик в `state.trade_session()`, а полученные исполнения — сюда.
+#[allow(dead_code)]
+pub fn emit_fill(app: &tauri::AppHandle, fill: &FillEventDto) -> CmdResult<()> {
+    app.emit("fill:tick", fill).map_err(|e| e.to_string())
+}
+
 /// Лента сделок (Time&Sales). В store-backed сборке тиковые сделки не
 /// сохраняются, поэтому первичный ответ пуст — живые сделки приходят событием
 /// `trade:tick` (см. [`emit_trade`]) из live-стрима `subscribe_trades`.
@@ -292,6 +328,11 @@ pub fn run() {
             run_backtest,
             delta_footprint,
             robot_scan,
+            submit_order,
+            cancel_order,
+            order_blotter,
+            positions,
+            account,
             latest_trades,
             order_book
         ])

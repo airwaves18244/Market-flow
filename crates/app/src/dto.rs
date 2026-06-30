@@ -11,6 +11,7 @@ use domain::backtest::{
 };
 use domain::delta::{FootprintBar, RobotConfig, RobotSignal};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
+use domain::trading::{Fill, Order, OrderType, Position, TimeInForce};
 use domain::{BookLevel, Instrument, OrderBook, Side, Trade};
 use storage::store::TurnoverSnapshot;
 use storage::SectorEntry;
@@ -400,7 +401,7 @@ pub enum FillTimingInput {
 
 impl BacktestConfigInput {
     /// Перевести в доменный конфиг бэктеста.
-    pub fn to_config(&self) -> BacktestConfig {
+    pub fn to_config(self) -> BacktestConfig {
         BacktestConfig {
             initial_capital: self.initial_capital,
             commission: self.commission,
@@ -590,7 +591,7 @@ pub struct RobotConfigInput {
 
 impl RobotConfigInput {
     /// Перевести в доменный конфиг, подставляя значения по умолчанию.
-    pub fn to_config(&self) -> RobotConfig {
+    pub fn to_config(self) -> RobotConfig {
         let d = RobotConfig::default();
         RobotConfig {
             same_lot_enabled: self.same_lot_enabled.unwrap_or(d.same_lot_enabled),
@@ -601,6 +602,153 @@ impl RobotConfigInput {
             absorption_enabled: self.absorption_enabled.unwrap_or(d.absorption_enabled),
             absorption_min_delta: self.absorption_min_delta.unwrap_or(d.absorption_min_delta),
             absorption_max_move: self.absorption_max_move.unwrap_or(d.absorption_max_move),
+        }
+    }
+}
+
+// ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
+
+/// Заявка на постановку, приходящая с фронта (вход IPC).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderInput {
+    pub symbol: String,
+    /// `buy|sell`.
+    pub side: String,
+    pub qty: f64,
+    /// `market|limit|stop`.
+    pub kind: String,
+    /// Цена для limit/stop.
+    pub price: Option<f64>,
+    /// `gtc|day|ioc` (по умолчанию `gtc`).
+    pub tif: Option<String>,
+}
+
+impl OrderInput {
+    /// Разобрать сторону заявки.
+    pub fn parse_side(&self) -> Option<Side> {
+        match self.side.as_str() {
+            "buy" => Some(Side::Buy),
+            "sell" => Some(Side::Sell),
+            _ => None,
+        }
+    }
+
+    /// Разобрать тип заявки.
+    pub fn parse_kind(&self) -> Option<OrderType> {
+        match self.kind.as_str() {
+            "market" => Some(OrderType::Market),
+            "limit" => Some(OrderType::Limit),
+            "stop" => Some(OrderType::Stop),
+            _ => None,
+        }
+    }
+
+    /// Разобрать TIF (по умолчанию GTC).
+    pub fn parse_tif(&self) -> TimeInForce {
+        match self.tif.as_deref() {
+            Some("ioc") => TimeInForce::Ioc,
+            Some("day") => TimeInForce::Day,
+            _ => TimeInForce::Gtc,
+        }
+    }
+}
+
+/// Заявка для блоттера.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderDto {
+    pub id: u64,
+    pub symbol: String,
+    /// `buy|sell`.
+    pub side: String,
+    pub qty: f64,
+    pub filled: f64,
+    pub price: Option<f64>,
+    /// `market|limit|stop`.
+    pub kind: String,
+    /// `new|partially_filled|filled|cancelled|rejected`.
+    pub status: String,
+}
+
+impl From<&Order> for OrderDto {
+    fn from(o: &Order) -> Self {
+        Self {
+            id: o.id,
+            symbol: o.symbol.clone(),
+            side: side_code(o.side).to_string(),
+            qty: o.qty,
+            filled: o.filled,
+            price: o.price,
+            kind: match o.kind {
+                OrderType::Market => "market",
+                OrderType::Limit => "limit",
+                OrderType::Stop => "stop",
+            }
+            .to_string(),
+            status: o.status.code().to_string(),
+        }
+    }
+}
+
+/// Факт исполнения (событие `fill:tick` и ответ на постановку).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FillEventDto {
+    pub order_id: u64,
+    pub ts: i64,
+    /// `buy|sell`.
+    pub side: &'static str,
+    pub qty: f64,
+    pub price: f64,
+    pub realized_pnl: f64,
+}
+
+impl From<&Fill> for FillEventDto {
+    fn from(f: &Fill) -> Self {
+        Self {
+            order_id: f.order_id,
+            ts: f.ts,
+            side: side_code(f.side),
+            qty: f.qty,
+            price: f.price,
+            realized_pnl: f.realized_pnl,
+        }
+    }
+}
+
+/// Позиция по инструменту для таблицы позиций.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionDto {
+    pub symbol: String,
+    pub qty: f64,
+    pub avg_price: f64,
+}
+
+/// Состояние счёта (наличность + реализованный P&L).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDto {
+    pub cash: f64,
+    pub realized_pnl: f64,
+}
+
+/// Результат постановки заявки: итог заявки + исполнения.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitResultDto {
+    pub order: OrderDto,
+    pub fills: Vec<FillEventDto>,
+}
+
+impl PositionDto {
+    /// Собрать DTO из доменной позиции.
+    pub fn new(symbol: &str, pos: &Position) -> Self {
+        Self {
+            symbol: symbol.to_string(),
+            qty: pos.qty,
+            avg_price: pos.avg_price,
         }
     }
 }
