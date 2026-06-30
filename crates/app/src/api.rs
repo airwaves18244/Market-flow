@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use domain::backtest::{
     descriptors, run_backtest as domain_run_backtest, strategy_from_id, StrategyParams,
 };
+use domain::delta::{footprint, RobotScanner};
 use domain::metrics::alerts::{AlertEngine, Observation};
 use domain::metrics::breadth::breadth;
 use domain::metrics::crossasset::{flow_matrix, turnover_shares, TurnoverShares};
@@ -19,9 +20,10 @@ use storage::{StorageError, Store};
 
 use crate::dto::{
     AlertEventDto, AlertRuleInput, AssetClassShareDto, BacktestConfigInput, BacktestReportDto,
-    BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
-    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, StrategyDescriptorDto, TopMoverDto,
-    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FootprintBarDto,
+    FutureGroupDto, InstrumentDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto,
+    SectorRow, StrategyDescriptorDto, TopMoverDto, TurnoverByClassPoint, TurnoverPoint,
+    YieldCurvePoint,
 };
 
 /// Метка сектора для инструментов без классификации.
@@ -611,10 +613,50 @@ pub fn run_backtest(
     Ok(BacktestReportDto::from(&report))
 }
 
+// ── V2 / Delta (footprint + роботы) ─────────────────────────────────────────
+
+/// Footprint/дельта инструмента: бинирует сохранённые тиковые сделки по барам
+/// тайм-фрейма `tf` (границы баров — времена сохранённых баров) и ценовым
+/// уровням шага `tick_size`. `tick_size <= 0` — без бакетирования по цене.
+pub fn delta_footprint(
+    store: &dyn Store,
+    symbol: &str,
+    tf: TimeFrame,
+    from_ts: i64,
+    to_ts: i64,
+    tick_size: f64,
+) -> Result<Vec<FootprintBarDto>, StorageError> {
+    let bar_starts: Vec<i64> = store
+        .bars(symbol, tf, from_ts, to_ts)?
+        .into_iter()
+        .map(|b| b.ts)
+        .collect();
+    let trades = store.trades(symbol, from_ts, to_ts)?;
+    let bars = footprint(&trades, &bar_starts, tf.seconds(), tick_size);
+    Ok(bars.iter().map(FootprintBarDto::from).collect())
+}
+
+/// Прогон детектирующих роботов по сохранённой ленте инструмента.
+///
+/// Стакан не сохраняется, поэтому айсберг-детектор (требующий снимка стакана)
+/// здесь не срабатывает; остальные (равные лоты, поглощение) работают по ленте.
+/// Живой оверлей со стаканом подключается через стрим-события.
+pub fn robot_scan(
+    store: &dyn Store,
+    symbol: &str,
+    from_ts: i64,
+    to_ts: i64,
+    config: &RobotConfigInput,
+) -> Result<Vec<RobotSignalDto>, StorageError> {
+    let trades = store.trades(symbol, from_ts, to_ts)?;
+    let signals = RobotScanner::new(config.to_config()).scan(&trades, None);
+    Ok(signals.iter().map(RobotSignalDto::from).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{AssetClass, Bar, Instrument};
+    use domain::{AssetClass, Bar, Instrument, Trade};
     use storage::ingest::Writer;
     use storage::MemStore;
 
@@ -921,6 +963,41 @@ mod tests {
             threshold: 1.0,
         }];
         assert!(alerts_scan(&store, &bogus, 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delta_footprint_bins_trades_by_bar_and_price() {
+        let mut store = seeded(); // SBER дневные бары на ts=1,2,3
+        // Сделки на ts=1 (внутри дневного бара): покупка 5 @100, продажа 2 @100.
+        store
+            .insert_trades(
+                "SBER@MISX",
+                &[
+                    Trade { ts: 1, price: 100.0, size: 5.0, buyer_initiated: Some(true) },
+                    Trade { ts: 1, price: 100.0, size: 2.0, buyer_initiated: Some(false) },
+                ],
+            )
+            .unwrap();
+        let fp = delta_footprint(&store, "SBER@MISX", TimeFrame::D1, 0, i64::MAX, 1.0).unwrap();
+        // По одному footprint-бару на каждый сохранённый бар (3).
+        assert_eq!(fp.len(), 3);
+        // Первый бар (ts=1) содержит дельту +3 (5 buy − 2 sell).
+        let b1 = fp.iter().find(|b| b.ts == 1).unwrap();
+        assert_eq!(b1.delta, 3.0);
+        assert_eq!(b1.cells.len(), 1);
+    }
+
+    #[test]
+    fn robot_scan_detects_same_lot_series() {
+        let mut store = seeded();
+        // 4 подряд по 10 → серия равных лотов.
+        let trades: Vec<Trade> = (1..=4)
+            .map(|i| Trade { ts: i, price: 100.0, size: 10.0, buyer_initiated: Some(true) })
+            .collect();
+        store.insert_trades("SBER@MISX", &trades).unwrap();
+        let cfg = RobotConfigInput::default();
+        let sigs = robot_scan(&store, "SBER@MISX", 0, i64::MAX, &cfg).unwrap();
+        assert!(sigs.iter().any(|s| s.kind == "same_lot"));
     }
 
     #[test]

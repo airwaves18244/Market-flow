@@ -122,6 +122,19 @@ fn seed_demo_store() -> Result<MemStore, Box<dyn std::error::Error>> {
         w.bars(sym, TimeFrame::D1, &bars)?;
         w.snapshot_from_bars(sym, &bars, 3)?;
     }
+
+    // V2 — демо-лента сделок для footprint/дельты и детектирующих роботов:
+    // серия из шести равных лотов по 10 на первом дневном баре (ts=1).
+    let demo_trades: Vec<Trade> = (0..6)
+        .map(|i| Trade {
+            ts: 1,
+            price: 300.0 + (i % 2) as f64,
+            size: 10.0,
+            buyer_initiated: Some(i % 3 != 0),
+        })
+        .collect();
+    w.trades("SBER@MISX", &demo_trades)?;
+
     Ok(store)
 }
 
@@ -272,6 +285,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             book.bids.len(),
             book.asks.len()
         );
+
+        // V2 — бэктестер + Delta (footprint/дельта и роботы) на MemStore.
+        println!(
+            "  list_strategies(): {} стратегий",
+            state.list_strategies().len()
+        );
+        let bt_cfg = dto::BacktestConfigInput {
+            initial_capital: 100_000.0,
+            commission: 0.0,
+            slippage: 0.0,
+            fill_timing: None,
+        };
+        let report = state.run_backtest(
+            "SBER@MISX",
+            TimeFrame::D1,
+            0,
+            i64::MAX,
+            "ma_cross",
+            &domain::backtest::StrategyParams::new(),
+            &bt_cfg,
+        )?;
+        println!(
+            "  run_backtest(ma_cross): {} сделок, P&L={:+.0}",
+            report.trades.len(),
+            report.metrics.net_pnl
+        );
+        let fp = state.delta_footprint("SBER@MISX", TimeFrame::D1, 0, i64::MAX, 1.0)?;
+        let total_delta: f64 = fp.iter().map(|b| b.delta).sum();
+        println!(
+            "  delta_footprint(SBER@MISX): {} баров, суммарная дельта={:+.0}",
+            fp.len(),
+            total_delta
+        );
+        let signals = state.robot_scan("SBER@MISX", 0, i64::MAX, &dto::RobotConfigInput::default())?;
+        println!("  robot_scan(SBER@MISX): {} сигналов роботов", signals.len());
 
         Ok(())
     }

@@ -18,9 +18,9 @@ use domain::backtest::StrategyParams;
 use crate::api;
 use crate::dto::{
     AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint, BondIssuerDto,
-    BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto,
-    SectorEntryDto, SectorRow, StrategyDescriptorDto, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FootprintBarDto, FutureGroupDto, InstrumentDto,
+    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    StrategyDescriptorDto, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 
 /// Разделяемое состояние терминала.
@@ -211,6 +211,31 @@ impl AppState {
         self.read(|s| {
             api::run_backtest(s, symbol, tf, from_ts, to_ts, strategy_id, params, config)
         })
+    }
+
+    // ── V2 / Delta ──────────────────────────────────────────────────────────
+
+    /// Footprint/дельта инструмента по сохранённым тиковым сделкам.
+    pub fn delta_footprint(
+        &self,
+        symbol: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+        tick_size: f64,
+    ) -> Result<Vec<FootprintBarDto>, StorageError> {
+        self.read(|s| api::delta_footprint(s, symbol, tf, from_ts, to_ts, tick_size))
+    }
+
+    /// Прогон детектирующих роботов по сохранённой ленте инструмента.
+    pub fn robot_scan(
+        &self,
+        symbol: &str,
+        from_ts: i64,
+        to_ts: i64,
+        config: &RobotConfigInput,
+    ) -> Result<Vec<RobotSignalDto>, StorageError> {
+        self.read(|s| api::robot_scan(s, symbol, from_ts, to_ts, config))
     }
 }
 

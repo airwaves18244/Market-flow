@@ -10,6 +10,7 @@
 //! затем вызывают функции из [`metrics`], а результат сериализуют во фронт.
 
 pub mod backtest;
+pub mod delta;
 pub mod metrics;
 pub mod model;
 

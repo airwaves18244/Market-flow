@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use domain::backtest::{
     BacktestConfig, BacktestReport, FillTiming, PerfMetrics, SimTrade, StrategyDescriptor,
 };
+use domain::delta::{FootprintBar, RobotConfig, RobotSignal};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
 use domain::{BookLevel, Instrument, OrderBook, Side, Trade};
 use storage::store::TurnoverSnapshot;
@@ -498,6 +499,108 @@ impl From<&BacktestReport> for BacktestReportDto {
                 .map(|&(ts, equity)| EquityPointDto { ts, equity })
                 .collect(),
             metrics: PerfMetricsDto::from(&r.metrics),
+        }
+    }
+}
+
+// ── V2 / Delta (footprint + роботы) ─────────────────────────────────────────
+
+/// Ячейка footprint: объём на уровне по сторонам агрессора.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FootprintCellDto {
+    pub price: f64,
+    pub bid_volume: f64,
+    pub ask_volume: f64,
+    pub delta: f64,
+}
+
+/// Footprint одного бара для оверлея дельты.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FootprintBarDto {
+    pub ts: i64,
+    pub cells: Vec<FootprintCellDto>,
+    pub bid_total: f64,
+    pub ask_total: f64,
+    pub delta: f64,
+    pub cumulative_delta: f64,
+}
+
+impl From<&FootprintBar> for FootprintBarDto {
+    fn from(b: &FootprintBar) -> Self {
+        Self {
+            ts: b.ts,
+            cells: b
+                .cells
+                .iter()
+                .map(|c| FootprintCellDto {
+                    price: c.price,
+                    bid_volume: c.bid_volume,
+                    ask_volume: c.ask_volume,
+                    delta: c.delta(),
+                })
+                .collect(),
+            bid_total: b.bid_total,
+            ask_total: b.ask_total,
+            delta: b.delta,
+            cumulative_delta: b.cumulative_delta,
+        }
+    }
+}
+
+/// Сигнал детектирующего робота (маркер на графике дельты).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RobotSignalDto {
+    /// Вид: `same_lot|iceberg|absorption`.
+    pub kind: String,
+    pub ts: i64,
+    pub price: f64,
+    pub strength: f64,
+    pub note: String,
+}
+
+impl From<&RobotSignal> for RobotSignalDto {
+    fn from(s: &RobotSignal) -> Self {
+        Self {
+            kind: s.kind.code().to_string(),
+            ts: s.ts,
+            price: s.price,
+            strength: s.strength,
+            note: s.note.clone(),
+        }
+    }
+}
+
+/// Настройки детекторов, приходящие с фронта (вход IPC). Все поля
+/// необязательные — отсутствующие берутся из значений по умолчанию.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RobotConfigInput {
+    pub same_lot_enabled: Option<bool>,
+    pub same_lot_run: Option<usize>,
+    pub lot_tolerance: Option<f64>,
+    pub iceberg_enabled: Option<bool>,
+    pub iceberg_volume_mult: Option<f64>,
+    pub absorption_enabled: Option<bool>,
+    pub absorption_min_delta: Option<f64>,
+    pub absorption_max_move: Option<f64>,
+}
+
+impl RobotConfigInput {
+    /// Перевести в доменный конфиг, подставляя значения по умолчанию.
+    pub fn to_config(&self) -> RobotConfig {
+        let d = RobotConfig::default();
+        RobotConfig {
+            same_lot_enabled: self.same_lot_enabled.unwrap_or(d.same_lot_enabled),
+            same_lot_run: self.same_lot_run.unwrap_or(d.same_lot_run),
+            lot_tolerance: self.lot_tolerance.unwrap_or(d.lot_tolerance),
+            iceberg_enabled: self.iceberg_enabled.unwrap_or(d.iceberg_enabled),
+            iceberg_volume_mult: self.iceberg_volume_mult.unwrap_or(d.iceberg_volume_mult),
+            absorption_enabled: self.absorption_enabled.unwrap_or(d.absorption_enabled),
+            absorption_min_delta: self.absorption_min_delta.unwrap_or(d.absorption_min_delta),
+            absorption_max_move: self.absorption_max_move.unwrap_or(d.absorption_max_move),
         }
     }
 }
