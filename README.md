@@ -123,7 +123,7 @@ cargo build -p data --features live-trading
 cargo run -p app
 
 # Фронт (мок-данные вне Tauri):
-cd frontend && npm install && npm run build
+cd frontend && npm install && npm run check && npm run test && npm run build
 
 # Десктоп целиком (нужен webkit2gtk на Linux):
 cargo run -p app --features tauri

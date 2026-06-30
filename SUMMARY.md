@@ -77,8 +77,9 @@
   сборка требует webkit2gtk → вне кросс-платформенного CI.
 - **Фронт** (`frontend`): Vite + Svelte 5 + TS, тёмная тема, каркас докуемых
   панелей, ECharts treemap + Lightweight Charts свечи, типизированный IPC-клиент
-  с мок-режимом (UI работает в браузере без бэкенда). `npm run build` и
-  `svelte-check` — зелёные.
+  с мок-режимом (UI работает в браузере без бэкенда). `npm run build`,
+  `svelte-check` и `vitest` (юнит-тесты `lib/settings`, `lib/assetClass`,
+  мок-IPC) — зелёные.
 
 ## Проверка
 ```bash
@@ -90,7 +91,7 @@ cargo test -p data --features keyring   # + ОС-keyring (live-roundtrip: --igno
 cargo test -p data --features grpc      # + gRPC auth-обмен (оркестрация без сети)
 cargo test -p app --features ingest     # + асинхронный планировщик ингеста
 cargo run -p app                        # smoke: domain → storage → dto
-cd frontend && npm install && npm run build   # сборка фронта (мок-данные)
+cd frontend && npm install && npm run check && npm run test && npm run build  # фронт: типы/тесты/сборка
 ```
 
 ## Готово (продолжение)
