@@ -40,3 +40,9 @@ required-features = ["grpc"]
 keyring = ["dep:keyring"]
 # Сетевой gRPC-клиент Finam (auth-обмен + рыночные данные поверх стабов).
 grpc = ["dep:tonic", "dep:tokio", "dep:prost-types", "finam-proto/grpc"]
+# Боевой роутинг заявок в Finam (OrderService/AccountsService). Каркас: контракт
+# `OrderRouter` есть всегда (с симулятором по умолчанию), а заглушка
+# `FinamOrderRouter` компилируется только под этой фичей. Реальный транспорт
+# (gRPC OrderService/AccountsService) подключается отдельно, поэтому фича
+# по умолчанию выключена (как `grpc`/`keyring`).
+live-trading = []

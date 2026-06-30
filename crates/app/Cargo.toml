@@ -45,3 +45,6 @@ ingest = ["dep:tokio"]
 keyring = ["data/keyring"]
 # Боевой режим: live-подключение к Finam (gRPC) + ингест в хранилище.
 live = ["ingest", "data/grpc"]
+# Боевой роутинг заявок (каркас): включает заглушку `data::FinamOrderRouter`.
+# По умолчанию торговля идёт через симулятор (`SimOrderRouter`).
+live-trading = ["data/live-trading"]

@@ -10,7 +10,7 @@
 
 use duckdb::{params, Connection};
 
-use domain::{AssetClass, Bar, Instrument, TimeFrame};
+use domain::{AssetClass, Bar, Instrument, TimeFrame, Trade};
 
 use crate::migrate;
 use crate::schema::SCHEMA_VERSION;
@@ -244,6 +244,45 @@ impl Store for DuckStore {
         rows.collect::<Result<_, _>>().map_err(db)
     }
 
+    fn insert_trades(&mut self, symbol: &str, trades: &[Trade]) -> Result<usize, StorageError> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO trades (symbol, ts, price, size, buyer_initiated) \
+                     VALUES (?, ?, ?, ?, ?)",
+                )
+                .map_err(db)?;
+            for t in trades {
+                stmt.execute(params![symbol, t.ts, t.price, t.size, t.buyer_initiated])
+                    .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(trades.len())
+    }
+
+    fn trades(&self, symbol: &str, from_ts: i64, to_ts: i64) -> Result<Vec<Trade>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT ts, price, size, buyer_initiated FROM trades \
+                 WHERE symbol = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![symbol, from_ts, to_ts], |row| {
+                Ok(Trade {
+                    ts: row.get(0)?,
+                    price: row.get(1)?,
+                    size: row.get(2)?,
+                    buyer_initiated: row.get(3)?,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
     fn upsert_sector_map(&mut self, entries: &[SectorEntry]) -> Result<usize, StorageError> {
         let tx = self.conn.transaction().map_err(db)?;
         {
@@ -397,5 +436,31 @@ mod tests {
         let sm = s.sector_map().unwrap();
         assert_eq!(sm.len(), 1);
         assert!(!sm[0].is_isin);
+    }
+
+    #[test]
+    fn trades_append_and_range_roundtrip() {
+        let mut s = store();
+        let t = |ts: i64, price: f64, size: f64, bi: Option<bool>| Trade {
+            ts,
+            price,
+            size,
+            buyer_initiated: bi,
+        };
+        s.insert_trades(
+            "SBER@MISX",
+            &[t(1, 10.0, 2.0, None), t(2, 20.0, 3.0, Some(false))],
+        )
+        .unwrap();
+        s.insert_trades("SBER@MISX", &[t(2, 21.0, 4.0, Some(true))])
+            .unwrap();
+
+        let got = s.trades("SBER@MISX", 0, 9).unwrap();
+        assert_eq!(got.len(), 3); // append-only, без перезаписи по (symbol, ts)
+        assert_eq!(got[0].ts, 1);
+        assert_eq!(got[0].buyer_initiated, None);
+        // окно усекает
+        assert_eq!(s.trades("SBER@MISX", 2, 2).unwrap().len(), 2);
+        assert!(s.trades("GAZP@MISX", 0, 9).unwrap().is_empty());
     }
 }

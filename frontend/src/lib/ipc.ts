@@ -5,19 +5,31 @@
 // именуются camelCase: Tauri преобразует их в snake_case параметры команд.
 
 import type {
+  AccountDto,
   AlertEventDto,
   AlertRuleInput,
+  BacktestConfigInput,
+  BacktestReportDto,
   BarPoint,
   BondIssuerDto,
   BreadthDto,
   CrossAssetSummaryDto,
+  FillEventDto,
   FlowEdgeDto,
+  FootprintBarDto,
   FutureGroupDto,
   InstrumentDto,
   OrderBookDto,
+  OrderDto,
+  OrderInput,
+  PositionDto,
+  RobotConfigInput,
+  RobotSignalDto,
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  StrategyDescriptorDto,
+  SubmitResultDto,
   TimeFrame,
   TopMoverDto,
   TradeDto,
@@ -91,6 +103,54 @@ export const ipc = {
 
   alertsScan: (rules: AlertRuleInput[], fromTs: number, toTs: number) =>
     invoke<AlertEventDto[]>("alerts_scan", { rules, fromTs, toTs }),
+
+  // ── V2 / Бэктестер ────────────────────────────────────────────────────────
+  listStrategies: () => invoke<StrategyDescriptorDto[]>("list_strategies"),
+
+  runBacktest: (
+    symbol: string,
+    timeframe: TimeFrame,
+    fromTs: number,
+    toTs: number,
+    strategyId: string,
+    params: Record<string, number>,
+    config: BacktestConfigInput,
+  ) =>
+    invoke<BacktestReportDto>("run_backtest", {
+      symbol,
+      timeframe,
+      fromTs,
+      toTs,
+      strategyId,
+      params,
+      config,
+    }),
+
+  // ── V2 / Delta ────────────────────────────────────────────────────────────
+  deltaFootprint: (
+    symbol: string,
+    timeframe: TimeFrame,
+    fromTs: number,
+    toTs: number,
+    tickSize: number,
+  ) =>
+    invoke<FootprintBarDto[]>("delta_footprint", {
+      symbol,
+      timeframe,
+      fromTs,
+      toTs,
+      tickSize,
+    }),
+
+  robotScan: (symbol: string, fromTs: number, toTs: number, config: RobotConfigInput) =>
+    invoke<RobotSignalDto[]>("robot_scan", { symbol, fromTs, toTs, config }),
+
+  // ── V2 / Trade ────────────────────────────────────────────────────────────
+  submitOrder: (order: OrderInput) => invoke<SubmitResultDto>("submit_order", { order }),
+  cancelOrder: (id: number) => invoke<OrderDto>("cancel_order", { id }),
+  orderBlotter: () => invoke<OrderDto[]>("order_blotter"),
+  positions: () => invoke<PositionDto[]>("positions"),
+  account: () => invoke<AccountDto>("account"),
 };
 
 // Подписки на live-push события (каналы `trade:tick` / `orderbook:tick`).
@@ -109,4 +169,11 @@ export async function onOrderBook(cb: (b: OrderBookDto) => void): Promise<Unlist
   if (!inTauri()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<OrderBookDto>("orderbook:tick", (e) => cb(e.payload));
+}
+
+// Исполнения симулятора (канал `fill:tick`). В браузере — no-op.
+export async function onFill(cb: (f: FillEventDto) => void): Promise<Unlisten> {
+  if (!inTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<FillEventDto>("fill:tick", (e) => cb(e.payload));
 }
