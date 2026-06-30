@@ -154,4 +154,7 @@ cargo run -p app --features live,keyring
   proto: https://github.com/FinamWeb/trade-api-docs
 - API-ключ хранится в ОС-keyring, **не** в репозитории.
 
-См. также `ROADMAP.md` — пошаговый план развития.
+См. также `ROADMAP.md` — пошаговый план развития, `ROADMAP_PHASE_10-12.md` —
+детальный план MOEX ALGO/историзации/опционов, `ROADMAP_V3.md` — предложение
+по алготрейдингу, межрыночному анализу и детекции рыночных роботов («Bot
+Radar»).
