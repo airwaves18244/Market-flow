@@ -9,7 +9,11 @@
 //! Адаптеры переводят сырые ответы Finam Trade API в типы из [`model`],
 //! затем вызывают функции из [`metrics`], а результат сериализуют во фронт.
 
+pub mod algo;
+pub mod history;
+pub mod keyactivity;
 pub mod metrics;
 pub mod model;
+pub mod options;
 
 pub use model::{AssetClass, Bar, BookLevel, Instrument, OrderBook, Quote, TimeFrame, Trade};
