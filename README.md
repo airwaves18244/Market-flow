@@ -39,7 +39,14 @@ CI на Linux). `data`/`storage`/`app` — тонкие адаптеры к API 
   - **sector** — роллапы метрик по секторам (взвешенные по обороту);
   - **rrg** — секторная ротация (RS-Ratio / RS-Momentum, квадранты);
   - **crossasset** — доли оборота по классам активов и матрица перетоков (Sankey);
-  - **alerts** — движок алёртов по цене/изменению (edge-triggered, без спама).
+  - **alerts** — движок алёртов по цене/изменению (edge-triggered, без спама);
+  - **backtest** (V2) — бэктестер стратегий: трейт `Strategy`, движок и метрики
+    (P&L, win-rate, profit factor, просадка, Sharpe), библиотека сценариев
+    (`ma_cross`, `same_lot`, `iceberg`, `cvd_momentum`);
+  - **delta** (V2) — footprint/дельта по ленте и детектирующие роботы
+    (равные лоты, айсберг, поглощение);
+  - **trading** (V2) — симулятор исполнения (paper trading): заявки, счёт/позиции,
+    риск, матчинг `SimBroker`.
 - `storage` — слой хранилища (Фаза 1), покрыт тестами:
   - контракт `Store` + реализации `MemStore` (в памяти) и `DuckStore` (нативный
     DuckDB за фичей `duckdb`);
@@ -108,6 +115,9 @@ cargo test -p data --features grpc
 
 # С планировщиком ингеста (async-цикл опроса данных в хранилище):
 cargo test -p app --features ingest
+
+# Каркас боевого роутинга заявок (заглушка FinamOrderRouter; по умолчанию off):
+cargo build -p data --features live-trading
 
 # Консольный smoke (путь domain → storage → dto на MemStore):
 cargo run -p app
