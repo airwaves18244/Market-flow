@@ -565,7 +565,9 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return { ...o, status: "cancelled" } as unknown as T;
     }
     case "order_blotter":
-      return sim.orders as unknown as T;
+      // Снимок, а не живая ссылка: реальный Tauri IPC всегда отдаёт
+      // десериализованную копию, мок должен вести себя так же.
+      return [...sim.orders] as unknown as T;
     case "positions":
       return Array.from(sim.positions.entries())
         .filter(([, p]) => p.qty !== 0)
