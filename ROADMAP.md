@@ -194,3 +194,12 @@
   (по умолчанию) и заглушка `FinamOrderRouter` за фичей `live-trading`
   (по умолчанию выключена; реальный gRPC `OrderService`/`AccountsService` —
   отдельная интеграция).
+
+## Фазы 10–12 — план (MOEX ALGO · Историзация · Опционы)
+Детальный TO-DO roadmap по новым фазам вынесен в отдельный файл:
+- **`ROADMAP_PHASE_10-12.md`** — фаза 10 (вкладка MOEX ALGO: Super Candles,
+  FUTOI, HI2, Mega Alerts, таблица Key Activity, LLM-итог), фаза 11 (историзация
+  для бэктестера из Finam/MOEX ALGO с локальным хранением), фаза 12 (опционы:
+  калькулятор, конструктор стратегий, улыбки MOEX/SABR/SVI/Каленкович).
+- **`design/claude-design-brief.md`** — бриф (EN) для Claude Design на прототип
+  фронта новых вкладок.

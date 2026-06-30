@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Модели улыбки волатильности — MOEX · SABR · SVI · Каленкович</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c2430; --border:#2a3441;
+    --text:#e6edf3; --muted:#9aa7b4; --accent:#4ea1ff;
+    --moex:#ffb454; --sabr:#4ea1ff; --svi:#5dd1a0; --kalen:#ff6b8b; --market:#e6edf3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:32px 22px 80px}
+  h1{font-size:28px;margin:0 0 6px;letter-spacing:.2px}
+  h2{font-size:22px;margin:42px 0 10px;padding-top:14px;border-top:1px solid var(--border)}
+  h3{font-size:17px;margin:22px 0 8px}
+  .sub{color:var(--muted);margin:0 0 22px}
+  p{margin:10px 0}
+  code,.mono{font-family:"SF Mono",Consolas,Menlo,monospace;font-size:13.5px}
+  .formula{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+    padding:12px 14px;margin:12px 0;overflow-x:auto;font-family:"SF Mono",Consolas,Menlo,monospace;
+    font-size:14px;color:#dbe7f3}
+  .chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;
+    border:1px solid var(--border)}
+  .c-moex{color:var(--moex);border-color:var(--moex)}
+  .c-sabr{color:var(--sabr);border-color:var(--sabr)}
+  .c-svi{color:var(--svi);border-color:var(--svi)}
+  .c-kalen{color:var(--kalen);border-color:var(--kalen)}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:18px 20px;margin:16px 0}
+  .chart{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px 8px 4px;margin:14px 0}
+  .chart .cap{color:var(--muted);font-size:13px;padding:2px 10px 8px}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#cfe0f0}
+  td.k{color:var(--muted);white-space:nowrap}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.cols{grid-template-columns:1fr}}
+  .pros,.cons{border-radius:10px;padding:12px 14px}
+  .pros{background:rgba(93,209,160,.08);border:1px solid rgba(93,209,160,.35)}
+  .cons{background:rgba(255,107,139,.08);border:1px solid rgba(255,107,139,.35)}
+  .pros b{color:var(--svi)} .cons b{color:var(--kalen)}
+  ul{margin:8px 0;padding-left:20px} li{margin:4px 0}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;padding:4px 10px 10px;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:18px;height:3px;border-radius:2px;display:inline-block}
+  .note{font-size:13.5px;color:var(--muted);background:var(--panel2);border-left:3px solid var(--accent);
+    padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0}
+  .verify{color:var(--moex);font-weight:600}
+  .toc{columns:2;column-gap:24px;font-size:14px}
+  .toc a{color:var(--accent);text-decoration:none}
+  @media(max-width:760px){.toc{columns:1}}
+  a{color:var(--accent)}
+  .reco td:first-child{white-space:nowrap;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Модели улыбки волатильности опционов</h1>
+<p class="sub">Сравнение четырёх моделей — <span class="chip c-moex">MOEX</span>
+<span class="chip c-sabr">SABR</span> <span class="chip c-svi">SVI</span>
+<span class="chip c-kalen">Каленкович</span> — для модуля «Опционы» терминала Market Terminal
+(фаза 12). Формулы, плюсы и минусы, рекомендации «когда что применять», примеры и графики.</p>
+
+<div class="note">
+Графики на этой странице построены <b>вычислением реальных кривых моделей</b> (встроенный
+расчёт, без внешних библиотек — работает офлайн в десктоп-сборке). Кривые
+<b>SABR</b> и <b>SVI</b> — точные (канонические формулы). Кривые <b>MOEX</b> и
+<b>Каленкович</b> — <span class="verify">репрезентативные</span> параметризации той же
+формы: точная официальная форма улыбки MOEX уточняется по «Методике…» MOEX/НКЦ
+(задача 12.0.2), параметризация Каленковича — по его публичным материалам (12.0.5).
+</div>
+
+<div class="panel">
+<b>Содержание</b>
+<div class="toc">
+<a href="#intro">1. Что такое улыбка и зачем модель</a><br>
+<a href="#conv">2. Конвенции и обозначения</a><br>
+<a href="#moex">3. MOEX — биржевая параметрическая улыбка</a><br>
+<a href="#sabr">4. SABR (Hagan)</a><br>
+<a href="#svi">5. SVI (Gatheral)</a><br>
+<a href="#kalen">6. Каленкович</a><br>
+<a href="#compare">7. Сравнение на одних данных</a><br>
+<a href="#reco">8. Итог и рекомендации</a><br>
+<a href="#refs">9. Источники</a>
+</div>
+</div>
+
+<h2 id="intro">1. Что такое улыбка и зачем модель</h2>
+<p><b>Подразумеваемая волатильность (IV)</b> — это волатильность, которую нужно подставить в
+формулу ценообразования (Блэка/Башелье), чтобы теоретическая цена совпала с рыночной.
+Если бы рынок жил по Блэку–Шоулзу, IV была бы одинаковой для всех страйков. На деле
+IV зависит от страйка: для опционов «вне денег» (особенно путов) она выше — график
+IV против страйка изгибается вверх по краям. Это и есть <b>улыбка</b> (часто
+несимметричная — <b>«ухмылка»/skew</b>: путы дороже коллов, т.к. рынок платит за защиту
+от падения).</p>
+<p><b>Зачем параметрическая модель улыбки:</b></p>
+<ul>
+<li><b>Сглаживание и интерполяция</b> — получить IV для страйков без сделок и
+непрерывную кривую вместо «зашумлённых» точек.</li>
+<li><b>Экстраполяция крыльев</b> — разумная IV далеко вне денег, где котировок нет.</li>
+<li><b>Согласованность / отсутствие арбитража</b> — корректные цены и греки по всей доске.</li>
+<li><b>Несколько чисел вместо сотен точек</b> — улыбку описывают 3–5 параметров
+(уровень, наклон/skew, кривизна/«крылья»), удобно хранить, сравнивать во времени и
+торговать «формой».</li>
+</ul>
+
+<h2 id="conv">2. Конвенции и обозначения</h2>
+<table>
+<tr><th>Обозначение</th><th>Смысл</th></tr>
+<tr><td class="k">F</td><td>форвард/цена базового актива (для фьючерсных опционов MOEX — цена фьючерса)</td></tr>
+<tr><td class="k">K</td><td>страйк</td></tr>
+<tr><td class="k">T</td><td>время до экспирации (в годах)</td></tr>
+<tr><td class="k">k = ln(K / F)</td><td><b>лог-моней­ность</b>: 0 — «при деньгах» (ATM), k&lt;0 — путы вне денег, k&gt;0 — коллы вне денег</td></tr>
+<tr><td class="k">σ(k)</td><td>подразумеваемая волатильность на страйке k (то, что рисует улыбка)</td></tr>
+<tr><td class="k">w(k) = σ(k)²·T</td><td><b>полная дисперсия</b> (total variance) — в этих единицах удобнее проверять арбитраж</td></tr>
+</table>
+<p>Модели ценообразования на MOEX: <b>Black-76</b> (форвардная версия Блэка, для
+положительных цен) и <b>Bachelier</b> (нормальная модель, для низких/отрицательных цен).
+Для маржируемых опционов MOEX безрисковая ставка <b>r = 0</b>. Улыбка задаёт σ(k), а
+модель ценообразования превращает σ в цену и греки.</p>
+
+<!-- ===================== MOEX ===================== -->
+<h2 id="moex">3. <span class="chip c-moex">MOEX</span> — биржевая параметрическая улыбка</h2>
+<p>MOEX/НКЦ ежедневно строит и публикует <b>параметрическую кривую волатильности</b> по
+каждой серии опционов — она используется для расчёта <b>теоретической цены</b>, гарантийного
+обеспечения и риск-параметров. Кривая откалибрована биржей по рыночным котировкам и
+сглаживает улыбку в устойчивую форму с управляемыми «крыльями».</p>
+<h3>Идея и форма</h3>
+<p>Улыбка задаётся как функция моней­ности с параметрами уровня, наклона (skew) и
+кривизны, с <b>демпфированием крыльев</b> (на больших |k| наклон ограничивается, чтобы IV
+не «улетала»). Репрезентативная форма (точные коэффициенты — по методике MOEX,
+<span class="verify">12.0.2</span>):</p>
+<div class="formula">σ(k) = σ₀ + skew·k + c(k)·k²,&nbsp;&nbsp; где c(k) = c₋ при k&lt;0 (путовое крыло), c₊ при k≥0 (колловое крыло);<br>
+крылья демпфируются насыщающим множителем (tanh) при больших |k|.</div>
+<table>
+<tr><th>Параметр</th><th>Роль</th></tr>
+<tr><td class="k">σ₀</td><td>уровень ATM-волатильности</td></tr>
+<tr><td class="k">skew</td><td>наклон (асимметрия путы↔коллы)</td></tr>
+<tr><td class="k">c₋, c₊</td><td>кривизна левого/правого крыла (раздельно — реалистичная асимметрия)</td></tr>
+</table>
+<div class="chart"><div class="cap">Роль <b>skew</b> в MOEX-улыбке: поворот кривой (путы дороже при skew&lt;0)</div>
+<div id="ch-moex"></div>
+<div class="legend" id="lg-moex"></div></div>
+<div class="cols">
+<div class="pros"><b>Плюсы</b><ul>
+<li><b>Рыночный стандарт MOEX</b>: совпадает с расчётом ГО/теорцены биржи — терминал
+«говорит на языке» клиринга.</li>
+<li>Устойчивые крылья: пригодна для риск-менеджмента, не даёт абсурдных IV вне денег.</li>
+<li>Параметры публикуются — можно не калибровать, а брать готовые с доски.</li>
+</ul></div>
+<div class="cons"><b>Минусы</b><ul>
+<li><b>Точная форма закрыта</b> в деталях методики; вне MOEX модель малоприменима.</li>
+<li>Сглаживание «под клиринг» может слегка расходиться с лучшими bid/ask маркетмейкера.</li>
+<li>Нет стохастической динамики (это статическая форма, не модель эволюции волы).</li>
+</ul></div></div>
+<p><b>Когда применять:</b> когда нужна <b>согласованность с биржей</b> — теоретическая цена,
+ГО, риск; как «референс», относительно которого ищут расхождения рынка.</p>
+
+<!-- ===================== SABR ===================== -->
+<h2 id="sabr">4. <span class="chip c-sabr">SABR</span> (Hagan)</h2>
+<p><b>SABR</b> (Stochastic Alpha–Beta–Rho, Hagan и др., 2002) — <b>стохастическая</b> модель:
+форвард и его волатильность случайны и коррелированы. Её главная ценность — закрытая
+формула приближения IV (Hagan), ставшая фактическим стандартом на десках по всему миру
+(в т.ч. азиатских/китайских).</p>
+<h3>Динамика и формула</h3>
+<div class="formula">dF = α·F^β·dW₁,&nbsp;&nbsp; dα = ν·α·dW₂,&nbsp;&nbsp; ⟨dW₁,dW₂⟩ = ρ·dt</div>
+<p>Приближение Hagan для лог-нормальной (Black) IV:</p>
+<div class="formula">z = (ν/α)·(F·K)^((1−β)/2)·ln(F/K)<br>
+x(z) = ln[ (√(1−2ρz+z²) + z − ρ) / (1−ρ) ]<br>
+σ(K) ≈ α / { (F·K)^((1−β)/2)·[1 + ((1−β)²/24)ln²(F/K) + ((1−β)⁴/1920)ln⁴(F/K)] } · (z/x(z)) · [1 + (…)·T]<br>
+ATM: σ_ATM ≈ (α / F^(1−β))·[1 + (…)·T]</div>
+<table>
+<tr><th>Параметр</th><th>Роль</th><th>Диапазон</th></tr>
+<tr><td class="k">α</td><td>уровень волатильности (≈ ATM)</td><td>&gt; 0</td></tr>
+<tr><td class="k">β</td><td>«backbone»/эластичность (0 — нормальная, 1 — лог-нормальная)</td><td>[0, 1], часто фикс. 0.5</td></tr>
+<tr><td class="k">ρ</td><td>корреляция цена↔вола → <b>наклон/skew</b></td><td>(−1, 1)</td></tr>
+<tr><td class="k">ν</td><td>вола волатильности → <b>кривизна</b> улыбки</td><td>&gt; 0</td></tr>
+</table>
+<div class="chart"><div class="cap">Роль <b>ρ</b> (наклон) и <b>ν</b> (кривизна) в SABR (β=0.5)</div>
+<div id="ch-sabr"></div>
+<div class="legend" id="lg-sabr"></div></div>
+<div class="cols">
+<div class="pros"><b>Плюсы</b><ul>
+<li><b>Финансовый смысл</b> у каждого параметра; β задаёт «скелет», по которому
+улыбка сдвигается при движении цены — хорошо для хеджирования.</li>
+<li>Закрытая формула — быстрая калибровка; отраслевой стандарт.</li>
+<li>Естественно поддерживает нормальный режим (β=0) — удобно с Bachelier-логикой MOEX.</li>
+</ul></div>
+<div class="cons"><b>Минусы</b><ul>
+<li>Приближение Hagan <b>теряет точность на длинных T и далёких крыльях</b>, может
+давать <b>арбитраж</b> (отрицательные плотности) глубоко вне денег.</li>
+<li>β и ρ <b>вырождены</b> при калибровке по одной экспирации (β часто фиксируют).</li>
+<li>Для очень крутых skew/коротких сроков подгонка хуже, чем у SVI.</li>
+</ul></div></div>
+<p><b>Когда применять:</b> когда важны <b>динамика и хедж</b> (как улыбка едет за ценой),
+смешанные положительные/отрицательные форварды, и нужен интуитивный набор параметров.
+По умолчанию для «китайской школы»/десков — рабочий выбор.</p>
+
+<!-- ===================== SVI ===================== -->
+<h2 id="svi">5. <span class="chip c-svi">SVI</span> (Gatheral)</h2>
+<p><b>SVI</b> (Stochastic Volatility Inspired, Gatheral, 2004) параметризует не саму IV, а
+<b>полную дисперсию</b> w(k) гиперболой. Это лучший «подгоночный» инструмент: точно ложится
+на рыночные точки и имеет известные условия отсутствия арбитража. Популярна в
+академической и количественной литературе (в т.ч. китайской — по опционам 50ETF).</p>
+<h3>Сырая (raw) параметризация</h3>
+<div class="formula">w(k) = a + b·[ ρ·(k − m) + √((k − m)² + σ²) ],&nbsp;&nbsp; σ_IV(k) = √( w(k) / T )</div>
+<table>
+<tr><th>Параметр</th><th>Роль</th><th>Ограничение</th></tr>
+<tr><td class="k">a</td><td>общий уровень дисперсии (вертикальный сдвиг)</td><td>a + b·σ·√(1−ρ²) ≥ 0</td></tr>
+<tr><td class="k">b</td><td>угол/«раскрытие» крыльев (наклон асимптот)</td><td>b ≥ 0</td></tr>
+<tr><td class="k">ρ</td><td>поворот → <b>асимметрия/skew</b></td><td>|ρ| &lt; 1</td></tr>
+<tr><td class="k">m</td><td>горизонтальный сдвиг (минимум улыбки)</td><td>—</td></tr>
+<tr><td class="k">σ</td><td>сглаживание дна (кривизна у ATM)</td><td>σ &gt; 0</td></tr>
+</table>
+<p>Условие отсутствия «бабочкового» арбитража (грубо): <code>b·(1+|ρ|) ≤ 4/T</code>;
+календарный арбитраж исключается монотонностью w(k) по T.</p>
+<div class="chart"><div class="cap">Роль <b>ρ</b> (наклон) и <b>σ</b> (сглаживание дна) в SVI</div>
+<div id="ch-svi"></div>
+<div class="legend" id="lg-svi"></div></div>
+<div class="cols">
+<div class="pros"><b>Плюсы</b><ul>
+<li><b>Лучшая подгонка</b> к рыночным точкам по одной экспирации; гибкая форма.</li>
+<li><b>Явные условия отсутствия арбитража</b> (бабочка/календарь) — основа «no-arb»
+поверхности (SSVI/eSSVI).</li>
+<li>Линейные асимптоты крыльев согласуются с теорией (момент-формула Lee).</li>
+</ul></div>
+<div class="cons"><b>Минусы</b><ul>
+<li><b>Параметры менее «торговые»</b> (a, m — не прямой уровень/skew); хуже интуиция.</li>
+<li>Калибровка может попасть в локальный минимум; нужна аккуратная инициализация.</li>
+<li>Чисто <b>статическая</b> подгонка формы — сама по себе не описывает динамику/хедж.</li>
+</ul></div></div>
+<p><b>Когда применять:</b> когда нужна <b>точная бесарбитражная поверхность</b> для
+переоценки всей доски, генерации непрерывной IV и риск-нейтральной плотности; «золотой
+стандарт» интерполяции улыбки на одну дату.</p>
+
+<!-- ===================== Kalenkovich ===================== -->
+<h2 id="kalen">6. <span class="chip c-kalen">Каленкович</span></h2>
+<p>Алексей Каленкович — российский опционный трейдер; его подход выработан из практики
+торговли «формой» улыбки. Улыбка параметризуется <b>трейдерскими, наглядными</b> величинами:
+<b>уровень ATM</b>, <b>наклон (skew)</b>, <b>кривизна («куртозис»/крылья)</b> — и обязательно
+учитывается <b>зависимость от времени</b> (как улыбка уплощается к дальним срокам). Ключевая
+идея — мерить страйк в <b>стандартизованной моней­ности</b> (в единицах σ·√T), тогда форма
+улыбки сопоставима между сериями и сроками.</p>
+<h3>Репрезентативная форма</h3>
+<div class="formula">d = ln(K/F) / ( σ_ATM·√T )&nbsp;&nbsp; (стандартизованная моней­ность, «сколько сигм до страйка»)<br>
+σ(d) = σ_ATM·( 1 + skew·d + kurt·d² ),&nbsp;&nbsp; с уплощением крыльев и σ_ATM = σ_ATM(T)</div>
+<table>
+<tr><th>Параметр</th><th>Роль</th></tr>
+<tr><td class="k">σ_ATM(T)</td><td>уровень при деньгах, зависящий от срока (терм-структура)</td></tr>
+<tr><td class="k">skew</td><td>наклон в σ-единицах — сопоставим между сериями</td></tr>
+<tr><td class="k">kurt</td><td>кривизна/«толщина хвостов» улыбки</td></tr>
+</table>
+<div class="chart"><div class="cap">Роль <b>skew</b> и <b>kurt</b> (Каленкович, в единицах σ·√T)</div>
+<div id="ch-kalen"></div>
+<div class="legend" id="lg-kalen"></div></div>
+<div class="cols">
+<div class="pros"><b>Плюсы</b><ul>
+<li><b>Максимально «торговая» интерпретация</b>: уровень / skew / кривизна — то, чем
+трейдер реально управляет и хеджирует.</li>
+<li>Стандартизованная моней­ность делает улыбки <b>сравнимыми</b> между сериями/сроками.</li>
+<li>Явно встроена <b>терм-структура</b> и уплощение со временем — близко к практике.</li>
+</ul></div>
+<div class="cons"><b>Минусы</b><ul>
+<li><b>Нет единой «официальной» формулы</b> — параметризация по авторским материалам
+(<span class="verify">12.0.5</span>), требует фиксации в коде.</li>
+<li>Не гарантирует отсутствие арбитража «из коробки» — нужна проверка.</li>
+<li>Меньше академической базы/инструментов, чем у SVI/SABR.</li>
+</ul></div></div>
+<p><b>Когда применять:</b> для <b>трейдерского анализа и торговли формой</b> (skew/кривизна как
+самостоятельные «активы»), визуального сравнения серий и интуитивной ручной подстройки.</p>
+
+<!-- ===================== Comparison ===================== -->
+<h2 id="compare">7. Сравнение на одних данных</h2>
+<p>Ниже — синтетическая, реалистично <b>левоскошенная</b> улыбка (путы дороже коллов;
+F = 100, T = 0.25). Точки — «рыночные» IV; четыре кривые — модели, подогнанные к ним.
+SVI и SABR ложатся практически точно; MOEX и Каленкович (репрезентативные) воспроизводят
+ту же форму с трейдерскими параметрами.</p>
+<div class="chart"><div class="cap">Четыре модели на одной улыбке (точки — рынок)</div>
+<div id="ch-cmp"></div>
+<div class="legend" id="lg-cmp"></div></div>
+<table>
+<tr><th>Критерий</th><th class="c-moex">MOEX</th><th class="c-sabr">SABR</th><th class="c-svi">SVI</th><th class="c-kalen">Каленкович</th></tr>
+<tr><td class="k">Тип</td><td>параметрическая (биржевая)</td><td>стохастическая</td><td>параметрическая (дисперсия)</td><td>параметрическая (трейдерская)</td></tr>
+<tr><td class="k">Параметров</td><td>~4</td><td>4 (α,β,ρ,ν)</td><td>5 (a,b,ρ,m,σ)</td><td>3 (+терм-структура)</td></tr>
+<tr><td class="k">Качество подгонки</td><td>хорошее</td><td>хорошее</td><td><b>отличное</b></td><td>хорошее</td></tr>
+<tr><td class="k">Динамика/хедж</td><td>нет</td><td><b>да</b></td><td>нет</td><td>частично</td></tr>
+<tr><td class="k">Контроль арбитража</td><td>биржевой</td><td>слабый (Hagan)</td><td><b>явный</b></td><td>ручной</td></tr>
+<tr><td class="k">Интуиция параметров</td><td>средняя</td><td>высокая</td><td>низкая</td><td><b>высокая</b></td></tr>
+</table>
+
+<!-- ===================== Recommendations ===================== -->
+<h2 id="reco">8. Итог и рекомендации</h2>
+<p>Все четыре модели реализуются в ядре (<code>domain::options::smile</code>), а выбор активной
+модели — в настройках доски (12.8.1). Рекомендации «когда что»:</p>
+<table class="reco">
+<tr><th>Задача / сценарий</th><th>Рекомендуемая модель</th><th>Почему</th></tr>
+<tr><td>Теорцена, ГО, согласие с клирингом MOEX</td><td><span class="chip c-moex">MOEX</span></td>
+<td>совпадает с расчётом биржи; готовые параметры с доски</td></tr>
+<tr><td>Бесарбитражная переоценка всей доски, непрерывная IV, риск-нейтральная плотность</td>
+<td><span class="chip c-svi">SVI</span></td><td>лучшая подгонка + явные no-arb условия</td></tr>
+<tr><td>Хеджирование, «как улыбка едет за ценой», смешанные знаки форварда</td>
+<td><span class="chip c-sabr">SABR</span></td><td>стохастическая динамика, β-backbone, нормальный режим</td></tr>
+<tr><td>Трейдерский анализ формы, торговля skew/кривизной, сравнение серий</td>
+<td><span class="chip c-kalen">Каленкович</span></td><td>наглядные параметры в σ-единицах + терм-структура</td></tr>
+<tr><td>Короткие сроки, очень крутой skew</td><td><span class="chip c-svi">SVI</span> &gt; SABR</td>
+<td>Hagan теряет точность/устойчивость на крутых крыльях</td></tr>
+<tr><td>Длинные сроки</td><td><span class="chip c-sabr">SABR</span> с проверкой no-arb, или eSSVI</td>
+<td>контроль крыльев; «сырой» Hagan на длинных T осторожно</td></tr>
+</table>
+<div class="note"><b>Практическая связка по умолчанию в терминале:</b>
+показывать <b>рыночные точки</b> + <b>MOEX</b> (референс биржи) + одну «рабочую» модель
+(<b>SVI</b> для точной формы или <b>SABR</b> для динамики), с возможностью включить
+<b>Каленковича</b> для трейдерской интерпретации. Для каждой модели в UI выводить
+параметры и <b>RMSE</b> подгонки (12.7.3).</div>
+
+<h2 id="refs">9. Источники</h2>
+<ul>
+<li>P. Hagan, D. Kumar, A. Lesniewski, D. Woodward — «Managing Smile Risk» (2002) — SABR.</li>
+<li>J. Gatheral — «A parsimonious arbitrage-free implied volatility parameterization» (2004); J. Gatheral, A. Jacquier — «Arbitrage-free SVI volatility surfaces» (2014).</li>
+<li>R. Lee — «The Moment Formula for Implied Volatility at Extreme Strikes» (2004) — асимптотика крыльев.</li>
+<li>MOEX/НКЦ — «Методика расчёта теоретической цены опциона и коэффициента дельта»; модели Black-76 и Bachelier на срочном рынке (<span class="verify">уточнить точную форму улыбки — 12.0.2</span>).</li>
+<li>А. Каленкович — публичные семинары/вебинары по торговле опционами и улыбке волатильности (<span class="verify">фиксация параметризации — 12.0.5</span>).</li>
+</ul>
+<p class="sub" style="margin-top:24px">Документ относится к фазе 12 (см. <code>ROADMAP_PHASE_10-12.md</code>, §12).
+Кривые MOEX/Каленкович — репрезентативные; SABR/SVI — канонические.</p>
+
+</div>
+
+<script>
+/* ---- Самодостаточный расчёт кривых и рендер SVG (без внешних библиотек) ---- */
+const F = 100, T = 0.25;
+const KS = []; for (let k = -0.40; k <= 0.4001; k += 0.01) KS.push(k);   // лог-моней­ность
+const strike = k => F * Math.exp(k);
+
+/* SVI: raw parametrization */
+function sviW(k, p){ const km = k - p.m; return p.a + p.b*(p.rho*km + Math.sqrt(km*km + p.sigma*p.sigma)); }
+function sviIV(k, p){ return Math.sqrt(Math.max(sviW(k,p),1e-8)/T); }
+
+/* SABR: Hagan lognormal approximation */
+function sabrIV(k, p){
+  const {alpha,beta,rho,nu} = p; const K = strike(k);
+  const logFK = Math.log(F/K);
+  const FKb = Math.pow(F*K,(1-beta)/2);
+  const corr = 1 + ( (Math.pow(1-beta,2)/24)*alpha*alpha/Math.pow(F*K,1-beta)
+            + 0.25*rho*beta*nu*alpha/FKb + ((2-3*rho*rho)/24)*nu*nu )*T;
+  if (Math.abs(logFK) < 1e-8) return alpha/Math.pow(F,1-beta)*corr;            // ATM
+  const z = (nu/alpha)*FKb*logFK;
+  const x = Math.log((Math.sqrt(1-2*rho*z+z*z)+z-rho)/(1-rho));
+  const denom = FKb*(1 + (Math.pow(1-beta,2)/24)*logFK*logFK + (Math.pow(1-beta,4)/1920)*Math.pow(logFK,4));
+  return alpha/denom*(z/x)*corr;
+}
+
+/* MOEX representative: parabola in moneyness, separate wings + tanh wing damping */
+function moexIV(k, p){
+  const c = k < 0 ? p.cl : p.cr;
+  const damp = Math.abs(Math.tanh(k/p.wing)*p.wing);     // насыщение крыльев
+  return p.s0 + p.skew*k + c*damp*damp;
+}
+
+/* Kalenkovich representative: standardized moneyness d = k/(sigmaAtm*sqrt(T)) */
+function kalenIV(k, p){
+  const d = k/(p.s0*Math.sqrt(T));
+  return p.s0*(1 + p.skew*d + p.kurt*d*d);
+}
+
+const curve = (fn,p) => KS.map(k => [k, fn(k,p)]);
+
+/* ---------- SVG renderer ---------- */
+function render(elId, lgId, opts){
+  const W=900, H=380, mL=58, mR=18, mT=14, mB=44;
+  const xmin=-0.4, xmax=0.4, ymin=opts.ymin, ymax=opts.ymax;
+  const px = x => mL + (x-xmin)/(xmax-xmin)*(W-mL-mR);
+  const py = y => H-mB - (y-ymin)/(ymax-ymin)*(H-mT-mB);
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" font-family="monospace" font-size="12">`;
+  s += `<rect x="0" y="0" width="${W}" height="${H}" fill="none"/>`;
+  // grid + y ticks
+  const yt=5, xt=8;
+  for(let i=0;i<=yt;i++){ const v=ymin+(ymax-ymin)*i/yt, y=py(v);
+    s+=`<line x1="${mL}" y1="${y}" x2="${W-mR}" y2="${y}" stroke="#2a3441" stroke-width="1"/>`;
+    s+=`<text x="${mL-8}" y="${y+4}" fill="#9aa7b4" text-anchor="end">${(v*100).toFixed(0)}%</text>`; }
+  for(let i=0;i<=xt;i++){ const v=xmin+(xmax-xmin)*i/xt, x=px(v);
+    s+=`<line x1="${x}" y1="${mT}" x2="${x}" y2="${H-mB}" stroke="#1c2430" stroke-width="1"/>`;
+    s+=`<text x="${x}" y="${H-mB+18}" fill="#9aa7b4" text-anchor="middle">${v.toFixed(2)}</text>`; }
+  // ATM line
+  s+=`<line x1="${px(0)}" y1="${mT}" x2="${px(0)}" y2="${H-mB}" stroke="#3a4a5c" stroke-dasharray="4 4"/>`;
+  s+=`<text x="${px(0)}" y="${mT+12}" fill="#6b7b8c" text-anchor="middle">ATM</text>`;
+  // axis labels
+  s+=`<text x="${(mL+W-mR)/2}" y="${H-6}" fill="#9aa7b4" text-anchor="middle">лог-моней­ность  k = ln(K/F)</text>`;
+  s+=`<text x="16" y="${(mT+H-mB)/2}" fill="#9aa7b4" text-anchor="middle" transform="rotate(-90 16 ${(mT+H-mB)/2})">IV, σ(k)</text>`;
+  // series
+  for(const ser of opts.series){
+    const pts = ser.points.filter(p=>isFinite(p[1])).map(p=>`${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+    s+=`<polyline points="${pts}" fill="none" stroke="${ser.color}" stroke-width="${ser.w||2.4}"${ser.dash?` stroke-dasharray="${ser.dash}"`:''}/>`;
+  }
+  // scatter (market)
+  if(opts.points) for(const p of opts.points)
+    s+=`<circle cx="${px(p[0]).toFixed(1)}" cy="${py(p[1]).toFixed(1)}" r="3.6" fill="#e6edf3" stroke="#0e1116" stroke-width="1"/>`;
+  s+=`</svg>`;
+  document.getElementById(elId).innerHTML = s;
+  if(lgId){ document.getElementById(lgId).innerHTML =
+    opts.series.map(x=>`<span><i style="background:${x.color}"></i>${x.name}</span>`).join('')
+    + (opts.points?`<span><i style="background:#e6edf3;border-radius:50%;width:10px;height:10px"></i>рынок</span>`:''); }
+}
+
+/* ---------- per-model illustration charts ---------- */
+// MOEX: vary skew
+render('ch-moex','lg-moex',{ymin:0.25,ymax:0.55,series:[
+  {name:'skew = −0.25 (путовый перекос)',color:'#ffb454',points:curve(moexIV,{s0:0.34,skew:-0.25,cl:0.9,cr:0.5,wing:0.25})},
+  {name:'skew = 0 (симметрично)',color:'#9aa7b4',dash:'5 4',points:curve(moexIV,{s0:0.34,skew:0,cl:0.7,cr:0.7,wing:0.25})},
+  {name:'skew = +0.25 (колловый перекос)',color:'#5dd1a0',points:curve(moexIV,{s0:0.34,skew:0.25,cl:0.5,cr:0.9,wing:0.25})},
+]});
+// SABR: rho & nu
+render('ch-sabr','lg-sabr',{ymin:0.25,ymax:0.55,series:[
+  {name:'ρ = −0.5, ν = 0.6 (skew + кривизна)',color:'#4ea1ff',points:curve(sabrIV,{alpha:3.42,beta:0.5,rho:-0.5,nu:0.6})},
+  {name:'ρ = 0, ν = 0.6 (симметричная улыбка)',color:'#9aa7b4',dash:'5 4',points:curve(sabrIV,{alpha:3.42,beta:0.5,rho:0,nu:0.6})},
+  {name:'ρ = −0.5, ν = 1.0 (выше кривизна)',color:'#5dd1a0',points:curve(sabrIV,{alpha:3.42,beta:0.5,rho:-0.5,nu:1.0})},
+]});
+// SVI: rho & sigma
+render('ch-svi','lg-svi',{ymin:0.25,ymax:0.55,series:[
+  {name:'ρ = −0.5, σ = 0.10',color:'#5dd1a0',points:curve(sviIV,{a:0.020,b:0.10,rho:-0.5,m:0.0,sigma:0.10})},
+  {name:'ρ = 0, σ = 0.10 (симметрично)',color:'#9aa7b4',dash:'5 4',points:curve(sviIV,{a:0.020,b:0.10,rho:0,m:0.0,sigma:0.10})},
+  {name:'ρ = −0.5, σ = 0.04 (острое дно)',color:'#4ea1ff',points:curve(sviIV,{a:0.026,b:0.10,rho:-0.5,m:0.0,sigma:0.04})},
+]});
+// Kalenkovich: skew & kurt
+render('ch-kalen','lg-kalen',{ymin:0.25,ymax:0.55,series:[
+  {name:'skew = −0.06, kurt = 0.03',color:'#ff6b8b',points:curve(kalenIV,{s0:0.34,skew:-0.06,kurt:0.03})},
+  {name:'skew = 0, kurt = 0.03 (симметрично)',color:'#9aa7b4',dash:'5 4',points:curve(kalenIV,{s0:0.34,skew:0,kurt:0.03})},
+  {name:'skew = −0.06, kurt = 0.06 (толще хвосты)',color:'#5dd1a0',points:curve(kalenIV,{s0:0.34,skew:-0.06,kurt:0.06})},
+]});
+
+/* ---------- comparison: market = SVI "truth", fit 4 models ---------- */
+const truth = {a:0.020,b:0.10,rho:-0.5,m:0.0,sigma:0.10};
+const mktK = [-0.30,-0.22,-0.14,-0.07,0,0.07,0.14,0.22,0.30];
+const market = mktK.map(k=>[k, sviIV(k,truth)]);
+render('ch-cmp','lg-cmp',{ymin:0.28,ymax:0.56,points:market,series:[
+  {name:'MOEX (репрез.)',color:'#ffb454',points:curve(moexIV,{s0:0.346,skew:-0.20,cl:1.6,cr:0.55,wing:0.30})},
+  {name:'SABR (RMSE ≈ 1.0%)',color:'#4ea1ff',points:curve(sabrIV,{alpha:3.45,beta:0.5,rho:-0.2,nu:1.6})},
+  {name:'SVI',color:'#5dd1a0',points:curve(sviIV,truth)},
+  {name:'Каленкович (репрез.)',color:'#ff6b8b',dash:'6 4',points:curve(kalenIV,{s0:0.346,skew:-0.075,kurt:0.052})},
+]});
+</script>
+</body>
+</html>
