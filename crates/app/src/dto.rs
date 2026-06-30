@@ -6,10 +6,21 @@
 
 use serde::{Deserialize, Serialize};
 
+use domain::backtest::{
+    BacktestConfig, BacktestReport, FillTiming, PerfMetrics, SimTrade, StrategyDescriptor,
+};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
-use domain::{BookLevel, Instrument, OrderBook, Trade};
+use domain::{BookLevel, Instrument, OrderBook, Side, Trade};
 use storage::store::TurnoverSnapshot;
 use storage::SectorEntry;
+
+/// Код стороны сделки/заявки для фронта (`buy|sell`).
+fn side_code(side: Side) -> &'static str {
+    match side {
+        Side::Buy => "buy",
+        Side::Sell => "sell",
+    }
+}
 
 /// Инструмент справочника (для списков/вотчлиста).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -325,6 +336,169 @@ impl AlertRuleInput {
             _ => return None,
         };
         Some(AlertRule::new(self.symbol.clone(), condition))
+    }
+}
+
+// ── V2 / Бэктестер ─────────────────────────────────────────────────────────
+
+/// Описание параметра стратегии (для формы настроек в UI).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyParamDto {
+    pub name: String,
+    pub label: String,
+    pub default: f64,
+}
+
+/// Описание стратегии бэктестера: id, подпись и схема параметров.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyDescriptorDto {
+    pub id: String,
+    pub label: String,
+    pub params: Vec<StrategyParamDto>,
+}
+
+impl From<&StrategyDescriptor> for StrategyDescriptorDto {
+    fn from(d: &StrategyDescriptor) -> Self {
+        Self {
+            id: d.id.to_string(),
+            label: d.label.to_string(),
+            params: d
+                .params
+                .iter()
+                .map(|p| StrategyParamDto {
+                    name: p.name.to_string(),
+                    label: p.label.to_string(),
+                    default: p.default,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Параметры прогона бэктеста, приходящие с фронта (вход IPC).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacktestConfigInput {
+    pub initial_capital: f64,
+    pub commission: f64,
+    pub slippage: f64,
+    /// `nextOpen` (по умолчанию) | `thisClose`.
+    #[serde(default)]
+    pub fill_timing: Option<FillTimingInput>,
+}
+
+/// Режим момента исполнения сигнала (вход IPC).
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FillTimingInput {
+    NextOpen,
+    ThisClose,
+}
+
+impl BacktestConfigInput {
+    /// Перевести в доменный конфиг бэктеста.
+    pub fn to_config(&self) -> BacktestConfig {
+        BacktestConfig {
+            initial_capital: self.initial_capital,
+            commission: self.commission,
+            slippage: self.slippage,
+            fill_timing: match self.fill_timing {
+                Some(FillTimingInput::ThisClose) => FillTiming::ThisClose,
+                _ => FillTiming::NextOpen,
+            },
+        }
+    }
+}
+
+/// Одна смоделированная сделка бэктеста.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimTradeDto {
+    pub ts: i64,
+    /// `buy|sell`.
+    pub side: String,
+    pub qty: f64,
+    pub price: f64,
+    pub realized_pnl: f64,
+}
+
+impl From<&SimTrade> for SimTradeDto {
+    fn from(t: &SimTrade) -> Self {
+        Self {
+            ts: t.ts,
+            side: side_code(t.side).to_string(),
+            qty: t.qty,
+            price: t.price,
+            realized_pnl: t.realized_pnl,
+        }
+    }
+}
+
+/// Точка кривой капитала (`ts`, `equity`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct EquityPointDto {
+    pub ts: i64,
+    pub equity: f64,
+}
+
+/// Метрики эффективности стратегии.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerfMetricsDto {
+    pub net_pnl: f64,
+    pub return_pct: f64,
+    pub trades: usize,
+    pub wins: usize,
+    pub losses: usize,
+    pub win_rate: f64,
+    /// Может быть `Infinity` — сериализуется как null; фронт трактует как «∞».
+    pub profit_factor: f64,
+    pub max_drawdown: f64,
+    pub sharpe: f64,
+    pub avg_win: f64,
+    pub avg_loss: f64,
+}
+
+impl From<&PerfMetrics> for PerfMetricsDto {
+    fn from(m: &PerfMetrics) -> Self {
+        Self {
+            net_pnl: m.net_pnl,
+            return_pct: m.return_pct,
+            trades: m.trades,
+            wins: m.wins,
+            losses: m.losses,
+            win_rate: m.win_rate,
+            profit_factor: m.profit_factor,
+            max_drawdown: m.max_drawdown,
+            sharpe: m.sharpe,
+            avg_win: m.avg_win,
+            avg_loss: m.avg_loss,
+        }
+    }
+}
+
+/// Полный отчёт бэктеста для фронта.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacktestReportDto {
+    pub trades: Vec<SimTradeDto>,
+    pub equity_curve: Vec<EquityPointDto>,
+    pub metrics: PerfMetricsDto,
+}
+
+impl From<&BacktestReport> for BacktestReportDto {
+    fn from(r: &BacktestReport) -> Self {
+        Self {
+            trades: r.trades.iter().map(SimTradeDto::from).collect(),
+            equity_curve: r
+                .equity_curve
+                .iter()
+                .map(|&(ts, equity)| EquityPointDto { ts, equity })
+                .collect(),
+            metrics: PerfMetricsDto::from(&r.metrics),
+        }
     }
 }
 

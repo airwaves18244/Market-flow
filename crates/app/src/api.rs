@@ -7,6 +7,9 @@
 
 use std::collections::BTreeMap;
 
+use domain::backtest::{
+    descriptors, run_backtest as domain_run_backtest, strategy_from_id, StrategyParams,
+};
 use domain::metrics::alerts::{AlertEngine, Observation};
 use domain::metrics::breadth::breadth;
 use domain::metrics::crossasset::{flow_matrix, turnover_shares, TurnoverShares};
@@ -15,9 +18,10 @@ use domain::{AssetClass, TimeFrame};
 use storage::{StorageError, Store};
 
 use crate::dto::{
-    AlertEventDto, AlertRuleInput, AssetClassShareDto, BarPoint, BondIssuerDto, BreadthDto,
-    CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto,
-    SectorRow, TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    AlertEventDto, AlertRuleInput, AssetClassShareDto, BacktestConfigInput, BacktestReportDto,
+    BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto,
+    InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow, StrategyDescriptorDto, TopMoverDto,
+    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 
 /// Метка сектора для инструментов без классификации.
@@ -576,6 +580,37 @@ pub fn alerts_scan(
     Ok(out)
 }
 
+// ── V2 / Бэктестер ─────────────────────────────────────────────────────────
+
+/// Каталог встроенных стратегий с их параметрами (для пикера в UI).
+pub fn list_strategies() -> Vec<StrategyDescriptorDto> {
+    descriptors().iter().map(StrategyDescriptorDto::from).collect()
+}
+
+/// Прогнать бэктест стратегии по сохранённым барам инструмента.
+///
+/// Грузит бары через [`Store::bars`], собирает стратегию из библиотеки по `id`
+/// и параметрам, прогоняет чистый движок [`domain::backtest::run_backtest`] и
+/// возвращает отчёт (сделки/кривая капитала/метрики). Неизвестный `id` →
+/// ошибка.
+#[allow(clippy::too_many_arguments)]
+pub fn run_backtest(
+    store: &dyn Store,
+    symbol: &str,
+    tf: TimeFrame,
+    from_ts: i64,
+    to_ts: i64,
+    strategy_id: &str,
+    params: &StrategyParams,
+    config: &BacktestConfigInput,
+) -> Result<BacktestReportDto, StorageError> {
+    let bars = store.bars(symbol, tf, from_ts, to_ts)?;
+    let mut strategy = strategy_from_id(strategy_id, params)
+        .ok_or_else(|| StorageError::Db(format!("неизвестная стратегия: {strategy_id}")))?;
+    let report = domain_run_backtest(&bars, strategy.as_mut(), config.to_config());
+    Ok(BacktestReportDto::from(&report))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -886,6 +921,55 @@ mod tests {
             threshold: 1.0,
         }];
         assert!(alerts_scan(&store, &bogus, 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_strategies_exposes_builtin_library() {
+        let strategies = list_strategies();
+        assert!(!strategies.is_empty());
+        let ids: Vec<&str> = strategies.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&"ma_cross"));
+        assert!(ids.contains(&"same_lot"));
+        // у каждой стратегии есть параметры со значениями по умолчанию
+        assert!(strategies.iter().all(|s| !s.params.is_empty()));
+    }
+
+    #[test]
+    fn run_backtest_reports_trades_and_rejects_unknown_strategy() {
+        let store = seeded(); // SBER/LKOH/GAZP с дневными барами
+        let cfg = BacktestConfigInput {
+            initial_capital: 100_000.0,
+            commission: 0.0,
+            slippage: 0.0,
+            fill_timing: None,
+        };
+        let params = StrategyParams::new();
+        let report = run_backtest(
+            &store,
+            "SBER@MISX",
+            TimeFrame::D1,
+            0,
+            i64::MAX,
+            "same_lot",
+            &params,
+            &cfg,
+        )
+        .unwrap();
+        // кривая капитала строится по барам инструмента
+        assert!(!report.equity_curve.is_empty());
+
+        // неизвестная стратегия → ошибка
+        assert!(run_backtest(
+            &store,
+            "SBER@MISX",
+            TimeFrame::D1,
+            0,
+            i64::MAX,
+            "does_not_exist",
+            &params,
+            &cfg,
+        )
+        .is_err());
     }
 
     #[test]

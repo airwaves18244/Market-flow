@@ -10,12 +10,14 @@
 
 use tauri::{Emitter, State};
 
+use domain::backtest::StrategyParams;
 use domain::TimeFrame;
 
 use crate::dto::{
-    AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
-    FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto, RrgSectorDto, SectorEntryDto,
-    SectorRow, TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint, BondIssuerDto,
+    BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, OrderBookDto,
+    RrgSectorDto, SectorEntryDto, SectorRow, StrategyDescriptorDto, TopMoverDto, TradeDto,
+    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -151,6 +153,30 @@ fn alerts_scan(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn list_strategies(state: State<AppState>) -> CmdResult<Vec<StrategyDescriptorDto>> {
+    Ok(state.list_strategies())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn run_backtest(
+    state: State<AppState>,
+    symbol: String,
+    timeframe: String,
+    from_ts: i64,
+    to_ts: i64,
+    strategy_id: String,
+    params: StrategyParams,
+    config: BacktestConfigInput,
+) -> CmdResult<BacktestReportDto> {
+    let tf = TimeFrame::from_code(&timeframe)
+        .ok_or_else(|| format!("неизвестный тайм-фрейм: {timeframe}"))?;
+    state
+        .run_backtest(&symbol, tf, from_ts, to_ts, &strategy_id, &params, &config)
+        .map_err(|e| e.to_string())
+}
+
 /// Лента сделок (Time&Sales). В store-backed сборке тиковые сделки не
 /// сохраняются, поэтому первичный ответ пуст — живые сделки приходят событием
 /// `trade:tick` (см. [`emit_trade`]) из live-стрима `subscribe_trades`.
@@ -232,6 +258,8 @@ pub fn run() {
             turnover_timeline,
             flow_sankey,
             alerts_scan,
+            list_strategies,
+            run_backtest,
             latest_trades,
             order_book
         ])

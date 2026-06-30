@@ -13,11 +13,14 @@ use domain::TimeFrame;
 use storage::ingest::snapshot_from_bars;
 use storage::{StorageError, Store};
 
+use domain::backtest::StrategyParams;
+
 use crate::api;
 use crate::dto::{
-    AlertEventDto, AlertRuleInput, BarPoint, BondIssuerDto, BreadthDto, CrossAssetSummaryDto,
-    FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    TopMoverDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint, BondIssuerDto,
+    BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FutureGroupDto, InstrumentDto, RrgSectorDto,
+    SectorEntryDto, SectorRow, StrategyDescriptorDto, TopMoverDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
 };
 
 /// Разделяемое состояние терминала.
@@ -184,6 +187,30 @@ impl AppState {
         to_ts: i64,
     ) -> Result<Vec<AlertEventDto>, StorageError> {
         self.read(|s| api::alerts_scan(s, rules, from_ts, to_ts))
+    }
+
+    // ── V2 / Бэктестер ──────────────────────────────────────────────────────
+
+    /// Каталог встроенных стратегий бэктестера (не зависит от хранилища).
+    pub fn list_strategies(&self) -> Vec<StrategyDescriptorDto> {
+        api::list_strategies()
+    }
+
+    /// Прогон бэктеста стратегии по сохранённым барам инструмента.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_backtest(
+        &self,
+        symbol: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+        strategy_id: &str,
+        params: &StrategyParams,
+        config: &BacktestConfigInput,
+    ) -> Result<BacktestReportDto, StorageError> {
+        self.read(|s| {
+            api::run_backtest(s, symbol, tf, from_ts, to_ts, strategy_id, params, config)
+        })
     }
 }
 
