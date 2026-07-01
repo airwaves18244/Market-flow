@@ -16,10 +16,11 @@ use domain::TimeFrame;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FillEventDto, FlowEdgeDto, FootprintBarDto,
-    FutureGroupDto, InstrumentDto, OrderBookDto, OrderDto, OrderInput, PositionDto,
-    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    StrategyDescriptorDto, SubmitResultDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    FutureGroupDto, ImpliedVolDto, ImpliedVolInput, InstrumentDto, OptionPriceDto,
+    OptionPriceInput, OrderBookDto, OrderDto, OrderInput, PositionDto, RobotConfigInput,
+    RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SmileFitDto, SmileFitInput,
+    SmileModelDto, StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput, SubmitResultDto,
+    TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -208,6 +209,33 @@ fn robot_scan(
         .map_err(|e| e.to_string())
 }
 
+// ── Фаза 12 — Опционы ────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_smile_models(state: State<AppState>) -> CmdResult<Vec<SmileModelDto>> {
+    Ok(state.list_smile_models())
+}
+
+#[tauri::command]
+fn option_price(state: State<AppState>, input: OptionPriceInput) -> CmdResult<OptionPriceDto> {
+    state.option_price(&input)
+}
+
+#[tauri::command]
+fn option_implied_vol(state: State<AppState>, input: ImpliedVolInput) -> CmdResult<ImpliedVolDto> {
+    state.option_implied_vol(&input)
+}
+
+#[tauri::command]
+fn smile_fit(state: State<AppState>, input: SmileFitInput) -> CmdResult<SmileFitDto> {
+    state.smile_fit(&input)
+}
+
+#[tauri::command]
+fn strategy_eval(state: State<AppState>, input: StrategyEvalInput) -> CmdResult<StrategyEvalDto> {
+    state.strategy_eval(&input)
+}
+
 // ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
 
 #[tauri::command]
@@ -328,6 +356,11 @@ pub fn run() {
             run_backtest,
             delta_footprint,
             robot_scan,
+            list_smile_models,
+            option_price,
+            option_implied_vol,
+            smile_fit,
+            strategy_eval,
             submit_order,
             cancel_order,
             order_blotter,

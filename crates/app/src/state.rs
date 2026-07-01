@@ -19,9 +19,11 @@ use crate::api;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FootprintBarDto, FutureGroupDto,
-    InstrumentDto, OrderDto, OrderInput, PositionDto, RobotConfigInput, RobotSignalDto,
-    RrgSectorDto, SectorEntryDto, SectorRow, StrategyDescriptorDto, SubmitResultDto, TopMoverDto,
-    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    ImpliedVolDto, ImpliedVolInput, InstrumentDto, OptionPriceDto, OptionPriceInput, OrderDto,
+    OrderInput, PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto,
+    SectorRow, SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
+    StrategyEvalInput, SubmitResultDto, TopMoverDto, TurnoverByClassPoint, TurnoverPoint,
+    YieldCurvePoint,
 };
 use crate::trade::TradeSession;
 
@@ -271,6 +273,33 @@ impl AppState {
     /// Состояние счёта.
     pub fn account(&self) -> AccountDto {
         self.trade.account()
+    }
+
+    // ── Фаза 12 — Опционы (чистые расчёты, без хранилища) ─────────────────────
+
+    /// Каталог моделей улыбки для селектора в UI.
+    pub fn list_smile_models(&self) -> Vec<SmileModelDto> {
+        api::list_smile_models()
+    }
+
+    /// Теоретическая цена + греки опциона.
+    pub fn option_price(&self, input: &OptionPriceInput) -> Result<OptionPriceDto, String> {
+        api::option_price(input)
+    }
+
+    /// Подразумеваемая волатильность из рыночной цены.
+    pub fn option_implied_vol(&self, input: &ImpliedVolInput) -> Result<ImpliedVolDto, String> {
+        api::option_implied_vol(input)
+    }
+
+    /// Калибровка улыбки по рыночным точкам.
+    pub fn smile_fit(&self, input: &SmileFitInput) -> Result<SmileFitDto, String> {
+        api::smile_fit(input)
+    }
+
+    /// Оценка опционной стратегии (payoff, греки, безубыток).
+    pub fn strategy_eval(&self, input: &StrategyEvalInput) -> Result<StrategyEvalDto, String> {
+        api::strategy_eval(input)
     }
 }
 

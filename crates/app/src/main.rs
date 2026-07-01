@@ -378,6 +378,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
         println!("  sim on_trade: {} исполнений по ленте", sim_fills.len());
 
+        // Фаза 12 — опционы: калькулятор, калибровка улыбки, стратегия.
+        let opt = state.option_price(&dto::OptionPriceInput {
+            forward: 100.0,
+            strike: 100.0,
+            t: 0.25,
+            vol: 0.3,
+            rate: None,
+            kind: "call".into(),
+            model: None,
+        })?;
+        println!(
+            "  option_price(ATM call): цена={:.4}, дельта={:.3}",
+            opt.price, opt.greeks.delta
+        );
+        let iv = state.option_implied_vol(&dto::ImpliedVolInput {
+            market_price: opt.price,
+            forward: 100.0,
+            strike: 100.0,
+            t: 0.25,
+            rate: None,
+            kind: "call".into(),
+            model: None,
+        })?;
+        println!("  option_implied_vol(≈0.30): {:?}", iv.iv);
+        let fit = state.smile_fit(&dto::SmileFitInput {
+            model: "svi".into(),
+            points: [0.28, 0.26, 0.25, 0.27, 0.30]
+                .iter()
+                .enumerate()
+                .map(|(i, &iv)| dto::SmilePointInput {
+                    strike: 90.0 + i as f64 * 5.0,
+                    iv,
+                    weight: None,
+                })
+                .collect(),
+            forward: 100.0,
+            t: 0.25,
+            curve_lo: None,
+            curve_hi: None,
+            curve_steps: None,
+        })?;
+        println!(
+            "  smile_fit(svi): {} параметров, rmse={:.4}, точек кривой={}",
+            fit.params.len(),
+            fit.rmse,
+            fit.curve.len()
+        );
+        let models = state.list_smile_models();
+        let strat = state.strategy_eval(&dto::StrategyEvalInput {
+            legs: vec![dto::StrategyLegInput {
+                kind: "call".into(),
+                side: "long".into(),
+                strike: 100.0,
+                expiry_t: 0.25,
+                quantity: 1.0,
+                entry_price: 5.0,
+            }],
+            price_lo: 80.0,
+            price_hi: 130.0,
+            steps: None,
+            forward: 100.0,
+            vol: 0.3,
+            rate: None,
+            model: None,
+        })?;
+        println!(
+            "  strategy_eval(long call): моделей улыбки={}, точек payoff={}, безубытки={:?}",
+            models.len(),
+            strat.payoff.len(),
+            strat.breakevens
+        );
+
         Ok(())
     }
 }

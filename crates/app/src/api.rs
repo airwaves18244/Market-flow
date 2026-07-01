@@ -656,6 +656,258 @@ pub fn robot_scan(
     Ok(signals.iter().map(RobotSignalDto::from).collect())
 }
 
+// ── Фаза 12 — Опционы (чистые обработчики, без хранилища и сети) ─────────────
+
+use domain::options::{
+    greeks as opt_greeks, implied_vol, price as opt_price, KalenkovichSmile, Leg, MoexSmile,
+    PriceInputs, SabrParams, SmileModel, SmilePoint, Strategy, SviParams,
+};
+
+use crate::dto::{
+    GreeksDto, ImpliedVolDto, ImpliedVolInput, OptionPriceDto, OptionPriceInput, SmileCurvePoint,
+    SmileFitDto, SmileFitInput, SmileModelDto, SmileParamDto, StrategyEvalDto, StrategyEvalInput,
+    StrategyPayoffPoint,
+};
+
+/// Каталог моделей улыбки для селектора в UI.
+pub fn list_smile_models() -> Vec<SmileModelDto> {
+    [
+        ("moex", "MOEX (параметрическая)"),
+        ("sabr", "SABR (Hagan)"),
+        ("svi", "SVI (Gatheral)"),
+        ("kalenkovich", "Каленкович"),
+    ]
+    .iter()
+    .map(|(id, name)| SmileModelDto {
+        id: (*id).to_string(),
+        name: (*name).to_string(),
+    })
+    .collect()
+}
+
+/// Теоретическая цена + греки опциона (Блэк-76/Башелье).
+pub fn option_price(input: &OptionPriceInput) -> Result<OptionPriceDto, String> {
+    let kind = input.parse_kind().ok_or("неизвестный тип опциона")?;
+    let inputs = PriceInputs {
+        forward: input.forward,
+        strike: input.strike,
+        t: input.t,
+        vol: input.vol,
+        rate: input.rate_or_zero(),
+        kind,
+        model: input.parse_model(),
+    };
+    Ok(OptionPriceDto {
+        price: opt_price(&inputs),
+        greeks: GreeksDto::from(opt_greeks(&inputs)),
+    })
+}
+
+/// Подразумеваемая волатильность из рыночной цены (`None` — недостижима).
+pub fn option_implied_vol(input: &ImpliedVolInput) -> Result<ImpliedVolDto, String> {
+    let kind = input.parse_kind().ok_or("неизвестный тип опциона")?;
+    let iv = implied_vol(
+        input.market_price,
+        input.forward,
+        input.strike,
+        input.t,
+        input.rate.unwrap_or(0.0),
+        kind,
+        crate::dto::parse_price_model(input.model.as_deref()),
+    );
+    Ok(ImpliedVolDto { iv })
+}
+
+/// Собрать доменные точки улыбки из входа.
+fn smile_points(input: &SmileFitInput) -> Vec<SmilePoint> {
+    input
+        .points
+        .iter()
+        .map(|p| SmilePoint {
+            strike: p.strike,
+            iv: p.iv,
+            weight: p.weight.unwrap_or(1.0).max(0.0),
+        })
+        .collect()
+}
+
+/// Диапазон страйков для генерации кривой наложения (по входу или по точкам).
+fn curve_range(input: &SmileFitInput, points: &[SmilePoint]) -> (f64, f64) {
+    let lo = input.curve_lo.unwrap_or_else(|| {
+        points
+            .iter()
+            .map(|p| p.strike)
+            .fold(f64::INFINITY, f64::min)
+    });
+    let hi = input.curve_hi.unwrap_or_else(|| {
+        points
+            .iter()
+            .map(|p| p.strike)
+            .fold(f64::NEG_INFINITY, f64::max)
+    });
+    (lo, hi)
+}
+
+/// Сгенерировать кривую улыбки по модели на равномерной сетке страйков.
+fn smile_curve<M: SmileModel>(
+    model: &M,
+    lo: f64,
+    hi: f64,
+    steps: usize,
+    forward: f64,
+    t: f64,
+) -> Vec<SmileCurvePoint> {
+    let n = steps.max(2);
+    if !lo.is_finite() || !hi.is_finite() || hi <= lo {
+        return Vec::new();
+    }
+    (0..n)
+        .map(|i| {
+            let strike = lo + (hi - lo) * i as f64 / (n - 1) as f64;
+            SmileCurvePoint {
+                strike,
+                iv: model.iv(strike, forward, t),
+            }
+        })
+        .collect()
+}
+
+fn param(name: &str, value: f64) -> SmileParamDto {
+    SmileParamDto {
+        name: name.to_string(),
+        value,
+    }
+}
+
+/// Калибровать выбранную модель улыбки по рыночным точкам; вернуть параметры,
+/// RMSE и сглаженную кривую наложения.
+pub fn smile_fit(input: &SmileFitInput) -> Result<SmileFitDto, String> {
+    let points = smile_points(input);
+    if points.is_empty() {
+        return Err("нет рыночных точек для калибровки".into());
+    }
+    let (f, t) = (input.forward, input.t);
+    let (lo, hi) = curve_range(input, &points);
+    let steps = input.curve_steps.unwrap_or(41);
+
+    let (params, rmse, curve) = match input.model.as_str() {
+        "moex" => {
+            let m = MoexSmile::calibrate(&points, f, t);
+            (
+                vec![
+                    param("s0", m.s0),
+                    param("skew", m.skew),
+                    param("cl", m.cl),
+                    param("cr", m.cr),
+                    param("wing", m.wing),
+                ],
+                m.rmse(&points, f, t),
+                smile_curve(&m, lo, hi, steps, f, t),
+            )
+        }
+        "sabr" => {
+            let m = SabrParams::calibrate(&points, f, t);
+            (
+                vec![
+                    param("alpha", m.alpha),
+                    param("beta", m.beta),
+                    param("rho", m.rho),
+                    param("nu", m.nu),
+                ],
+                m.rmse(&points, f, t),
+                smile_curve(&m, lo, hi, steps, f, t),
+            )
+        }
+        "svi" => {
+            let m = SviParams::calibrate(&points, f, t);
+            (
+                vec![
+                    param("a", m.a),
+                    param("b", m.b),
+                    param("rho", m.rho),
+                    param("m", m.m),
+                    param("sigma", m.sigma),
+                ],
+                m.rmse(&points, f, t),
+                smile_curve(&m, lo, hi, steps, f, t),
+            )
+        }
+        "kalenkovich" => {
+            let m = KalenkovichSmile::calibrate(&points, f, t);
+            (
+                vec![
+                    param("s0", m.s0),
+                    param("skew", m.skew),
+                    param("kurt", m.kurt),
+                ],
+                m.rmse(&points, f, t),
+                smile_curve(&m, lo, hi, steps, f, t),
+            )
+        }
+        other => return Err(format!("неизвестная модель улыбки: {other}")),
+    };
+
+    Ok(SmileFitDto {
+        model: input.model.clone(),
+        params,
+        rmse,
+        curve,
+    })
+}
+
+/// Оценить опционную стратегию: диаграмма payoff (экспирация + текущий P&L),
+/// точки безубытка, max profit/loss, агрегированные греки.
+pub fn strategy_eval(input: &StrategyEvalInput) -> Result<StrategyEvalDto, String> {
+    let mut strat = Strategy::new();
+    for (i, leg) in input.legs.iter().enumerate() {
+        let kind = leg
+            .parse_kind()
+            .ok_or_else(|| format!("нога {i}: неизвестный тип"))?;
+        let side = leg
+            .parse_side()
+            .ok_or_else(|| format!("нога {i}: неизвестная сторона"))?;
+        strat.legs.push(Leg {
+            kind,
+            side,
+            strike: leg.strike,
+            expiry_t: leg.expiry_t,
+            quantity: leg.quantity,
+            entry_price: leg.entry_price,
+        });
+    }
+    if strat.legs.is_empty() {
+        return Err("стратегия без ног".into());
+    }
+
+    let model = crate::dto::parse_price_model(input.model.as_deref());
+    let rate = input.rate.unwrap_or(0.0);
+    let steps = input.steps.unwrap_or(61).max(2);
+    let (lo, hi) = (input.price_lo, input.price_hi);
+
+    let payoff = (0..steps)
+        .map(|i| {
+            let price = lo + (hi - lo) * i as f64 / (steps - 1) as f64;
+            StrategyPayoffPoint {
+                price,
+                pnl_expiry: strat.payoff(price),
+                pnl_now: strat.mark_pnl(price, input.vol, rate, model),
+            }
+        })
+        .collect();
+
+    let result = strat.evaluate();
+    let greeks = strat.greeks(input.forward, input.vol, rate, model);
+
+    Ok(StrategyEvalDto {
+        breakevens: result.breakevens,
+        max_profit: result.max_profit,
+        max_loss: result.max_loss,
+        net_cost: result.net_cost,
+        payoff,
+        greeks: GreeksDto::from(greeks),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1106,5 +1358,139 @@ mod tests {
         assert_eq!(edges[0].to, "future");
         // Доля сместилась на 0.8 (с 0.9 до 0.1 у акций).
         assert!((edges[0].weight - 0.8).abs() < 1e-9);
+    }
+
+    // ── Фаза 12 — Опционы ─────────────────────────────────────────────────────
+
+    #[test]
+    fn option_price_atm_call_matches_greeks_delta_sign() {
+        let input = OptionPriceInput {
+            forward: 100.0,
+            strike: 100.0,
+            t: 0.25,
+            vol: 0.3,
+            rate: None,
+            kind: "call".into(),
+            model: None,
+        };
+        let out = option_price(&input).unwrap();
+        // ATM-колл: положительная цена, дельта в (0,1).
+        assert!(out.price > 0.0);
+        assert!(out.greeks.delta > 0.0 && out.greeks.delta < 1.0);
+        assert!(out.greeks.vega > 0.0);
+    }
+
+    #[test]
+    fn option_price_rejects_unknown_kind() {
+        let input = OptionPriceInput {
+            forward: 100.0,
+            strike: 100.0,
+            t: 0.25,
+            vol: 0.3,
+            rate: None,
+            kind: "swaption".into(),
+            model: None,
+        };
+        assert!(option_price(&input).is_err());
+    }
+
+    #[test]
+    fn implied_vol_roundtrips_price() {
+        let priced = option_price(&OptionPriceInput {
+            forward: 100.0,
+            strike: 105.0,
+            t: 0.5,
+            vol: 0.25,
+            rate: None,
+            kind: "put".into(),
+            model: None,
+        })
+        .unwrap();
+        let iv = option_implied_vol(&ImpliedVolInput {
+            market_price: priced.price,
+            forward: 100.0,
+            strike: 105.0,
+            t: 0.5,
+            rate: None,
+            kind: "put".into(),
+            model: None,
+        })
+        .unwrap();
+        assert!((iv.iv.unwrap() - 0.25).abs() < 1e-4);
+    }
+
+    #[test]
+    fn smile_fit_recovers_low_rmse_curve() {
+        // Синтетическая улыбка MOEX → её же калибровка даёт малый RMSE.
+        let truth = MoexSmile::default();
+        let (f, t) = (100.0, 0.3);
+        let points: Vec<_> = [80.0, 90.0, 100.0, 110.0, 120.0]
+            .iter()
+            .map(|&k| crate::dto::SmilePointInput {
+                strike: k,
+                iv: truth.iv(k, f, t),
+                weight: None,
+            })
+            .collect();
+        let out = smile_fit(&SmileFitInput {
+            model: "moex".into(),
+            points,
+            forward: f,
+            t,
+            curve_lo: Some(80.0),
+            curve_hi: Some(120.0),
+            curve_steps: Some(9),
+        })
+        .unwrap();
+        assert_eq!(out.model, "moex");
+        assert!(!out.params.is_empty());
+        assert_eq!(out.curve.len(), 9);
+        assert!(out.rmse < 1e-3, "rmse={}", out.rmse);
+    }
+
+    #[test]
+    fn smile_fit_rejects_unknown_model() {
+        let out = smile_fit(&SmileFitInput {
+            model: "garch".into(),
+            points: vec![crate::dto::SmilePointInput {
+                strike: 100.0,
+                iv: 0.3,
+                weight: None,
+            }],
+            forward: 100.0,
+            t: 0.3,
+            curve_lo: None,
+            curve_hi: None,
+            curve_steps: None,
+        });
+        assert!(out.is_err());
+    }
+
+    #[test]
+    fn strategy_eval_long_call_has_capped_loss_and_unbounded_profit() {
+        let out = strategy_eval(&StrategyEvalInput {
+            legs: vec![crate::dto::StrategyLegInput {
+                kind: "call".into(),
+                side: "long".into(),
+                strike: 100.0,
+                expiry_t: 0.25,
+                quantity: 1.0,
+                entry_price: 5.0,
+            }],
+            price_lo: 80.0,
+            price_hi: 130.0,
+            steps: Some(11),
+            forward: 100.0,
+            vol: 0.3,
+            rate: None,
+            model: None,
+        })
+        .unwrap();
+        assert_eq!(out.payoff.len(), 11);
+        // Длинный колл: максимальный убыток = уплаченная премия, прибыль не ограничена.
+        assert!(out.max_profit.is_none());
+        assert!((out.max_loss.unwrap() + 5.0).abs() < 1e-6);
+        assert!(out.net_cost > 0.0);
+        assert!(out.greeks.delta > 0.0);
     }
 }

@@ -18,7 +18,11 @@ import type {
   FlowEdgeDto,
   FootprintBarDto,
   FutureGroupDto,
+  ImpliedVolDto,
+  ImpliedVolInput,
   InstrumentDto,
+  OptionPriceDto,
+  OptionPriceInput,
   OrderBookDto,
   OrderDto,
   OrderInput,
@@ -28,7 +32,12 @@ import type {
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  SmileFitDto,
+  SmileFitInput,
+  SmileModelDto,
   StrategyDescriptorDto,
+  StrategyEvalDto,
+  StrategyEvalInput,
   SubmitResultDto,
   TimeFrame,
   TopMoverDto,
@@ -151,6 +160,14 @@ export const ipc = {
   orderBlotter: () => invoke<OrderDto[]>("order_blotter"),
   positions: () => invoke<PositionDto[]>("positions"),
   account: () => invoke<AccountDto>("account"),
+
+  // ── Фаза 12 / Опционы ───────────────────────────────────────────────────────
+  listSmileModels: () => invoke<SmileModelDto[]>("list_smile_models"),
+  optionPrice: (input: OptionPriceInput) => invoke<OptionPriceDto>("option_price", { input }),
+  optionImpliedVol: (input: ImpliedVolInput) =>
+    invoke<ImpliedVolDto>("option_implied_vol", { input }),
+  smileFit: (input: SmileFitInput) => invoke<SmileFitDto>("smile_fit", { input }),
+  strategyEval: (input: StrategyEvalInput) => invoke<StrategyEvalDto>("strategy_eval", { input }),
 };
 
 // Подписки на live-push события (каналы `trade:tick` / `orderbook:tick`).

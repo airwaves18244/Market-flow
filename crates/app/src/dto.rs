@@ -11,6 +11,7 @@ use domain::backtest::{
 };
 use domain::delta::{FootprintBar, RobotConfig, RobotSignal};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
+use domain::options::{Greeks, LegKind, OptionType, PriceModel, Side as OptSide};
 use domain::trading::{Fill, Order, OrderType, Position, TimeInForce};
 use domain::{BookLevel, Instrument, OrderBook, Side, Trade};
 use storage::store::TurnoverSnapshot;
@@ -751,6 +752,247 @@ impl PositionDto {
             avg_price: pos.avg_price,
         }
     }
+}
+
+// ── Фаза 12 — Опционы (калькулятор · улыбка · конструктор стратегий) ─────────
+
+/// Разобрать тип опциона из кода фронта (`call|put`).
+fn parse_option_type(code: &str) -> Option<OptionType> {
+    match code {
+        "call" => Some(OptionType::Call),
+        "put" => Some(OptionType::Put),
+        _ => None,
+    }
+}
+
+/// Разобрать модель ценообразования (`black76|bachelier`, по умолчанию Блэк-76).
+pub(crate) fn parse_price_model(code: Option<&str>) -> PriceModel {
+    match code {
+        Some("bachelier") => PriceModel::Bachelier,
+        _ => PriceModel::Black76,
+    }
+}
+
+/// Греки опциона/портфеля для фронта.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GreeksDto {
+    pub delta: f64,
+    pub gamma: f64,
+    pub vega: f64,
+    pub theta: f64,
+    pub rho: f64,
+}
+
+impl From<Greeks> for GreeksDto {
+    fn from(g: Greeks) -> Self {
+        Self {
+            delta: g.delta,
+            gamma: g.gamma,
+            vega: g.vega,
+            theta: g.theta,
+            rho: g.rho,
+        }
+    }
+}
+
+/// Вход калькулятора цены/греков опциона.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionPriceInput {
+    /// Форвард базового актива.
+    pub forward: f64,
+    pub strike: f64,
+    /// Время до экспирации в годах.
+    pub t: f64,
+    /// Волатильность (доля для Блэка, абсолютная для Башелье).
+    pub vol: f64,
+    /// Ставка дисконта (по умолчанию 0 — MOEX-маржируемые).
+    pub rate: Option<f64>,
+    /// `call|put`.
+    pub kind: String,
+    /// `black76|bachelier`.
+    pub model: Option<String>,
+}
+
+impl OptionPriceInput {
+    pub fn parse_kind(&self) -> Option<OptionType> {
+        parse_option_type(&self.kind)
+    }
+    pub fn parse_model(&self) -> PriceModel {
+        parse_price_model(self.model.as_deref())
+    }
+    pub fn rate_or_zero(&self) -> f64 {
+        self.rate.unwrap_or(0.0)
+    }
+}
+
+/// Результат калькулятора: теоретическая цена + греки.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionPriceDto {
+    pub price: f64,
+    pub greeks: GreeksDto,
+}
+
+/// Вход решателя подразумеваемой волатильности.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpliedVolInput {
+    pub market_price: f64,
+    pub forward: f64,
+    pub strike: f64,
+    pub t: f64,
+    pub rate: Option<f64>,
+    pub kind: String,
+    pub model: Option<String>,
+}
+
+impl ImpliedVolInput {
+    pub fn parse_kind(&self) -> Option<OptionType> {
+        parse_option_type(&self.kind)
+    }
+}
+
+/// Результат решателя IV (`None` → недостижимо положительной волатильностью).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpliedVolDto {
+    pub iv: Option<f64>,
+}
+
+/// Рыночная точка улыбки (вход калибровки).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmilePointInput {
+    pub strike: f64,
+    pub iv: f64,
+    /// Вес точки (ликвидность/OI); по умолчанию 1.
+    pub weight: Option<f64>,
+}
+
+/// Вход калибровки улыбки.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileFitInput {
+    /// `moex|sabr|svi|kalenkovich`.
+    pub model: String,
+    pub points: Vec<SmilePointInput>,
+    pub forward: f64,
+    pub t: f64,
+    /// Границы страйков для генерации кривой наложения (по умолчанию — по точкам).
+    pub curve_lo: Option<f64>,
+    pub curve_hi: Option<f64>,
+    /// Число точек кривой (по умолчанию 41).
+    pub curve_steps: Option<usize>,
+}
+
+/// Именованный параметр подгонки улыбки.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileParamDto {
+    pub name: String,
+    pub value: f64,
+}
+
+/// Точка кривой улыбки (страйк → IV).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileCurvePoint {
+    pub strike: f64,
+    pub iv: f64,
+}
+
+/// Результат калибровки улыбки: параметры, RMSE, сглаженная кривая наложения.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileFitDto {
+    /// `moex|sabr|svi|kalenkovich`.
+    pub model: String,
+    pub params: Vec<SmileParamDto>,
+    pub rmse: f64,
+    pub curve: Vec<SmileCurvePoint>,
+}
+
+/// Нога опционной стратегии (вход конструктора).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyLegInput {
+    /// `call|put|underlying`.
+    pub kind: String,
+    /// `long|short`.
+    pub side: String,
+    pub strike: f64,
+    pub expiry_t: f64,
+    pub quantity: f64,
+    pub entry_price: f64,
+}
+
+impl StrategyLegInput {
+    pub fn parse_kind(&self) -> Option<LegKind> {
+        match self.kind.as_str() {
+            "call" => Some(LegKind::Call),
+            "put" => Some(LegKind::Put),
+            "underlying" => Some(LegKind::Underlying),
+            _ => None,
+        }
+    }
+    pub fn parse_side(&self) -> Option<OptSide> {
+        match self.side.as_str() {
+            "long" => Some(OptSide::Long),
+            "short" => Some(OptSide::Short),
+            _ => None,
+        }
+    }
+}
+
+/// Вход оценки стратегии.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyEvalInput {
+    pub legs: Vec<StrategyLegInput>,
+    /// Границы диаграммы payoff (цена базового).
+    pub price_lo: f64,
+    pub price_hi: f64,
+    /// Число точек диаграммы (по умолчанию 61).
+    pub steps: Option<usize>,
+    /// Форвард/волатильность/модель для текущего P&L и агрегированных греков.
+    pub forward: f64,
+    pub vol: f64,
+    pub rate: Option<f64>,
+    /// `black76|bachelier`.
+    pub model: Option<String>,
+}
+
+/// Точка диаграммы payoff: P&L на экспирацию и текущий.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyPayoffPoint {
+    pub price: f64,
+    pub pnl_expiry: f64,
+    pub pnl_now: f64,
+}
+
+/// Результат оценки стратегии для фронта.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyEvalDto {
+    pub breakevens: Vec<f64>,
+    pub max_profit: Option<f64>,
+    pub max_loss: Option<f64>,
+    pub net_cost: f64,
+    pub payoff: Vec<StrategyPayoffPoint>,
+    pub greeks: GreeksDto,
+}
+
+/// Описание модели улыбки для UI (селектор моделей).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileModelDto {
+    /// Код: `moex|sabr|svi|kalenkovich`.
+    pub id: String,
+    /// Человекочитаемое имя.
+    pub name: String,
 }
 
 #[cfg(test)]

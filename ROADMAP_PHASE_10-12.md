@@ -414,25 +414,30 @@ API** (gRPC bars, уже есть) и **MOEX ALGO** (REST, из фазы 10). П
   миграция, идемпотентность.
 
 ### 12.6 — App/IPC (`app`)
-- [ ] `12.6.1` DTO: `OptionQuoteDto`, `GreeksDto`, `SmilePointDto`,
-  `SmileFitDto` (модель+параметры+RMSE), `StrategyLegInput`, `StrategyResultDto`
-  (payoff, греки, безубыток).
-- [ ] `12.6.2` Обработчики/AppState: `option_board(underlying)`,
-  `option_price(req)`, `option_greeks(req)`, `smile_fit(board, model)`,
-  `strategy_eval(legs)`; Tauri-обёртки; мок-данные.
+- [x] `12.6.1` DTO (`crates/app/src/dto.rs`): `GreeksDto`, `OptionPriceInput`/
+  `OptionPriceDto`, `ImpliedVolInput`/`ImpliedVolDto`, `SmilePointInput`,
+  `SmileFitInput`/`SmileFitDto` (модель+параметры+RMSE+кривая),
+  `StrategyLegInput`, `StrategyEvalInput`/`StrategyEvalDto` (payoff, греки,
+  безубыток), `SmileModelDto`. `OptionQuoteDto` (котировки доски) — с фазой 12.4.
+- [x] `12.6.2` Обработчики/AppState + Tauri-обёртки + мок-данные:
+  `option_price(req)`, `option_implied_vol(req)`, `smile_fit(points, model)`,
+  `strategy_eval(legs)`, `list_smile_models()` (`api.rs`/`state.rs`/`tauri_app.rs`,
+  мок в `frontend/src/lib/mock.ts`). Чистые (без сети), покрыты тестами `app`.
+  `option_board(underlying)` (загрузка живой доски) — с транспортом 12.4.
 
 ### 12.7 — Frontend: вкладка «Опционы»
-- [ ] `12.7.1` `tabs/OptionsTab.svelte` — секции «Калькулятор», «Улыбка»,
-  «Конструктор стратегий».
-- [ ] `12.7.2` `OptionCalculator.svelte` — ввод параметров → цена/греки/IV;
+- [x] `12.7.1` `OptionsTab.svelte` — саб-навигация: «Калькулятор», «Улыбка»,
+  «Конструктор стратегий». Подключена вкладкой «Опционы» в `App.svelte`.
+- [x] `12.7.2` `OptionCalculator.svelte` — ввод параметров → цена/греки/IV;
   таблица результатов.
-- [ ] `12.7.3` `SmileChart.svelte` (ECharts) — рыночные точки IV + наложение
-  выбранных моделей (MOEX/SABR/SVI/Каленкович), переключатель моделей,
-  отображение параметров и RMSE.
-- [ ] `12.7.4` `StrategyBuilder.svelte` — добавление ног, шаблоны, диаграмма
-  payoff (P&L vs цена), таблица агрегированных греков и точек безубытка.
-- [ ] `12.7.5` `GreeksTable.svelte` / профиль риска (тепловая карта по цене/
-  времени). Типы/ipc.
+- [x] `12.7.3` `SmileChart.svelte` + `SmileView.svelte` (ECharts) — рыночные
+  точки IV + наложение калиброванной модели (MOEX/SABR/SVI/Каленкович),
+  переключатель моделей, параметры и RMSE.
+- [x] `12.7.4` `StrategyBuilder.svelte` + `PayoffChart.svelte` — добавление ног,
+  шаблоны (спред/стрэддл/бабочка…), диаграмма payoff (экспирация + текущий),
+  агрегированные греки и точки безубытка.
+- [x] `12.7.5` Таблица греков в конструкторе; типы (`lib/types.ts`) и IPC
+  (`lib/ipc.ts`). Профиль риска (тепловая карта по цене/времени) — позже.
 
 ### 12.8 — Настройки (вкладка Settings, раздел «Опционы»)
 - [ ] `12.8.1` Модель ценообразования (Black-76 | Bachelier), `r` (дефолт 0 для
@@ -440,9 +445,11 @@ API** (gRPC bars, уже есть) и **MOEX ALGO** (REST, из фазы 10). П
   калибровки (веса/диапазоны), единицы греков.
 
 ### 12.9 — Тесты/доки
-- [ ] `12.9.1` `domain`: ценообразование, греки, IV-solver, калибровка улыбок,
-  стратегии — без сети, по известным эталонам.
-- [ ] `12.9.2` `data`/`app`: парсинг доски на фикстурах, DTO-маппинг.
+- [x] `12.9.1` `domain`: ценообразование, греки, IV-solver, калибровка улыбок,
+  стратегии — без сети, по известным эталонам (крейт `domain`).
+- [x] `12.9.2` `app`: DTO-маппинг и обработчики опционов (цена/греки/IV/улыбка/
+  стратегия) — юнит-тесты в `crates/app/src/api.rs`; фронт — `frontend/src/lib/
+  options.test.ts` (мок-режим). `data`: парсинг доски на фикстурах — с фазой 12.4.
 - [ ] `12.9.3` `docs/options-smile-models.html` финализирован (форма улыбки MOEX
   выверена по методике); обновить `ROADMAP.md`/`SUMMARY.md`.
 
