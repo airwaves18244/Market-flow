@@ -21,6 +21,11 @@ import type {
   ImpliedVolDto,
   ImpliedVolInput,
   InstrumentDto,
+  KeyActivityPeriod,
+  KeyActivityRowDto,
+  KeyActivityRuleDto,
+  KeyActivitySampleInput,
+  KeyActivitySummaryDto,
   OptionPriceDto,
   OptionPriceInput,
   OrderBookDto,
@@ -168,6 +173,13 @@ export const ipc = {
     invoke<ImpliedVolDto>("option_implied_vol", { input }),
   smileFit: (input: SmileFitInput) => invoke<SmileFitDto>("smile_fit", { input }),
   strategyEval: (input: StrategyEvalInput) => invoke<StrategyEvalDto>("strategy_eval", { input }),
+
+  // ── Фаза 10 / MOEX ALGO: Key Activity ───────────────────────────────────────
+  keyActivity: (samples: KeyActivitySampleInput[], period?: KeyActivityPeriod) =>
+    invoke<KeyActivityRowDto[]>("key_activity", { samples, period }),
+  keyActivitySummary: (samples: KeyActivitySampleInput[], period?: KeyActivityPeriod) =>
+    invoke<KeyActivitySummaryDto>("key_activity_summary", { samples, period }),
+  keyActivityRules: () => invoke<KeyActivityRuleDto[]>("key_activity_rules"),
 };
 
 // Подписки на live-push события (каналы `trade:tick` / `orderbook:tick`).

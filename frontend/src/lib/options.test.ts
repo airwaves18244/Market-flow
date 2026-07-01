@@ -73,3 +73,37 @@ describe("options ipc (mock mode)", () => {
     expect(res.greeks.delta).toBeGreaterThan(0);
   });
 });
+
+describe("key activity ipc (mock mode)", () => {
+  it("flags anomalous volume and imbalance samples", async () => {
+    const rows = await ipc.keyActivity(
+      [
+        { secid: "SBER", ts: 4, volumeZ: 3.8, disb: 0.55, hi2: 0.2, priceChange: 0.03 },
+        { secid: "QUIET", ts: 4, volumeZ: 0.2, disb: 0.05, hi2: 0.1, priceChange: 0.0 },
+      ],
+      "1h",
+    );
+    expect(rows.some((r) => r.secid === "SBER")).toBe(true);
+    expect(rows.every((r) => typeof r.importance === "number")).toBe(true);
+    // Отсортировано по убыванию важности.
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i - 1].importance).toBeGreaterThanOrEqual(rows[i].importance);
+    }
+  });
+
+  it("builds a local (fallback) summary", async () => {
+    const s = await ipc.keyActivitySummary(
+      [{ secid: "SBER", ts: 4, volumeZ: 4, disb: 0.6, priceChange: 0.05 }],
+      "1d",
+    );
+    expect(s.fallback).toBe(true);
+    expect(s.period).toBe("1d");
+    expect(s.text.length).toBeGreaterThan(0);
+  });
+
+  it("lists default rules", async () => {
+    const rules = await ipc.keyActivityRules();
+    expect(rules.length).toBeGreaterThan(0);
+    expect(rules[0]).toHaveProperty("id");
+  });
+});

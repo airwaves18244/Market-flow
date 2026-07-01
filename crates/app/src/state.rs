@@ -19,7 +19,8 @@ use crate::api;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FootprintBarDto, FutureGroupDto,
-    ImpliedVolDto, ImpliedVolInput, InstrumentDto, OptionPriceDto, OptionPriceInput, OrderDto,
+    ImpliedVolDto, ImpliedVolInput, InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto,
+    KeyActivitySampleInput, KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderDto,
     OrderInput, PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto,
     SectorRow, SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
     StrategyEvalInput, SubmitResultDto, TopMoverDto, TurnoverByClassPoint, TurnoverPoint,
@@ -300,6 +301,31 @@ impl AppState {
     /// Оценка опционной стратегии (payoff, греки, безубыток).
     pub fn strategy_eval(&self, input: &StrategyEvalInput) -> Result<StrategyEvalDto, String> {
         api::strategy_eval(input)
+    }
+
+    // ── Фаза 10 — MOEX ALGO: Key Activity ─────────────────────────────────────
+
+    /// Ключевая активность за период по образцам метрик (встроенные правила).
+    pub fn key_activity(
+        &self,
+        samples: &[KeyActivitySampleInput],
+        period: Option<&str>,
+    ) -> Vec<KeyActivityRowDto> {
+        api::key_activity(samples, period)
+    }
+
+    /// Локальный (без LLM) свод «ИТОГО» по ключевой активности.
+    pub fn key_activity_summary(
+        &self,
+        samples: &[KeyActivitySampleInput],
+        period: Option<&str>,
+    ) -> KeyActivitySummaryDto {
+        api::key_activity_summary(samples, period)
+    }
+
+    /// Встроенные правила Key Activity (для настроек/справки).
+    pub fn key_activity_rules(&self) -> Vec<KeyActivityRuleDto> {
+        api::key_activity_rules()
     }
 }
 

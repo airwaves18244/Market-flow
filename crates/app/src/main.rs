@@ -450,6 +450,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             strat.breakevens
         );
 
+        // Фаза 10 — MOEX ALGO: ключевая активность + локальный свод «ИТОГО».
+        let samples = vec![
+            dto::KeyActivitySampleInput {
+                secid: "SBER".into(),
+                ts: 4,
+                volume: 5_000.0,
+                volume_z: 3.5,
+                disb: 0.6,
+                oi_change: 0.0,
+                hi2: 0.2,
+                spread: 0.001,
+                price_change: 0.03,
+            },
+            dto::KeyActivitySampleInput {
+                secid: "GAZP".into(),
+                ts: 4,
+                volume: 800.0,
+                volume_z: 0.4,
+                disb: -0.1,
+                oi_change: 0.0,
+                hi2: 0.7,
+                spread: 0.002,
+                price_change: -0.01,
+            },
+        ];
+        let ka = state.key_activity(&samples, Some("1h"));
+        let ka_sum = state.key_activity_summary(&samples, Some("1h"));
+        println!(
+            "  key_activity(1h): {} строк, правил по умолчанию={}",
+            ka.len(),
+            state.key_activity_rules().len()
+        );
+        println!(
+            "  key_activity_summary(1h): fallback={}, строк в своде={}",
+            ka_sum.fallback, ka_sum.row_count
+        );
+
         Ok(())
     }
 }

@@ -215,33 +215,36 @@ HTTP-слой.
 - [ ] `10.5.4` Запросы чтения для модулей вкладки (по тикеру/периоду/датасету).
 
 ### 10.6 — App/IPC (`app`)
-- [ ] `10.6.1` DTO (camelCase) в `dto.rs`: `TradestatsDto`, `FutoiDto`, `Hi2Dto`,
-  `MegaAlertDto`, `KeyActivityRowDto`, `KeyActivitySummaryDto` (LLM-текст +
-  метаданные), `KeyActivityRuleInput`.
-- [ ] `10.6.2` Обработчики в `api.rs` + методы `AppState`: `algo_tradestats`,
-  `algo_futoi`, `algo_hi2`, `algo_mega_alerts`, `key_activity(period, rules?)`,
-  `key_activity_summary(period, rules?)` (вызывает LLM), `key_activity_rules_get/set`.
-- [ ] `10.6.3` Tauri-команды (`tauri_app.rs`) для всех обработчиков (фича `tauri`).
+- ⏳ `10.6.1` DTO (camelCase) в `dto.rs`: **сделаны** `KeyActivitySampleInput`,
+  `KeyActivityRowDto`, `KeyActivitySummaryDto`, `KeyActivityRuleDto`. Остаются
+  `TradestatsDto`/`FutoiDto`/`Hi2Dto`/`MegaAlertDto` (с транспортом `data::moex`).
+- ⏳ `10.6.2` Обработчики в `api.rs` + методы `AppState`: **сделаны**
+  `key_activity(samples, period)`, `key_activity_summary(...)` (локальный
+  fallback), `key_activity_rules()` — чистые, покрыты тестами. Остаются
+  `algo_tradestats/futoi/hi2/mega_alerts` (нужен источник данных 10.1/10.5) и
+  LLM-вызов в summary (10.4).
+- [x] `10.6.3` Tauri-команды (`tauri_app.rs`) для реализованных обработчиков
+  Key Activity (фича `tauri`).
 - [ ] `10.6.4` Ингест ALGOPACK в планировщик (`app::ingest`/`live`) — опрос
   ALGOPACK по вотчлисту под лимитом (фича `live`/`moex`).
-- [ ] `10.6.5` Мок-данные в `frontend/src/lib/mock.ts` для всех новых команд
-  (UI работает в браузере без бэкенда — как сейчас).
+- [x] `10.6.5` Мок-данные в `frontend/src/lib/mock.ts` для команд Key Activity
+  (UI работает в браузере без бэкенда). Остальные — по мере добавления команд.
 
 ### 10.7 — Frontend: вкладка «MOEX ALGO»
-- [ ] `10.7.1` `tabs/MoexAlgoTab.svelte` — лэйаут с под-модулями (саб-навигация
-  или секции): **Super Candles**, **FUTOI**, **HI2**, **Mega Alerts**,
-  **Key Activity**, **TOTAL (LLM)**.
+- ⏳ `10.7.1` `MoexAlgoTab.svelte` — саб-навигация по модулям; **Key Activity** и
+  **TOTAL** реализованы, остальные (Super Candles/FUTOI/HI2/Mega Alerts) — плейсхолдеры
+  до подключения транспорта `data::moex`. Подключена вкладкой «MOEX ALGO».
 - [ ] `10.7.2` `SuperCandles.svelte` — расширенный свечной/объёмный график
   (Lightweight Charts) + VWAP-полоса + индикатор disb; таблица метрик.
 - [ ] `10.7.3` `Futoi.svelte` — график нетто-позиций физ/юр (long/short), таблица.
 - [ ] `10.7.4` `Hi2Concentration.svelte` — временной ряд концентрации + ранкинг
   тикеров (ECharts).
 - [ ] `10.7.5` `MegaAlerts.svelte` — лента сигналов (тип, тикер, метрика, время).
-- [ ] `10.7.6` `KeyActivityTable.svelte` — таблица «Key activity» с селектором
+- [x] `10.7.6` `KeyActivityTable.svelte` — таблица «Key activity» с селектором
   периода (`1h/1d/1w/1m/3m`, дефолт `1h`), фильтрами по правилу/тикеру.
-- [ ] `10.7.7` `KeyActivitySummary.svelte` — панель «TOTAL»: текст LLM-резюме,
-  кнопка «обновить», состояние загрузки/ошибки/без-ключа (fallback-свод).
-- [ ] `10.7.8` Типы в `lib/types.ts` + методы в `lib/ipc.ts` для новых команд.
+- [x] `10.7.7` `KeyActivitySummary.svelte` — панель «TOTAL»: текст свода,
+  кнопка «Обновить», состояния загрузки/без-ключа (локальный fallback).
+- [x] `10.7.8` Типы в `lib/types.ts` + методы в `lib/ipc.ts` для команд Key Activity.
 
 ### 10.8 — Настройки (вкладка Settings, раздел «MOEX ALGO / Key Activity / LLM»)
 - [ ] `10.8.1` Подключение MOEX Passport (статус «секрет задан»), выбор markets,
@@ -254,11 +257,13 @@ HTTP-слой.
 - [ ] `10.8.4` Период анализа по умолчанию.
 
 ### 10.9 — Тесты/CI/доки
-- [ ] `10.9.1` `domain`: юнит-тесты аналитики, Mega Alerts, Key Activity,
-  сборки промпта (все без сети).
+- [x] `10.9.1` `domain`: юнит-тесты аналитики, Mega Alerts, Key Activity,
+  сборки промпта (все без сети) — крейт `domain`.
 - [ ] `10.9.2` `data`: парсер ISS на фикстурах, оркестрация на фейке.
-- [ ] `10.9.3` `app`: DTO-маппинг, обработчики на `MemStore`.
-- [ ] `10.9.4` Обновить `ROADMAP.md`/`SUMMARY.md` (отметки фазы 10).
+- ⏳ `10.9.3` `app`: обработчики Key Activity покрыты юнит-тестами (`api.rs`);
+  фронт — `frontend/src/lib/options.test.ts` (мок-режим). Остальные обработчики —
+  по мере добавления.
+- ⏳ `10.9.4` Обновить `ROADMAP.md`/`SUMMARY.md` — отметки Key Activity внесены.
 
 ---
 

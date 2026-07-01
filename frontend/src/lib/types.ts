@@ -419,3 +419,42 @@ export interface StrategyEvalDto {
   payoff: StrategyPayoffPoint[];
   greeks: GreeksDto;
 }
+
+// ── Фаза 10 — MOEX ALGO: Key Activity ────────────────────────────────────────
+
+export type KeyActivityPeriod = "1h" | "1d" | "1w" | "1m" | "3m";
+
+export interface KeyActivitySampleInput {
+  secid: string;
+  ts: number;
+  volume?: number;
+  volumeZ?: number;
+  disb?: number;
+  oiChange?: number;
+  hi2?: number;
+  spread?: number;
+  priceChange?: number;
+}
+
+export interface KeyActivityRowDto {
+  secid: string;
+  ruleId: string;
+  ruleName: string;
+  metric: string;
+  value: number;
+  ts: number;
+  importance: number;
+}
+
+export interface KeyActivitySummaryDto {
+  text: string;
+  period: string;
+  rowCount: number;
+  fallback: boolean;
+}
+
+export interface KeyActivityRuleDto {
+  id: string;
+  name: string;
+  weight: number;
+}

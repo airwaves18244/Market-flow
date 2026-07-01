@@ -10,6 +10,7 @@ use domain::backtest::{
     BacktestConfig, BacktestReport, FillTiming, PerfMetrics, SimTrade, StrategyDescriptor,
 };
 use domain::delta::{FootprintBar, RobotConfig, RobotSignal};
+use domain::keyactivity::{KeyActivityRow, Sample};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
 use domain::options::{Greeks, LegKind, OptionType, PriceModel, Side as OptSide};
 use domain::trading::{Fill, Order, OrderType, Position, TimeInForce};
@@ -993,6 +994,100 @@ pub struct SmileModelDto {
     pub id: String,
     /// Человекочитаемое имя.
     pub name: String,
+}
+
+// ── Фаза 10 — MOEX ALGO: Key Activity (ключевая активность) ──────────────────
+
+/// Образец метрик инструмента за период (вход движка Key Activity). Приходит с
+/// фронта в camelCase; в боевом режиме собирается из датасетов ALGOPACK.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivitySampleInput {
+    pub secid: String,
+    pub ts: i64,
+    #[serde(default)]
+    pub volume: f64,
+    #[serde(default)]
+    pub volume_z: f64,
+    #[serde(default)]
+    pub disb: f64,
+    #[serde(default)]
+    pub oi_change: f64,
+    #[serde(default)]
+    pub hi2: f64,
+    #[serde(default)]
+    pub spread: f64,
+    #[serde(default)]
+    pub price_change: f64,
+}
+
+impl From<&KeyActivitySampleInput> for Sample {
+    fn from(s: &KeyActivitySampleInput) -> Self {
+        Sample {
+            secid: s.secid.clone(),
+            asset_class: None,
+            ts: s.ts,
+            volume: s.volume,
+            volume_z: s.volume_z,
+            disb: s.disb,
+            oi_change: s.oi_change,
+            hi2: s.hi2,
+            spread: s.spread,
+            price_change: s.price_change,
+        }
+    }
+}
+
+/// Строка таблицы «Ключевая активность» для фронта.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivityRowDto {
+    pub secid: String,
+    pub rule_id: String,
+    pub rule_name: String,
+    /// Человекочитаемая подпись первичной метрики правила.
+    pub metric: String,
+    pub value: f64,
+    pub ts: i64,
+    pub importance: f64,
+}
+
+impl From<&KeyActivityRow> for KeyActivityRowDto {
+    fn from(r: &KeyActivityRow) -> Self {
+        Self {
+            secid: r.secid.clone(),
+            rule_id: r.rule_id.clone(),
+            rule_name: r.rule_name.clone(),
+            metric: r.metric.label().to_string(),
+            value: r.value,
+            ts: r.ts,
+            importance: r.importance,
+        }
+    }
+}
+
+/// Итоговое ИИ-резюме по ключевой активности (панель «ИТОГО»). В отсутствие
+/// LLM-ключа/сети — локально собранный текстовый свод (`fallback`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivitySummaryDto {
+    /// Текст резюме (markdown/plain).
+    pub text: String,
+    /// Подпись периода (`1h|1d|1w|1m|3m`).
+    pub period: String,
+    /// Число строк ключевой активности, попавших в свод.
+    pub row_count: usize,
+    /// Локальный свод (`true`) vs. ответ LLM (`false`).
+    pub fallback: bool,
+}
+
+/// Описание правила Key Activity по умолчанию (для UI-настроек/справки).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivityRuleDto {
+    pub id: String,
+    pub name: String,
+    pub weight: f64,
 }
 
 #[cfg(test)]

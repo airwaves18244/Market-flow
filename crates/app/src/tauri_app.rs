@@ -16,7 +16,8 @@ use domain::TimeFrame;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FillEventDto, FlowEdgeDto, FootprintBarDto,
-    FutureGroupDto, ImpliedVolDto, ImpliedVolInput, InstrumentDto, OptionPriceDto,
+    FutureGroupDto, ImpliedVolDto, ImpliedVolInput, InstrumentDto, KeyActivityRowDto,
+    KeyActivityRuleDto, KeyActivitySampleInput, KeyActivitySummaryDto, OptionPriceDto,
     OptionPriceInput, OrderBookDto, OrderDto, OrderInput, PositionDto, RobotConfigInput,
     RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SmileFitDto, SmileFitInput,
     SmileModelDto, StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput, SubmitResultDto,
@@ -236,6 +237,31 @@ fn strategy_eval(state: State<AppState>, input: StrategyEvalInput) -> CmdResult<
     state.strategy_eval(&input)
 }
 
+// ── Фаза 10 — MOEX ALGO: Key Activity ────────────────────────────────────────
+
+#[tauri::command]
+fn key_activity(
+    state: State<AppState>,
+    samples: Vec<KeyActivitySampleInput>,
+    period: Option<String>,
+) -> CmdResult<Vec<KeyActivityRowDto>> {
+    Ok(state.key_activity(&samples, period.as_deref()))
+}
+
+#[tauri::command]
+fn key_activity_summary(
+    state: State<AppState>,
+    samples: Vec<KeyActivitySampleInput>,
+    period: Option<String>,
+) -> CmdResult<KeyActivitySummaryDto> {
+    Ok(state.key_activity_summary(&samples, period.as_deref()))
+}
+
+#[tauri::command]
+fn key_activity_rules(state: State<AppState>) -> CmdResult<Vec<KeyActivityRuleDto>> {
+    Ok(state.key_activity_rules())
+}
+
 // ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
 
 #[tauri::command]
@@ -361,6 +387,9 @@ pub fn run() {
             option_implied_vol,
             smile_fit,
             strategy_eval,
+            key_activity,
+            key_activity_summary,
+            key_activity_rules,
             submit_order,
             cancel_order,
             order_blotter,

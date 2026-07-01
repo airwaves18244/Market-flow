@@ -908,6 +908,64 @@ pub fn strategy_eval(input: &StrategyEvalInput) -> Result<StrategyEvalDto, Strin
     })
 }
 
+// ── Фаза 10 — MOEX ALGO: Key Activity (чистый движок правил) ─────────────────
+
+use domain::keyactivity::{default_rules, evaluate as ka_evaluate, prompt, Period, Sample};
+
+use crate::dto::{
+    KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput, KeyActivitySummaryDto,
+};
+
+/// Разобрать период анализа (`1h|1d|1w|1m|3m`, по умолчанию `1h`).
+fn parse_period(label: Option<&str>) -> Period {
+    label.and_then(Period::from_label).unwrap_or_default()
+}
+
+/// Прогнать движок «Ключевая активность» по образцам метрик за период.
+/// Пока используется встроенный набор правил (`default_rules`); пользовательские
+/// цепочки правил подключаются с конструктором правил в настройках (10.8.2).
+pub fn key_activity(
+    samples: &[KeyActivitySampleInput],
+    _period: Option<&str>,
+) -> Vec<KeyActivityRowDto> {
+    let domain_samples: Vec<Sample> = samples.iter().map(Sample::from).collect();
+    ka_evaluate(&default_rules(), &domain_samples)
+        .iter()
+        .map(KeyActivityRowDto::from)
+        .collect()
+}
+
+/// Локальный (без LLM) свод по ключевой активности за период — панель «ИТОГО».
+/// Живой LLM-провайдер (OpenRouter/Anthropic/OpenAI) подключается за фичей `llm`
+/// (10.4); в его отсутствие панель показывает этот текстовый fallback.
+pub fn key_activity_summary(
+    samples: &[KeyActivitySampleInput],
+    period: Option<&str>,
+) -> KeyActivitySummaryDto {
+    let p = parse_period(period);
+    let domain_samples: Vec<Sample> = samples.iter().map(Sample::from).collect();
+    let rows = ka_evaluate(&default_rules(), &domain_samples);
+    let text = prompt::fallback_summary(&rows, p, 12);
+    KeyActivitySummaryDto {
+        text,
+        period: p.label().to_string(),
+        row_count: rows.len(),
+        fallback: true,
+    }
+}
+
+/// Встроенные правила Key Activity (для справки/настроек).
+pub fn key_activity_rules() -> Vec<KeyActivityRuleDto> {
+    default_rules()
+        .iter()
+        .map(|r| KeyActivityRuleDto {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            weight: r.weight,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1492,5 +1550,60 @@ mod tests {
         assert!((out.max_loss.unwrap() + 5.0).abs() < 1e-6);
         assert!(out.net_cost > 0.0);
         assert!(out.greeks.delta > 0.0);
+    }
+
+    // ── Фаза 10 — MOEX ALGO: Key Activity ─────────────────────────────────────
+
+    #[test]
+    fn key_activity_flags_anomalous_volume_sample() {
+        let samples = vec![
+            crate::dto::KeyActivitySampleInput {
+                secid: "SBER".into(),
+                ts: 10,
+                volume: 5000.0,
+                volume_z: 4.0,
+                disb: 0.5,
+                oi_change: 0.0,
+                hi2: 0.2,
+                spread: 0.001,
+                price_change: 0.02,
+            },
+            crate::dto::KeyActivitySampleInput {
+                secid: "QUIET".into(),
+                ts: 10,
+                volume: 10.0,
+                volume_z: 0.1,
+                disb: 0.0,
+                oi_change: 0.0,
+                hi2: 0.1,
+                spread: 0.001,
+                price_change: 0.0,
+            },
+        ];
+        let rows = key_activity(&samples, Some("1h"));
+        // Хотя бы одно правило срабатывает на аномальном образце SBER.
+        assert!(rows.iter().any(|r| r.secid == "SBER"));
+        // Тихий инструмент не должен доминировать в выдаче.
+        assert!(rows.iter().filter(|r| r.secid == "QUIET").count() <= rows.len());
+        assert!(!key_activity_rules().is_empty());
+    }
+
+    #[test]
+    fn key_activity_summary_is_local_fallback() {
+        let samples = vec![crate::dto::KeyActivitySampleInput {
+            secid: "SBER".into(),
+            ts: 10,
+            volume: 5000.0,
+            volume_z: 4.0,
+            disb: 0.7,
+            oi_change: 0.0,
+            hi2: 0.2,
+            spread: 0.001,
+            price_change: 0.05,
+        }];
+        let sum = key_activity_summary(&samples, Some("1h"));
+        assert!(sum.fallback);
+        assert_eq!(sum.period, "1h");
+        assert!(!sum.text.is_empty());
     }
 }

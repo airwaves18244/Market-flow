@@ -16,6 +16,10 @@ import type {
   ImpliedVolDto,
   ImpliedVolInput,
   InstrumentDto,
+  KeyActivityRowDto,
+  KeyActivityRuleDto,
+  KeyActivitySampleInput,
+  KeyActivitySummaryDto,
   OptionPriceDto,
   OptionPriceInput,
   OrderBookDto,
@@ -702,6 +706,71 @@ const smileModels: SmileModelDto[] = [
   { id: "kalenkovich", name: "Каленкович" },
 ];
 
+// ── Фаза 10 — MOEX ALGO: Key Activity (упрощённые правила для мок-режима) ─────
+// Зеркалит доменный `default_rules()` достаточно, чтобы таблица «Ключевая
+// активность» и панель «ИТОГО» работали без бэкенда.
+
+const keyActivityRules: KeyActivityRuleDto[] = [
+  { id: "anomalous_volume", name: "Аномальный объём", weight: 1 },
+  { id: "flow_imbalance", name: "Сильный дисбаланс потока", weight: 0.9 },
+  { id: "concentration_spike", name: "Всплеск концентрации HI2", weight: 0.8 },
+  { id: "price_move", name: "Резкое движение цены", weight: 0.7 },
+];
+
+function mockSampleSet(): KeyActivitySampleInput[] {
+  return [
+    { secid: "SBER", ts: 4, volume: 5200, volumeZ: 3.8, disb: 0.55, hi2: 0.22, priceChange: 0.031 },
+    { secid: "GAZP", ts: 4, volume: 900, volumeZ: 0.6, disb: -0.62, hi2: 0.71, priceChange: -0.008 },
+    { secid: "LKOH", ts: 4, volume: 2100, volumeZ: 1.2, disb: 0.15, hi2: 0.34, priceChange: 0.026 },
+    { secid: "GMKN", ts: 4, volume: 1500, volumeZ: 2.9, disb: 0.05, hi2: 0.28, priceChange: -0.004 },
+  ];
+}
+
+function evalKeyActivity(samples: KeyActivitySampleInput[]): KeyActivityRowDto[] {
+  const rows: KeyActivityRowDto[] = [];
+  for (const s of samples) {
+    if ((s.volumeZ ?? 0) >= 3) {
+      rows.push(row(s, "anomalous_volume", "Аномальный объём", "z-score объёма", s.volumeZ ?? 0, 1));
+    }
+    if (Math.abs(s.disb ?? 0) >= 0.4) {
+      rows.push(row(s, "flow_imbalance", "Сильный дисбаланс потока", "дисбаланс", s.disb ?? 0, 0.9));
+    }
+    if ((s.hi2 ?? 0) >= 0.6) {
+      rows.push(row(s, "concentration_spike", "Всплеск концентрации HI2", "концентрация HI2", s.hi2 ?? 0, 0.8));
+    }
+    if (Math.abs(s.priceChange ?? 0) >= 0.02) {
+      rows.push(row(s, "price_move", "Резкое движение цены", "изменение цены", s.priceChange ?? 0, 0.7));
+    }
+  }
+  return rows.sort((a, b) => b.importance - a.importance || a.secid.localeCompare(b.secid));
+}
+
+function row(
+  s: KeyActivitySampleInput,
+  ruleId: string,
+  ruleName: string,
+  metric: string,
+  value: number,
+  importance: number,
+): KeyActivityRowDto {
+  return { secid: s.secid, ruleId, ruleName, metric, value, ts: s.ts, importance };
+}
+
+function mockKeyActivitySummary(
+  samples: KeyActivitySampleInput[],
+  period: string,
+): KeyActivitySummaryDto {
+  const rows = evalKeyActivity(samples);
+  const lines = rows
+    .slice(0, 8)
+    .map((r) => `• ${r.secid}: ${r.ruleName.toLowerCase()} (${r.metric} = ${r.value.toFixed(3)})`);
+  const text =
+    rows.length === 0
+      ? `За период ${period} значимых активностей не выявлено.`
+      : `Ключевая активность за ${period} (${rows.length} сигналов):\n${lines.join("\n")}`;
+  return { text, period, rowCount: rows.length, fallback: true };
+}
+
 export async function handle<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "instruments":
@@ -796,6 +865,19 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return mockSmileFit(args?.input as SmileFitInput) as unknown as T;
     case "strategy_eval":
       return mockStrategyEval(args?.input as StrategyEvalInput) as unknown as T;
+
+    // ── Фаза 10 / MOEX ALGO: Key Activity ───────────────────────────────────────
+    case "key_activity": {
+      const samples = (args?.samples as KeyActivitySampleInput[]) ?? mockSampleSet();
+      return evalKeyActivity(samples) as unknown as T;
+    }
+    case "key_activity_summary": {
+      const samples = (args?.samples as KeyActivitySampleInput[]) ?? mockSampleSet();
+      const period = String(args?.period ?? "1h");
+      return mockKeyActivitySummary(samples, period) as unknown as T;
+    }
+    case "key_activity_rules":
+      return keyActivityRules as unknown as T;
 
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
