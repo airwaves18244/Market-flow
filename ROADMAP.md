@@ -2,6 +2,21 @@
 
 Пошаговый план. Отметка ✅ — сделано в текущей итерации.
 
+## Статус верификации (ревизия 2026-07)
+Фазы 0–9 реализованы и проверены на зелёном CI-контуре:
+- `cargo test --workspace` — 244 теста зелёные (в т.ч. `--features ingest` — 40);
+- `cargo fmt --all --check` и `cargo clippy --workspace -- -D warnings` — чисто;
+- фронт: `svelte-check` — 0 ошибок, `vitest` — 16 тестов, `vite build` — ок;
+- IPC-контракт согласован end-to-end: одни и те же 26 команд в `frontend/src/lib/mock.ts`,
+  `frontend/src/lib/ipc.ts` и регистрации `crates/app/src/tauri_app.rs`.
+
+Фиче-гейтед сборки (`ingest`, `live-trading`, `grpc` с vendored protoc) компилируются;
+`duckdb` собирается штатно (bundled C++ — долгая сборка), `tauri` требует webkit2gtk.
+
+Оставшиеся ниже пункты `⏳` — не незавершённая инженерия, а шаги, требующие
+десктопного окружения (упаковка MSI/NSIS) или полировки (полный dockview); они
+вне кросс-платформенного CI по конструкции.
+
 ## Фаза 0 — Фундамент ✅
 - ✅ Cargo workspace, члены: `finam-proto`, `domain`, `data`, `storage`, `app`.
 - ✅ Дисциплина слоёв (аналитика в `domain` без внешних зависимостей).
