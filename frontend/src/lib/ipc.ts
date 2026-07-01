@@ -14,10 +14,13 @@ import type {
   BondIssuerDto,
   BreadthDto,
   CrossAssetSummaryDto,
+  DatasetIdInput,
+  DatasetMetaDto,
   FillEventDto,
   FlowEdgeDto,
   FootprintBarDto,
   FutureGroupDto,
+  HistoryPlanInput,
   ImpliedVolDto,
   ImpliedVolInput,
   InstrumentDto,
@@ -45,6 +48,7 @@ import type {
   StrategyEvalInput,
   SubmitResultDto,
   TimeFrame,
+  TimeRangeDto,
   TopMoverDto,
   TradeDto,
   TurnoverByClassPoint,
@@ -180,6 +184,11 @@ export const ipc = {
   keyActivitySummary: (samples: KeyActivitySampleInput[], period?: KeyActivityPeriod) =>
     invoke<KeyActivitySummaryDto>("key_activity_summary", { samples, period }),
   keyActivityRules: () => invoke<KeyActivityRuleDto[]>("key_activity_rules"),
+
+  // ── Фаза 11 / Историзация ────────────────────────────────────────────────────
+  historyDatasets: () => invoke<DatasetMetaDto[]>("history_datasets"),
+  historyDelete: (id: DatasetIdInput) => invoke<boolean>("history_delete", { id }),
+  historyPlan: (input: HistoryPlanInput) => invoke<TimeRangeDto[]>("history_plan", { input }),
 };
 
 // Подписки на live-push события (каналы `trade:tick` / `orderbook:tick`).

@@ -39,6 +39,10 @@ use storage::schema;
 // Импорты и хелперы консольного smoke нужны только когда не собран ни Tauri-UI,
 // ни боевой live-режим (оба не вызывают демо-наполнение).
 #[cfg(not(any(feature = "tauri", feature = "live")))]
+use domain::history::{
+    DataSource as HistorySource, DatasetMeta as HistoryDatasetMeta, TimeRange as HistoryTimeRange,
+};
+#[cfg(not(any(feature = "tauri", feature = "live")))]
 use domain::{AssetClass, Bar, BookLevel, OrderBook, TimeFrame, Trade};
 #[cfg(not(any(feature = "tauri", feature = "live")))]
 use dto::{AlertRuleInput, OrderBookDto, TradeDto};
@@ -485,6 +489,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "  key_activity_summary(1h): fallback={}, строк в своде={}",
             ka_sum.fallback, ka_sum.row_count
+        );
+
+        // Фаза 11 — историзация: каталог датасетов + план дозагрузки.
+        state.history_register(HistoryDatasetMeta {
+            source: HistorySource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::D1,
+            range: HistoryTimeRange::new(0, 86_400 * 30),
+            bars: 30,
+            updated_ts: 86_400 * 30,
+        });
+        let plan = state.history_plan(&dto::HistoryPlanInput {
+            covered: vec![dto::TimeRangeDto {
+                from: 0,
+                till: 86_400 * 20,
+            }],
+            requested_from: 0,
+            requested_till: 86_400 * 30,
+        });
+        let removed = state
+            .history_delete(&dto::DatasetIdInput {
+                source: "finam".into(),
+                secid: "SBER".into(),
+                tf: "d1".into(),
+            })
+            .unwrap_or(false);
+        println!(
+            "  history: датасетов после удаления={}, дыр для дозагрузки={}, удалено={}",
+            state.history_datasets().len(),
+            plan.len(),
+            removed
         );
 
         Ok(())

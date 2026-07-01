@@ -10,6 +10,7 @@ import type {
   BondIssuerDto,
   BreadthDto,
   CrossAssetSummaryDto,
+  DatasetMetaDto,
   FlowEdgeDto,
   FootprintBarDto,
   FutureGroupDto,
@@ -37,6 +38,7 @@ import type {
   StrategyEvalDto,
   StrategyEvalInput,
   SubmitResultDto,
+  TimeRangeDto,
   TopMoverDto,
   TradeDto,
   TurnoverByClassPoint,
@@ -771,6 +773,33 @@ function mockKeyActivitySummary(
   return { text, period, rowCount: rows.length, fallback: true };
 }
 
+// ── Фаза 11 — Историзация: демо-каталог датасетов ────────────────────────────
+const DAY = 86_400;
+const mockDatasets: DatasetMetaDto[] = [
+  { source: "finam", secid: "SBER", tf: "d1", fromTs: 0, toTs: DAY * 365, bars: 365, updatedTs: DAY * 365, looksComplete: true },
+  { source: "finam", secid: "GAZP", tf: "h1", fromTs: 0, toTs: DAY * 90, bars: 90 * 9, updatedTs: DAY * 90, looksComplete: true },
+  { source: "moex_algo", secid: "SBER", tf: "m5", fromTs: 0, toTs: DAY * 30, bars: 30 * 78, updatedTs: DAY * 30, looksComplete: false },
+];
+
+function mockHistoryPlan(input: {
+  covered: { from: number; till: number }[];
+  requestedFrom: number;
+  requestedTill: number;
+}): TimeRangeDto[] {
+  // Нормализуем покрытие и вычитаем из запрошенного окна (как domain::missing_ranges).
+  const covered = [...input.covered].sort((a, b) => a.from - b.from);
+  const gaps: TimeRangeDto[] = [];
+  let cursor = input.requestedFrom;
+  for (const c of covered) {
+    if (c.till <= cursor) continue;
+    if (c.from > cursor) gaps.push({ from: cursor, till: Math.min(c.from, input.requestedTill) });
+    cursor = Math.max(cursor, c.till);
+    if (cursor >= input.requestedTill) break;
+  }
+  if (cursor < input.requestedTill) gaps.push({ from: cursor, till: input.requestedTill });
+  return gaps.filter((g) => g.till > g.from);
+}
+
 export async function handle<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "instruments":
@@ -878,6 +907,26 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
     }
     case "key_activity_rules":
       return keyActivityRules as unknown as T;
+
+    // ── Фаза 11 / Историзация ────────────────────────────────────────────────────
+    case "history_datasets":
+      return mockDatasets as unknown as T;
+    case "history_delete": {
+      const id = args?.id as { source: string; secid: string; tf: string };
+      const idx = mockDatasets.findIndex(
+        (d) => d.source === id.source && d.secid === id.secid && d.tf === id.tf,
+      );
+      if (idx >= 0) mockDatasets.splice(idx, 1);
+      return (idx >= 0) as unknown as T;
+    }
+    case "history_plan": {
+      const inp = args?.input as {
+        covered: { from: number; till: number }[];
+        requestedFrom: number;
+        requestedTill: number;
+      };
+      return mockHistoryPlan(inp) as unknown as T;
+    }
 
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);

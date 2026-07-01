@@ -966,6 +966,28 @@ pub fn key_activity_rules() -> Vec<KeyActivityRuleDto> {
         .collect()
 }
 
+// ── Фаза 11 — Историзация: планирование дозагрузки (чистая функция) ──────────
+
+use domain::history::{missing_ranges, TimeRange};
+
+use crate::dto::{HistoryPlanInput, TimeRangeDto};
+
+/// Спланировать дозагрузку истории: вернуть недостающие диапазоны запрошенного
+/// окна с учётом уже покрытых (чистая обёртка над `domain::history::missing_ranges`).
+/// Инкрементальная загрузка тянет только эти «дыры».
+pub fn history_plan(input: &HistoryPlanInput) -> Vec<TimeRangeDto> {
+    let covered: Vec<TimeRange> = input
+        .covered
+        .iter()
+        .map(|r| TimeRange::new(r.from, r.till))
+        .collect();
+    let requested = TimeRange::new(input.requested_from, input.requested_till);
+    missing_ranges(requested, &covered)
+        .iter()
+        .map(TimeRangeDto::from)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1605,5 +1627,33 @@ mod tests {
         assert!(sum.fallback);
         assert_eq!(sum.period, "1h");
         assert!(!sum.text.is_empty());
+    }
+
+    // ── Фаза 11 — Историзация ─────────────────────────────────────────────────
+
+    #[test]
+    fn history_plan_returns_gaps_only() {
+        // Запрошено [0, 100]; покрыто [0, 40] и [60, 80] → дыры [40,60] и [80,100].
+        let plan = history_plan(&crate::dto::HistoryPlanInput {
+            covered: vec![
+                crate::dto::TimeRangeDto { from: 0, till: 40 },
+                crate::dto::TimeRangeDto { from: 60, till: 80 },
+            ],
+            requested_from: 0,
+            requested_till: 100,
+        });
+        assert_eq!(plan.len(), 2);
+        assert_eq!((plan[0].from, plan[0].till), (40, 60));
+        assert_eq!((plan[1].from, plan[1].till), (80, 100));
+    }
+
+    #[test]
+    fn history_plan_full_coverage_is_empty() {
+        let plan = history_plan(&crate::dto::HistoryPlanInput {
+            covered: vec![crate::dto::TimeRangeDto { from: 0, till: 100 }],
+            requested_from: 10,
+            requested_till: 90,
+        });
+        assert!(plan.is_empty());
     }
 }

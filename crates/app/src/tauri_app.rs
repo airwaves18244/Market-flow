@@ -15,13 +15,14 @@ use domain::TimeFrame;
 
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
-    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FillEventDto, FlowEdgeDto, FootprintBarDto,
-    FutureGroupDto, ImpliedVolDto, ImpliedVolInput, InstrumentDto, KeyActivityRowDto,
-    KeyActivityRuleDto, KeyActivitySampleInput, KeyActivitySummaryDto, OptionPriceDto,
-    OptionPriceInput, OrderBookDto, OrderDto, OrderInput, PositionDto, RobotConfigInput,
-    RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SmileFitDto, SmileFitInput,
-    SmileModelDto, StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput, SubmitResultDto,
-    TopMoverDto, TradeDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, DatasetIdInput, DatasetMetaDto, FillEventDto,
+    FlowEdgeDto, FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
+    InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
+    KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderBookDto, OrderDto, OrderInput,
+    PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
+    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -262,6 +263,23 @@ fn key_activity_rules(state: State<AppState>) -> CmdResult<Vec<KeyActivityRuleDt
     Ok(state.key_activity_rules())
 }
 
+// ── Фаза 11 — Историзация: каталог датасетов ─────────────────────────────────
+
+#[tauri::command]
+fn history_datasets(state: State<AppState>) -> CmdResult<Vec<DatasetMetaDto>> {
+    Ok(state.history_datasets())
+}
+
+#[tauri::command]
+fn history_delete(state: State<AppState>, id: DatasetIdInput) -> CmdResult<bool> {
+    state.history_delete(&id)
+}
+
+#[tauri::command]
+fn history_plan(state: State<AppState>, input: HistoryPlanInput) -> CmdResult<Vec<TimeRangeDto>> {
+    Ok(state.history_plan(&input))
+}
+
 // ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
 
 #[tauri::command]
@@ -390,6 +408,9 @@ pub fn run() {
             key_activity,
             key_activity_summary,
             key_activity_rules,
+            history_datasets,
+            history_delete,
+            history_plan,
             submit_order,
             cancel_order,
             order_blotter,

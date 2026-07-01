@@ -458,3 +458,35 @@ export interface KeyActivityRuleDto {
   name: string;
   weight: number;
 }
+
+// ── Фаза 11 — Историзация: датасеты ──────────────────────────────────────────
+
+export type DataSource = "finam" | "moex_algo";
+
+export interface DatasetMetaDto {
+  source: string;
+  secid: string;
+  tf: string;
+  fromTs: number;
+  toTs: number;
+  bars: number;
+  updatedTs: number;
+  looksComplete: boolean;
+}
+
+export interface TimeRangeDto {
+  from: number;
+  till: number;
+}
+
+export interface HistoryPlanInput {
+  covered: TimeRangeDto[];
+  requestedFrom: number;
+  requestedTill: number;
+}
+
+export interface DatasetIdInput {
+  source: string;
+  secid: string;
+  tf: string;
+}

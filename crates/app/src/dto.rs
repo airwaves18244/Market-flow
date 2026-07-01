@@ -10,6 +10,7 @@ use domain::backtest::{
     BacktestConfig, BacktestReport, FillTiming, PerfMetrics, SimTrade, StrategyDescriptor,
 };
 use domain::delta::{FootprintBar, RobotConfig, RobotSignal};
+use domain::history::{DatasetMeta, TimeRange};
 use domain::keyactivity::{KeyActivityRow, Sample};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
 use domain::options::{Greeks, LegKind, OptionType, PriceModel, Side as OptSide};
@@ -1088,6 +1089,79 @@ pub struct KeyActivityRuleDto {
     pub id: String,
     pub name: String,
     pub weight: f64,
+}
+
+// ── Фаза 11 — Историзация: каталог локальных датасетов ───────────────────────
+
+/// Метаданные локального датасета истории (строка «Локальные датасеты»).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatasetMetaDto {
+    /// Код источника (`finam|moex_algo`).
+    pub source: String,
+    pub secid: String,
+    /// Код тайм-фрейма (`m1|m5|m15|h1|d1`).
+    pub tf: String,
+    pub from_ts: i64,
+    pub to_ts: i64,
+    pub bars: u64,
+    pub updated_ts: i64,
+    /// Полнота покрытия (без крупных дыр).
+    pub looks_complete: bool,
+}
+
+impl From<&DatasetMeta> for DatasetMetaDto {
+    fn from(m: &DatasetMeta) -> Self {
+        Self {
+            source: m.source.code().to_string(),
+            secid: m.secid.clone(),
+            tf: m.tf.code().to_string(),
+            from_ts: m.range.from,
+            to_ts: m.range.till,
+            bars: m.bars,
+            updated_ts: m.updated_ts,
+            looks_complete: m.looks_complete(),
+        }
+    }
+}
+
+/// Диапазон времени для фронта (план дозагрузки). Также вход (уже покрытые
+/// диапазоны в `HistoryPlanInput`), поэтому и сериализуется, и десериализуется.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeRangeDto {
+    pub from: i64,
+    pub till: i64,
+}
+
+impl From<&TimeRange> for TimeRangeDto {
+    fn from(r: &TimeRange) -> Self {
+        Self {
+            from: r.from,
+            till: r.till,
+        }
+    }
+}
+
+/// Вход планирования дозагрузки истории: что уже покрыто и что запрошено.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPlanInput {
+    /// Уже покрытые диапазоны (из каталога/стора).
+    pub covered: Vec<TimeRangeDto>,
+    pub requested_from: i64,
+    pub requested_till: i64,
+}
+
+/// Идентификатор датасета для удаления/рефреша.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatasetIdInput {
+    /// `finam|moex_algo`.
+    pub source: String,
+    pub secid: String,
+    /// `m1|m5|m15|h1|d1`.
+    pub tf: String,
 }
 
 #[cfg(test)]

@@ -107,3 +107,27 @@ describe("key activity ipc (mock mode)", () => {
     expect(rules[0]).toHaveProperty("id");
   });
 });
+
+describe("history ipc (mock mode)", () => {
+  it("lists demo datasets", async () => {
+    const ds = await ipc.historyDatasets();
+    expect(ds.length).toBeGreaterThan(0);
+    expect(ds[0]).toHaveProperty("secid");
+    expect(ds[0]).toHaveProperty("tf");
+  });
+
+  it("plans only the missing ranges", async () => {
+    const gaps = await ipc.historyPlan({
+      covered: [
+        { from: 0, till: 40 },
+        { from: 60, till: 80 },
+      ],
+      requestedFrom: 0,
+      requestedTill: 100,
+    });
+    expect(gaps).toEqual([
+      { from: 40, till: 60 },
+      { from: 80, till: 100 },
+    ]);
+  });
+});
