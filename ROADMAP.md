@@ -210,11 +210,30 @@
   (по умолчанию выключена; реальный gRPC `OrderService`/`AccountsService` —
   отдельная интеграция).
 
-## Фазы 10–12 — план (MOEX ALGO · Историзация · Опционы)
-Детальный TO-DO roadmap по новым фазам вынесен в отдельный файл:
-- **`ROADMAP_PHASE_10-12.md`** — фаза 10 (вкладка MOEX ALGO: Super Candles,
-  FUTOI, HI2, Mega Alerts, таблица Key Activity, LLM-итог), фаза 11 (историзация
-  для бэктестера из Finam/MOEX ALGO с локальным хранением), фаза 12 (опционы:
-  калькулятор, конструктор стратегий, улыбки MOEX/SABR/SVI/Каленкович).
-- **`design/claude-design-brief.md`** — бриф (EN) для Claude Design на прототип
-  фронта новых вкладок.
+## Фазы 10–12 — MOEX ALGO · Историзация · Опционы ✅ (кроме сетевых слоёв)
+Детальный план — в **`ROADMAP_PHASE_10-12.md`**; бриф фронта —
+`design/claude-design-brief.md`.
+
+Реализовано end-to-end на mock/локальных данных:
+- ✅ Доменные ядра: `domain::algo` (Super Candles, FUTOI, HI2, Mega Alerts),
+  `domain::keyactivity` (правила + LLM-промпт + fallback-свод),
+  `domain::history` (каталог датасетов, `missing_ranges`),
+  `domain::options` (Блэк-76/Башелье, греки, IV, улыбки MOEX/SABR/SVI/
+  Каленкович + калибратор Нелдера–Мида, конструктор стратегий).
+- ✅ App/IPC: обработчики + команды Tauri для всех трёх вкладок.
+- ✅ Frontend: вкладки **MOEX ALGO** (`MoexAlgoTab`, `KeyActivityTable`,
+  `KeyActivitySummary`), **Данные** (`HistoryTab`, `DatasetManager`),
+  **Опционы** (`OptionsTab`, `OptionCalculator`, `SmileView`/`SmileChart`,
+  `StrategyBuilder`, `PayoffChart`) — типизированный IPC + мок-режим.
+- ⏳ Сетевые слои: транспорт `data::moex` (ALGOPACK/ISS), `http`, `llm`;
+  таблицы `storage` для датасетов; блоки `(verify)` — фиксация контракта
+  ALGOPACK по живым фикстурам. Требуют egress-доступа/ключей.
+
+## V3 — целевое состояние (state of the art)
+Продуктовая спецификация и план работ следующего мажорного этапа:
+- **`V3/PRD.md`** — детальный PRD терминала уровня state of the art
+  (аналитика + торговля): рабочие пространства, скринер, ликвидность/heatmap,
+  боевой роутинг заявок, риск-менеджмент, walk-forward бэктест, LLM-копайлот,
+  производительность и NFR.
+- **`V3/TODO.md`** — декомпозиция на задачи с распределением по моделям Claude
+  (Fable 5 / Opus 4.8 / Sonnet 5 / Haiku 4.5) и уровням усилий.
