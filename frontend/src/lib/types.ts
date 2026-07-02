@@ -302,3 +302,191 @@ export interface SubmitResultDto {
   order: OrderDto;
   fills: FillEventDto[];
 }
+
+// ── Фаза 12 — Опционы ────────────────────────────────────────────────────────
+
+export type OptionKind = "call" | "put";
+export type PricingModel = "black76" | "bachelier";
+export type LegKind = "call" | "put" | "underlying";
+export type LegSide = "long" | "short";
+
+export interface GreeksDto {
+  delta: number;
+  gamma: number;
+  vega: number;
+  theta: number;
+  rho: number;
+}
+
+export interface OptionPriceInput {
+  forward: number;
+  strike: number;
+  t: number;
+  vol: number;
+  rate?: number | null;
+  kind: OptionKind;
+  model?: PricingModel | null;
+}
+
+export interface OptionPriceDto {
+  price: number;
+  greeks: GreeksDto;
+}
+
+export interface ImpliedVolInput {
+  marketPrice: number;
+  forward: number;
+  strike: number;
+  t: number;
+  rate?: number | null;
+  kind: OptionKind;
+  model?: PricingModel | null;
+}
+
+export interface ImpliedVolDto {
+  iv: number | null;
+}
+
+export interface SmilePointInput {
+  strike: number;
+  iv: number;
+  weight?: number | null;
+}
+
+export interface SmileFitInput {
+  model: string;
+  points: SmilePointInput[];
+  forward: number;
+  t: number;
+  curveLo?: number | null;
+  curveHi?: number | null;
+  curveSteps?: number | null;
+}
+
+export interface SmileParamDto {
+  name: string;
+  value: number;
+}
+
+export interface SmileCurvePoint {
+  strike: number;
+  iv: number;
+}
+
+export interface SmileFitDto {
+  model: string;
+  params: SmileParamDto[];
+  rmse: number;
+  curve: SmileCurvePoint[];
+}
+
+export interface SmileModelDto {
+  id: string;
+  name: string;
+}
+
+export interface StrategyLegInput {
+  kind: LegKind;
+  side: LegSide;
+  strike: number;
+  expiryT: number;
+  quantity: number;
+  entryPrice: number;
+}
+
+export interface StrategyEvalInput {
+  legs: StrategyLegInput[];
+  priceLo: number;
+  priceHi: number;
+  steps?: number | null;
+  forward: number;
+  vol: number;
+  rate?: number | null;
+  model?: PricingModel | null;
+}
+
+export interface StrategyPayoffPoint {
+  price: number;
+  pnlExpiry: number;
+  pnlNow: number;
+}
+
+export interface StrategyEvalDto {
+  breakevens: number[];
+  maxProfit: number | null;
+  maxLoss: number | null;
+  netCost: number;
+  payoff: StrategyPayoffPoint[];
+  greeks: GreeksDto;
+}
+
+// ── Фаза 10 — MOEX ALGO: Key Activity ────────────────────────────────────────
+
+export type KeyActivityPeriod = "1h" | "1d" | "1w" | "1m" | "3m";
+
+export interface KeyActivitySampleInput {
+  secid: string;
+  ts: number;
+  volume?: number;
+  volumeZ?: number;
+  disb?: number;
+  oiChange?: number;
+  hi2?: number;
+  spread?: number;
+  priceChange?: number;
+}
+
+export interface KeyActivityRowDto {
+  secid: string;
+  ruleId: string;
+  ruleName: string;
+  metric: string;
+  value: number;
+  ts: number;
+  importance: number;
+}
+
+export interface KeyActivitySummaryDto {
+  text: string;
+  period: string;
+  rowCount: number;
+  fallback: boolean;
+}
+
+export interface KeyActivityRuleDto {
+  id: string;
+  name: string;
+  weight: number;
+}
+
+// ── Фаза 11 — Историзация: датасеты ──────────────────────────────────────────
+
+export type DataSource = "finam" | "moex_algo";
+
+export interface DatasetMetaDto {
+  source: string;
+  secid: string;
+  tf: string;
+  fromTs: number;
+  toTs: number;
+  bars: number;
+  updatedTs: number;
+  looksComplete: boolean;
+}
+
+export interface TimeRangeDto {
+  from: number;
+  till: number;
+}
+
+export interface HistoryPlanInput {
+  covered: TimeRangeDto[];
+  requestedFrom: number;
+  requestedTill: number;
+}
+
+export interface DatasetIdInput {
+  source: string;
+  secid: string;
+  tf: string;
+}

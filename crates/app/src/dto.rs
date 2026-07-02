@@ -10,7 +10,10 @@ use domain::backtest::{
     BacktestConfig, BacktestReport, FillTiming, PerfMetrics, SimTrade, StrategyDescriptor,
 };
 use domain::delta::{FootprintBar, RobotConfig, RobotSignal};
+use domain::history::{DatasetMeta, TimeRange};
+use domain::keyactivity::{KeyActivityRow, Sample};
 use domain::metrics::alerts::{AlertCondition, AlertEvent, AlertRule};
+use domain::options::{Greeks, LegKind, OptionType, PriceModel, Side as OptSide};
 use domain::trading::{Fill, Order, OrderType, Position, TimeInForce};
 use domain::{BookLevel, Instrument, OrderBook, Side, Trade};
 use storage::store::TurnoverSnapshot;
@@ -751,6 +754,414 @@ impl PositionDto {
             avg_price: pos.avg_price,
         }
     }
+}
+
+// ── Фаза 12 — Опционы (калькулятор · улыбка · конструктор стратегий) ─────────
+
+/// Разобрать тип опциона из кода фронта (`call|put`).
+fn parse_option_type(code: &str) -> Option<OptionType> {
+    match code {
+        "call" => Some(OptionType::Call),
+        "put" => Some(OptionType::Put),
+        _ => None,
+    }
+}
+
+/// Разобрать модель ценообразования (`black76|bachelier`, по умолчанию Блэк-76).
+pub(crate) fn parse_price_model(code: Option<&str>) -> PriceModel {
+    match code {
+        Some("bachelier") => PriceModel::Bachelier,
+        _ => PriceModel::Black76,
+    }
+}
+
+/// Греки опциона/портфеля для фронта.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GreeksDto {
+    pub delta: f64,
+    pub gamma: f64,
+    pub vega: f64,
+    pub theta: f64,
+    pub rho: f64,
+}
+
+impl From<Greeks> for GreeksDto {
+    fn from(g: Greeks) -> Self {
+        Self {
+            delta: g.delta,
+            gamma: g.gamma,
+            vega: g.vega,
+            theta: g.theta,
+            rho: g.rho,
+        }
+    }
+}
+
+/// Вход калькулятора цены/греков опциона.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionPriceInput {
+    /// Форвард базового актива.
+    pub forward: f64,
+    pub strike: f64,
+    /// Время до экспирации в годах.
+    pub t: f64,
+    /// Волатильность (доля для Блэка, абсолютная для Башелье).
+    pub vol: f64,
+    /// Ставка дисконта (по умолчанию 0 — MOEX-маржируемые).
+    pub rate: Option<f64>,
+    /// `call|put`.
+    pub kind: String,
+    /// `black76|bachelier`.
+    pub model: Option<String>,
+}
+
+impl OptionPriceInput {
+    pub fn parse_kind(&self) -> Option<OptionType> {
+        parse_option_type(&self.kind)
+    }
+    pub fn parse_model(&self) -> PriceModel {
+        parse_price_model(self.model.as_deref())
+    }
+    pub fn rate_or_zero(&self) -> f64 {
+        self.rate.unwrap_or(0.0)
+    }
+}
+
+/// Результат калькулятора: теоретическая цена + греки.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionPriceDto {
+    pub price: f64,
+    pub greeks: GreeksDto,
+}
+
+/// Вход решателя подразумеваемой волатильности.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpliedVolInput {
+    pub market_price: f64,
+    pub forward: f64,
+    pub strike: f64,
+    pub t: f64,
+    pub rate: Option<f64>,
+    pub kind: String,
+    pub model: Option<String>,
+}
+
+impl ImpliedVolInput {
+    pub fn parse_kind(&self) -> Option<OptionType> {
+        parse_option_type(&self.kind)
+    }
+}
+
+/// Результат решателя IV (`None` → недостижимо положительной волатильностью).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpliedVolDto {
+    pub iv: Option<f64>,
+}
+
+/// Рыночная точка улыбки (вход калибровки).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmilePointInput {
+    pub strike: f64,
+    pub iv: f64,
+    /// Вес точки (ликвидность/OI); по умолчанию 1.
+    pub weight: Option<f64>,
+}
+
+/// Вход калибровки улыбки.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileFitInput {
+    /// `moex|sabr|svi|kalenkovich`.
+    pub model: String,
+    pub points: Vec<SmilePointInput>,
+    pub forward: f64,
+    pub t: f64,
+    /// Границы страйков для генерации кривой наложения (по умолчанию — по точкам).
+    pub curve_lo: Option<f64>,
+    pub curve_hi: Option<f64>,
+    /// Число точек кривой (по умолчанию 41).
+    pub curve_steps: Option<usize>,
+}
+
+/// Именованный параметр подгонки улыбки.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileParamDto {
+    pub name: String,
+    pub value: f64,
+}
+
+/// Точка кривой улыбки (страйк → IV).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileCurvePoint {
+    pub strike: f64,
+    pub iv: f64,
+}
+
+/// Результат калибровки улыбки: параметры, RMSE, сглаженная кривая наложения.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileFitDto {
+    /// `moex|sabr|svi|kalenkovich`.
+    pub model: String,
+    pub params: Vec<SmileParamDto>,
+    pub rmse: f64,
+    pub curve: Vec<SmileCurvePoint>,
+}
+
+/// Нога опционной стратегии (вход конструктора).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyLegInput {
+    /// `call|put|underlying`.
+    pub kind: String,
+    /// `long|short`.
+    pub side: String,
+    pub strike: f64,
+    pub expiry_t: f64,
+    pub quantity: f64,
+    pub entry_price: f64,
+}
+
+impl StrategyLegInput {
+    pub fn parse_kind(&self) -> Option<LegKind> {
+        match self.kind.as_str() {
+            "call" => Some(LegKind::Call),
+            "put" => Some(LegKind::Put),
+            "underlying" => Some(LegKind::Underlying),
+            _ => None,
+        }
+    }
+    pub fn parse_side(&self) -> Option<OptSide> {
+        match self.side.as_str() {
+            "long" => Some(OptSide::Long),
+            "short" => Some(OptSide::Short),
+            _ => None,
+        }
+    }
+}
+
+/// Вход оценки стратегии.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyEvalInput {
+    pub legs: Vec<StrategyLegInput>,
+    /// Границы диаграммы payoff (цена базового).
+    pub price_lo: f64,
+    pub price_hi: f64,
+    /// Число точек диаграммы (по умолчанию 61).
+    pub steps: Option<usize>,
+    /// Форвард/волатильность/модель для текущего P&L и агрегированных греков.
+    pub forward: f64,
+    pub vol: f64,
+    pub rate: Option<f64>,
+    /// `black76|bachelier`.
+    pub model: Option<String>,
+}
+
+/// Точка диаграммы payoff: P&L на экспирацию и текущий.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyPayoffPoint {
+    pub price: f64,
+    pub pnl_expiry: f64,
+    pub pnl_now: f64,
+}
+
+/// Результат оценки стратегии для фронта.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyEvalDto {
+    pub breakevens: Vec<f64>,
+    pub max_profit: Option<f64>,
+    pub max_loss: Option<f64>,
+    pub net_cost: f64,
+    pub payoff: Vec<StrategyPayoffPoint>,
+    pub greeks: GreeksDto,
+}
+
+/// Описание модели улыбки для UI (селектор моделей).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmileModelDto {
+    /// Код: `moex|sabr|svi|kalenkovich`.
+    pub id: String,
+    /// Человекочитаемое имя.
+    pub name: String,
+}
+
+// ── Фаза 10 — MOEX ALGO: Key Activity (ключевая активность) ──────────────────
+
+/// Образец метрик инструмента за период (вход движка Key Activity). Приходит с
+/// фронта в camelCase; в боевом режиме собирается из датасетов ALGOPACK.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivitySampleInput {
+    pub secid: String,
+    pub ts: i64,
+    #[serde(default)]
+    pub volume: f64,
+    #[serde(default)]
+    pub volume_z: f64,
+    #[serde(default)]
+    pub disb: f64,
+    #[serde(default)]
+    pub oi_change: f64,
+    #[serde(default)]
+    pub hi2: f64,
+    #[serde(default)]
+    pub spread: f64,
+    #[serde(default)]
+    pub price_change: f64,
+}
+
+impl From<&KeyActivitySampleInput> for Sample {
+    fn from(s: &KeyActivitySampleInput) -> Self {
+        Sample {
+            secid: s.secid.clone(),
+            asset_class: None,
+            ts: s.ts,
+            volume: s.volume,
+            volume_z: s.volume_z,
+            disb: s.disb,
+            oi_change: s.oi_change,
+            hi2: s.hi2,
+            spread: s.spread,
+            price_change: s.price_change,
+        }
+    }
+}
+
+/// Строка таблицы «Ключевая активность» для фронта.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivityRowDto {
+    pub secid: String,
+    pub rule_id: String,
+    pub rule_name: String,
+    /// Человекочитаемая подпись первичной метрики правила.
+    pub metric: String,
+    pub value: f64,
+    pub ts: i64,
+    pub importance: f64,
+}
+
+impl From<&KeyActivityRow> for KeyActivityRowDto {
+    fn from(r: &KeyActivityRow) -> Self {
+        Self {
+            secid: r.secid.clone(),
+            rule_id: r.rule_id.clone(),
+            rule_name: r.rule_name.clone(),
+            metric: r.metric.label().to_string(),
+            value: r.value,
+            ts: r.ts,
+            importance: r.importance,
+        }
+    }
+}
+
+/// Итоговое ИИ-резюме по ключевой активности (панель «ИТОГО»). В отсутствие
+/// LLM-ключа/сети — локально собранный текстовый свод (`fallback`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivitySummaryDto {
+    /// Текст резюме (markdown/plain).
+    pub text: String,
+    /// Подпись периода (`1h|1d|1w|1m|3m`).
+    pub period: String,
+    /// Число строк ключевой активности, попавших в свод.
+    pub row_count: usize,
+    /// Локальный свод (`true`) vs. ответ LLM (`false`).
+    pub fallback: bool,
+}
+
+/// Описание правила Key Activity по умолчанию (для UI-настроек/справки).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyActivityRuleDto {
+    pub id: String,
+    pub name: String,
+    pub weight: f64,
+}
+
+// ── Фаза 11 — Историзация: каталог локальных датасетов ───────────────────────
+
+/// Метаданные локального датасета истории (строка «Локальные датасеты»).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatasetMetaDto {
+    /// Код источника (`finam|moex_algo`).
+    pub source: String,
+    pub secid: String,
+    /// Код тайм-фрейма (`m1|m5|m15|h1|d1`).
+    pub tf: String,
+    pub from_ts: i64,
+    pub to_ts: i64,
+    pub bars: u64,
+    pub updated_ts: i64,
+    /// Полнота покрытия (без крупных дыр).
+    pub looks_complete: bool,
+}
+
+impl From<&DatasetMeta> for DatasetMetaDto {
+    fn from(m: &DatasetMeta) -> Self {
+        Self {
+            source: m.source.code().to_string(),
+            secid: m.secid.clone(),
+            tf: m.tf.code().to_string(),
+            from_ts: m.range.from,
+            to_ts: m.range.till,
+            bars: m.bars,
+            updated_ts: m.updated_ts,
+            looks_complete: m.looks_complete(),
+        }
+    }
+}
+
+/// Диапазон времени для фронта (план дозагрузки). Также вход (уже покрытые
+/// диапазоны в `HistoryPlanInput`), поэтому и сериализуется, и десериализуется.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeRangeDto {
+    pub from: i64,
+    pub till: i64,
+}
+
+impl From<&TimeRange> for TimeRangeDto {
+    fn from(r: &TimeRange) -> Self {
+        Self {
+            from: r.from,
+            till: r.till,
+        }
+    }
+}
+
+/// Вход планирования дозагрузки истории: что уже покрыто и что запрошено.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryPlanInput {
+    /// Уже покрытые диапазоны (из каталога/стора).
+    pub covered: Vec<TimeRangeDto>,
+    pub requested_from: i64,
+    pub requested_till: i64,
+}
+
+/// Идентификатор датасета для удаления/рефреша.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatasetIdInput {
+    /// `finam|moex_algo`.
+    pub source: String,
+    pub secid: String,
+    /// `m1|m5|m15|h1|d1`.
+    pub tf: String,
 }
 
 #[cfg(test)]

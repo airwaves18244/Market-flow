@@ -14,11 +14,23 @@ import type {
   BondIssuerDto,
   BreadthDto,
   CrossAssetSummaryDto,
+  DatasetIdInput,
+  DatasetMetaDto,
   FillEventDto,
   FlowEdgeDto,
   FootprintBarDto,
   FutureGroupDto,
+  HistoryPlanInput,
+  ImpliedVolDto,
+  ImpliedVolInput,
   InstrumentDto,
+  KeyActivityPeriod,
+  KeyActivityRowDto,
+  KeyActivityRuleDto,
+  KeyActivitySampleInput,
+  KeyActivitySummaryDto,
+  OptionPriceDto,
+  OptionPriceInput,
   OrderBookDto,
   OrderDto,
   OrderInput,
@@ -28,9 +40,15 @@ import type {
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  SmileFitDto,
+  SmileFitInput,
+  SmileModelDto,
   StrategyDescriptorDto,
+  StrategyEvalDto,
+  StrategyEvalInput,
   SubmitResultDto,
   TimeFrame,
+  TimeRangeDto,
   TopMoverDto,
   TradeDto,
   TurnoverByClassPoint,
@@ -151,6 +169,26 @@ export const ipc = {
   orderBlotter: () => invoke<OrderDto[]>("order_blotter"),
   positions: () => invoke<PositionDto[]>("positions"),
   account: () => invoke<AccountDto>("account"),
+
+  // ── Фаза 12 / Опционы ───────────────────────────────────────────────────────
+  listSmileModels: () => invoke<SmileModelDto[]>("list_smile_models"),
+  optionPrice: (input: OptionPriceInput) => invoke<OptionPriceDto>("option_price", { input }),
+  optionImpliedVol: (input: ImpliedVolInput) =>
+    invoke<ImpliedVolDto>("option_implied_vol", { input }),
+  smileFit: (input: SmileFitInput) => invoke<SmileFitDto>("smile_fit", { input }),
+  strategyEval: (input: StrategyEvalInput) => invoke<StrategyEvalDto>("strategy_eval", { input }),
+
+  // ── Фаза 10 / MOEX ALGO: Key Activity ───────────────────────────────────────
+  keyActivity: (samples: KeyActivitySampleInput[], period?: KeyActivityPeriod) =>
+    invoke<KeyActivityRowDto[]>("key_activity", { samples, period }),
+  keyActivitySummary: (samples: KeyActivitySampleInput[], period?: KeyActivityPeriod) =>
+    invoke<KeyActivitySummaryDto>("key_activity_summary", { samples, period }),
+  keyActivityRules: () => invoke<KeyActivityRuleDto[]>("key_activity_rules"),
+
+  // ── Фаза 11 / Историзация ────────────────────────────────────────────────────
+  historyDatasets: () => invoke<DatasetMetaDto[]>("history_datasets"),
+  historyDelete: (id: DatasetIdInput) => invoke<boolean>("history_delete", { id }),
+  historyPlan: (input: HistoryPlanInput) => invoke<TimeRangeDto[]>("history_plan", { input }),
 };
 
 // Подписки на live-push события (каналы `trade:tick` / `orderbook:tick`).

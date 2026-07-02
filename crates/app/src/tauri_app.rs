@@ -15,10 +15,13 @@ use domain::TimeFrame;
 
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
-    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FillEventDto, FlowEdgeDto, FootprintBarDto,
-    FutureGroupDto, InstrumentDto, OrderBookDto, OrderDto, OrderInput, PositionDto,
-    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    StrategyDescriptorDto, SubmitResultDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
+    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, DatasetIdInput, DatasetMetaDto, FillEventDto,
+    FlowEdgeDto, FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
+    InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
+    KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderBookDto, OrderDto, OrderInput,
+    PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
+    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
+    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
     TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
@@ -208,6 +211,75 @@ fn robot_scan(
         .map_err(|e| e.to_string())
 }
 
+// ── Фаза 12 — Опционы ────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_smile_models(state: State<AppState>) -> CmdResult<Vec<SmileModelDto>> {
+    Ok(state.list_smile_models())
+}
+
+#[tauri::command]
+fn option_price(state: State<AppState>, input: OptionPriceInput) -> CmdResult<OptionPriceDto> {
+    state.option_price(&input)
+}
+
+#[tauri::command]
+fn option_implied_vol(state: State<AppState>, input: ImpliedVolInput) -> CmdResult<ImpliedVolDto> {
+    state.option_implied_vol(&input)
+}
+
+#[tauri::command]
+fn smile_fit(state: State<AppState>, input: SmileFitInput) -> CmdResult<SmileFitDto> {
+    state.smile_fit(&input)
+}
+
+#[tauri::command]
+fn strategy_eval(state: State<AppState>, input: StrategyEvalInput) -> CmdResult<StrategyEvalDto> {
+    state.strategy_eval(&input)
+}
+
+// ── Фаза 10 — MOEX ALGO: Key Activity ────────────────────────────────────────
+
+#[tauri::command]
+fn key_activity(
+    state: State<AppState>,
+    samples: Vec<KeyActivitySampleInput>,
+    period: Option<String>,
+) -> CmdResult<Vec<KeyActivityRowDto>> {
+    Ok(state.key_activity(&samples, period.as_deref()))
+}
+
+#[tauri::command]
+fn key_activity_summary(
+    state: State<AppState>,
+    samples: Vec<KeyActivitySampleInput>,
+    period: Option<String>,
+) -> CmdResult<KeyActivitySummaryDto> {
+    Ok(state.key_activity_summary(&samples, period.as_deref()))
+}
+
+#[tauri::command]
+fn key_activity_rules(state: State<AppState>) -> CmdResult<Vec<KeyActivityRuleDto>> {
+    Ok(state.key_activity_rules())
+}
+
+// ── Фаза 11 — Историзация: каталог датасетов ─────────────────────────────────
+
+#[tauri::command]
+fn history_datasets(state: State<AppState>) -> CmdResult<Vec<DatasetMetaDto>> {
+    Ok(state.history_datasets())
+}
+
+#[tauri::command]
+fn history_delete(state: State<AppState>, id: DatasetIdInput) -> CmdResult<bool> {
+    state.history_delete(&id)
+}
+
+#[tauri::command]
+fn history_plan(state: State<AppState>, input: HistoryPlanInput) -> CmdResult<Vec<TimeRangeDto>> {
+    Ok(state.history_plan(&input))
+}
+
 // ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
 
 #[tauri::command]
@@ -328,6 +400,17 @@ pub fn run() {
             run_backtest,
             delta_footprint,
             robot_scan,
+            list_smile_models,
+            option_price,
+            option_implied_vol,
+            smile_fit,
+            strategy_eval,
+            key_activity,
+            key_activity_summary,
+            key_activity_rules,
+            history_datasets,
+            history_delete,
+            history_plan,
             submit_order,
             cancel_order,
             order_blotter,

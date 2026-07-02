@@ -215,33 +215,36 @@ HTTP-слой.
 - [ ] `10.5.4` Запросы чтения для модулей вкладки (по тикеру/периоду/датасету).
 
 ### 10.6 — App/IPC (`app`)
-- [ ] `10.6.1` DTO (camelCase) в `dto.rs`: `TradestatsDto`, `FutoiDto`, `Hi2Dto`,
-  `MegaAlertDto`, `KeyActivityRowDto`, `KeyActivitySummaryDto` (LLM-текст +
-  метаданные), `KeyActivityRuleInput`.
-- [ ] `10.6.2` Обработчики в `api.rs` + методы `AppState`: `algo_tradestats`,
-  `algo_futoi`, `algo_hi2`, `algo_mega_alerts`, `key_activity(period, rules?)`,
-  `key_activity_summary(period, rules?)` (вызывает LLM), `key_activity_rules_get/set`.
-- [ ] `10.6.3` Tauri-команды (`tauri_app.rs`) для всех обработчиков (фича `tauri`).
+- ⏳ `10.6.1` DTO (camelCase) в `dto.rs`: **сделаны** `KeyActivitySampleInput`,
+  `KeyActivityRowDto`, `KeyActivitySummaryDto`, `KeyActivityRuleDto`. Остаются
+  `TradestatsDto`/`FutoiDto`/`Hi2Dto`/`MegaAlertDto` (с транспортом `data::moex`).
+- ⏳ `10.6.2` Обработчики в `api.rs` + методы `AppState`: **сделаны**
+  `key_activity(samples, period)`, `key_activity_summary(...)` (локальный
+  fallback), `key_activity_rules()` — чистые, покрыты тестами. Остаются
+  `algo_tradestats/futoi/hi2/mega_alerts` (нужен источник данных 10.1/10.5) и
+  LLM-вызов в summary (10.4).
+- [x] `10.6.3` Tauri-команды (`tauri_app.rs`) для реализованных обработчиков
+  Key Activity (фича `tauri`).
 - [ ] `10.6.4` Ингест ALGOPACK в планировщик (`app::ingest`/`live`) — опрос
   ALGOPACK по вотчлисту под лимитом (фича `live`/`moex`).
-- [ ] `10.6.5` Мок-данные в `frontend/src/lib/mock.ts` для всех новых команд
-  (UI работает в браузере без бэкенда — как сейчас).
+- [x] `10.6.5` Мок-данные в `frontend/src/lib/mock.ts` для команд Key Activity
+  (UI работает в браузере без бэкенда). Остальные — по мере добавления команд.
 
 ### 10.7 — Frontend: вкладка «MOEX ALGO»
-- [ ] `10.7.1` `tabs/MoexAlgoTab.svelte` — лэйаут с под-модулями (саб-навигация
-  или секции): **Super Candles**, **FUTOI**, **HI2**, **Mega Alerts**,
-  **Key Activity**, **TOTAL (LLM)**.
+- ⏳ `10.7.1` `MoexAlgoTab.svelte` — саб-навигация по модулям; **Key Activity** и
+  **TOTAL** реализованы, остальные (Super Candles/FUTOI/HI2/Mega Alerts) — плейсхолдеры
+  до подключения транспорта `data::moex`. Подключена вкладкой «MOEX ALGO».
 - [ ] `10.7.2` `SuperCandles.svelte` — расширенный свечной/объёмный график
   (Lightweight Charts) + VWAP-полоса + индикатор disb; таблица метрик.
 - [ ] `10.7.3` `Futoi.svelte` — график нетто-позиций физ/юр (long/short), таблица.
 - [ ] `10.7.4` `Hi2Concentration.svelte` — временной ряд концентрации + ранкинг
   тикеров (ECharts).
 - [ ] `10.7.5` `MegaAlerts.svelte` — лента сигналов (тип, тикер, метрика, время).
-- [ ] `10.7.6` `KeyActivityTable.svelte` — таблица «Key activity» с селектором
+- [x] `10.7.6` `KeyActivityTable.svelte` — таблица «Key activity» с селектором
   периода (`1h/1d/1w/1m/3m`, дефолт `1h`), фильтрами по правилу/тикеру.
-- [ ] `10.7.7` `KeyActivitySummary.svelte` — панель «TOTAL»: текст LLM-резюме,
-  кнопка «обновить», состояние загрузки/ошибки/без-ключа (fallback-свод).
-- [ ] `10.7.8` Типы в `lib/types.ts` + методы в `lib/ipc.ts` для новых команд.
+- [x] `10.7.7` `KeyActivitySummary.svelte` — панель «TOTAL»: текст свода,
+  кнопка «Обновить», состояния загрузки/без-ключа (локальный fallback).
+- [x] `10.7.8` Типы в `lib/types.ts` + методы в `lib/ipc.ts` для команд Key Activity.
 
 ### 10.8 — Настройки (вкладка Settings, раздел «MOEX ALGO / Key Activity / LLM»)
 - [ ] `10.8.1` Подключение MOEX Passport (статус «секрет задан»), выбор markets,
@@ -254,11 +257,13 @@ HTTP-слой.
 - [ ] `10.8.4` Период анализа по умолчанию.
 
 ### 10.9 — Тесты/CI/доки
-- [ ] `10.9.1` `domain`: юнит-тесты аналитики, Mega Alerts, Key Activity,
-  сборки промпта (все без сети).
+- [x] `10.9.1` `domain`: юнит-тесты аналитики, Mega Alerts, Key Activity,
+  сборки промпта (все без сети) — крейт `domain`.
 - [ ] `10.9.2` `data`: парсер ISS на фикстурах, оркестрация на фейке.
-- [ ] `10.9.3` `app`: DTO-маппинг, обработчики на `MemStore`.
-- [ ] `10.9.4` Обновить `ROADMAP.md`/`SUMMARY.md` (отметки фазы 10).
+- ⏳ `10.9.3` `app`: обработчики Key Activity покрыты юнит-тестами (`api.rs`);
+  фронт — `frontend/src/lib/options.test.ts` (мок-режим). Остальные обработчики —
+  по мере добавления.
+- ⏳ `10.9.4` Обновить `ROADMAP.md`/`SUMMARY.md` — отметки Key Activity внесены.
 
 ---
 
@@ -313,18 +318,22 @@ API** (gRPC bars, уже есть) и **MOEX ALGO** (REST, из фазы 10). П
 - [ ] `11.3.2` Прогресс/события в UI (как `trade:tick`): `history:progress`
   (тикер/TF/проценты), `history:done`, `history:error`.
 - [ ] `11.3.3` Параллелизм с уважением к лимитам API (очередь задач, отмена).
-- [ ] `11.3.4` IPC-команды + DTO: `history_load(req)`, `history_cancel(id)`,
-  `history_datasets()`, `history_delete(id)`; Tauri-обёртки; мок-данные.
+- ⏳ `11.3.4` IPC-команды + DTO: **сделаны** `history_datasets()`,
+  `history_delete(id)`, `history_plan(req)` (каталог в `AppState`,
+  `DatasetMetaDto`/`TimeRangeDto`/`HistoryPlanInput`/`DatasetIdInput`,
+  Tauri-обёртки, мок-данные, тесты). Остаются `history_load`/`history_cancel`
+  (нужен сетевой загрузчик 11.1/11.3.1).
 
-### 11.4 — Frontend: вкладка «Бэктестер» (загрузка данных)
+### 11.4 — Frontend: вкладка «Данные» (загрузка/менеджмент истории)
 > В фазе 11 — слой данных и UI загрузки/менеджмента. Сам движок бэктеста —
 > следующая итерация; здесь готовим feed-контракт.
-- [ ] `11.4.1` `tabs/BacktesterTab.svelte` (секция «Исторические данные»):
-  выбор источника, тикер/набор тикеров, мультиселект TF, диапазон дат, кнопка
-  «Загрузить», прогресс-бар(ы).
-- [ ] `11.4.2` `DatasetManager.svelte`: таблица локальных датасетов (источник/
-  тикер/TF/диапазон/размер/обновлено) с действиями рефреш/удалить.
-- [ ] `11.4.3` Типы/ipc для history-команд; подписки на `history:*` события.
+- [x] `11.4.1` `HistoryTab.svelte` (вкладка «Данные»): выбор источника,
+  инструмент, мультиселект TF, диапазон дат, кнопка «Загрузить», прогресс-бары
+  (в мок-режиме — симуляция; в бою — события `history:progress`).
+- [x] `11.4.2` `DatasetManager.svelte`: таблица локальных датасетов (источник/
+  тикер/TF/диапазон/бары/размер/обновлено) с действием «удалить».
+- ⏳ `11.4.3` Типы/ipc для history-команд — сделаны (`historyDatasets`/
+  `historyDelete`/`historyPlan`). Подписки на `history:*` события — с загрузчиком.
 - [ ] `11.4.4` Превью загруженного датасета (свечи) для верификации.
 
 ### 11.5 — Контракт фида для бэктестера
@@ -414,25 +423,30 @@ API** (gRPC bars, уже есть) и **MOEX ALGO** (REST, из фазы 10). П
   миграция, идемпотентность.
 
 ### 12.6 — App/IPC (`app`)
-- [ ] `12.6.1` DTO: `OptionQuoteDto`, `GreeksDto`, `SmilePointDto`,
-  `SmileFitDto` (модель+параметры+RMSE), `StrategyLegInput`, `StrategyResultDto`
-  (payoff, греки, безубыток).
-- [ ] `12.6.2` Обработчики/AppState: `option_board(underlying)`,
-  `option_price(req)`, `option_greeks(req)`, `smile_fit(board, model)`,
-  `strategy_eval(legs)`; Tauri-обёртки; мок-данные.
+- [x] `12.6.1` DTO (`crates/app/src/dto.rs`): `GreeksDto`, `OptionPriceInput`/
+  `OptionPriceDto`, `ImpliedVolInput`/`ImpliedVolDto`, `SmilePointInput`,
+  `SmileFitInput`/`SmileFitDto` (модель+параметры+RMSE+кривая),
+  `StrategyLegInput`, `StrategyEvalInput`/`StrategyEvalDto` (payoff, греки,
+  безубыток), `SmileModelDto`. `OptionQuoteDto` (котировки доски) — с фазой 12.4.
+- [x] `12.6.2` Обработчики/AppState + Tauri-обёртки + мок-данные:
+  `option_price(req)`, `option_implied_vol(req)`, `smile_fit(points, model)`,
+  `strategy_eval(legs)`, `list_smile_models()` (`api.rs`/`state.rs`/`tauri_app.rs`,
+  мок в `frontend/src/lib/mock.ts`). Чистые (без сети), покрыты тестами `app`.
+  `option_board(underlying)` (загрузка живой доски) — с транспортом 12.4.
 
 ### 12.7 — Frontend: вкладка «Опционы»
-- [ ] `12.7.1` `tabs/OptionsTab.svelte` — секции «Калькулятор», «Улыбка»,
-  «Конструктор стратегий».
-- [ ] `12.7.2` `OptionCalculator.svelte` — ввод параметров → цена/греки/IV;
+- [x] `12.7.1` `OptionsTab.svelte` — саб-навигация: «Калькулятор», «Улыбка»,
+  «Конструктор стратегий». Подключена вкладкой «Опционы» в `App.svelte`.
+- [x] `12.7.2` `OptionCalculator.svelte` — ввод параметров → цена/греки/IV;
   таблица результатов.
-- [ ] `12.7.3` `SmileChart.svelte` (ECharts) — рыночные точки IV + наложение
-  выбранных моделей (MOEX/SABR/SVI/Каленкович), переключатель моделей,
-  отображение параметров и RMSE.
-- [ ] `12.7.4` `StrategyBuilder.svelte` — добавление ног, шаблоны, диаграмма
-  payoff (P&L vs цена), таблица агрегированных греков и точек безубытка.
-- [ ] `12.7.5` `GreeksTable.svelte` / профиль риска (тепловая карта по цене/
-  времени). Типы/ipc.
+- [x] `12.7.3` `SmileChart.svelte` + `SmileView.svelte` (ECharts) — рыночные
+  точки IV + наложение калиброванной модели (MOEX/SABR/SVI/Каленкович),
+  переключатель моделей, параметры и RMSE.
+- [x] `12.7.4` `StrategyBuilder.svelte` + `PayoffChart.svelte` — добавление ног,
+  шаблоны (спред/стрэддл/бабочка…), диаграмма payoff (экспирация + текущий),
+  агрегированные греки и точки безубытка.
+- [x] `12.7.5` Таблица греков в конструкторе; типы (`lib/types.ts`) и IPC
+  (`lib/ipc.ts`). Профиль риска (тепловая карта по цене/времени) — позже.
 
 ### 12.8 — Настройки (вкладка Settings, раздел «Опционы»)
 - [ ] `12.8.1` Модель ценообразования (Black-76 | Bachelier), `r` (дефолт 0 для
@@ -440,9 +454,11 @@ API** (gRPC bars, уже есть) и **MOEX ALGO** (REST, из фазы 10). П
   калибровки (веса/диапазоны), единицы греков.
 
 ### 12.9 — Тесты/доки
-- [ ] `12.9.1` `domain`: ценообразование, греки, IV-solver, калибровка улыбок,
-  стратегии — без сети, по известным эталонам.
-- [ ] `12.9.2` `data`/`app`: парсинг доски на фикстурах, DTO-маппинг.
+- [x] `12.9.1` `domain`: ценообразование, греки, IV-solver, калибровка улыбок,
+  стратегии — без сети, по известным эталонам (крейт `domain`).
+- [x] `12.9.2` `app`: DTO-маппинг и обработчики опционов (цена/греки/IV/улыбка/
+  стратегия) — юнит-тесты в `crates/app/src/api.rs`; фронт — `frontend/src/lib/
+  options.test.ts` (мок-режим). `data`: парсинг доски на фикстурах — с фазой 12.4.
 - [ ] `12.9.3` `docs/options-smile-models.html` финализирован (форма улыбки MOEX
   выверена по методике); обновить `ROADMAP.md`/`SUMMARY.md`.
 

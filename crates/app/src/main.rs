@@ -39,6 +39,10 @@ use storage::schema;
 // Импорты и хелперы консольного smoke нужны только когда не собран ни Tauri-UI,
 // ни боевой live-режим (оба не вызывают демо-наполнение).
 #[cfg(not(any(feature = "tauri", feature = "live")))]
+use domain::history::{
+    DataSource as HistorySource, DatasetMeta as HistoryDatasetMeta, TimeRange as HistoryTimeRange,
+};
+#[cfg(not(any(feature = "tauri", feature = "live")))]
 use domain::{AssetClass, Bar, BookLevel, OrderBook, TimeFrame, Trade};
 #[cfg(not(any(feature = "tauri", feature = "live")))]
 use dto::{AlertRuleInput, OrderBookDto, TradeDto};
@@ -377,6 +381,146 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             buyer_initiated: Some(true),
         });
         println!("  sim on_trade: {} исполнений по ленте", sim_fills.len());
+
+        // Фаза 12 — опционы: калькулятор, калибровка улыбки, стратегия.
+        let opt = state.option_price(&dto::OptionPriceInput {
+            forward: 100.0,
+            strike: 100.0,
+            t: 0.25,
+            vol: 0.3,
+            rate: None,
+            kind: "call".into(),
+            model: None,
+        })?;
+        println!(
+            "  option_price(ATM call): цена={:.4}, дельта={:.3}",
+            opt.price, opt.greeks.delta
+        );
+        let iv = state.option_implied_vol(&dto::ImpliedVolInput {
+            market_price: opt.price,
+            forward: 100.0,
+            strike: 100.0,
+            t: 0.25,
+            rate: None,
+            kind: "call".into(),
+            model: None,
+        })?;
+        println!("  option_implied_vol(≈0.30): {:?}", iv.iv);
+        let fit = state.smile_fit(&dto::SmileFitInput {
+            model: "svi".into(),
+            points: [0.28, 0.26, 0.25, 0.27, 0.30]
+                .iter()
+                .enumerate()
+                .map(|(i, &iv)| dto::SmilePointInput {
+                    strike: 90.0 + i as f64 * 5.0,
+                    iv,
+                    weight: None,
+                })
+                .collect(),
+            forward: 100.0,
+            t: 0.25,
+            curve_lo: None,
+            curve_hi: None,
+            curve_steps: None,
+        })?;
+        println!(
+            "  smile_fit(svi): {} параметров, rmse={:.4}, точек кривой={}",
+            fit.params.len(),
+            fit.rmse,
+            fit.curve.len()
+        );
+        let models = state.list_smile_models();
+        let strat = state.strategy_eval(&dto::StrategyEvalInput {
+            legs: vec![dto::StrategyLegInput {
+                kind: "call".into(),
+                side: "long".into(),
+                strike: 100.0,
+                expiry_t: 0.25,
+                quantity: 1.0,
+                entry_price: 5.0,
+            }],
+            price_lo: 80.0,
+            price_hi: 130.0,
+            steps: None,
+            forward: 100.0,
+            vol: 0.3,
+            rate: None,
+            model: None,
+        })?;
+        println!(
+            "  strategy_eval(long call): моделей улыбки={}, точек payoff={}, безубытки={:?}",
+            models.len(),
+            strat.payoff.len(),
+            strat.breakevens
+        );
+
+        // Фаза 10 — MOEX ALGO: ключевая активность + локальный свод «ИТОГО».
+        let samples = vec![
+            dto::KeyActivitySampleInput {
+                secid: "SBER".into(),
+                ts: 4,
+                volume: 5_000.0,
+                volume_z: 3.5,
+                disb: 0.6,
+                oi_change: 0.0,
+                hi2: 0.2,
+                spread: 0.001,
+                price_change: 0.03,
+            },
+            dto::KeyActivitySampleInput {
+                secid: "GAZP".into(),
+                ts: 4,
+                volume: 800.0,
+                volume_z: 0.4,
+                disb: -0.1,
+                oi_change: 0.0,
+                hi2: 0.7,
+                spread: 0.002,
+                price_change: -0.01,
+            },
+        ];
+        let ka = state.key_activity(&samples, Some("1h"));
+        let ka_sum = state.key_activity_summary(&samples, Some("1h"));
+        println!(
+            "  key_activity(1h): {} строк, правил по умолчанию={}",
+            ka.len(),
+            state.key_activity_rules().len()
+        );
+        println!(
+            "  key_activity_summary(1h): fallback={}, строк в своде={}",
+            ka_sum.fallback, ka_sum.row_count
+        );
+
+        // Фаза 11 — историзация: каталог датасетов + план дозагрузки.
+        state.history_register(HistoryDatasetMeta {
+            source: HistorySource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::D1,
+            range: HistoryTimeRange::new(0, 86_400 * 30),
+            bars: 30,
+            updated_ts: 86_400 * 30,
+        });
+        let plan = state.history_plan(&dto::HistoryPlanInput {
+            covered: vec![dto::TimeRangeDto {
+                from: 0,
+                till: 86_400 * 20,
+            }],
+            requested_from: 0,
+            requested_till: 86_400 * 30,
+        });
+        let removed = state
+            .history_delete(&dto::DatasetIdInput {
+                source: "finam".into(),
+                secid: "SBER".into(),
+                tf: "d1".into(),
+            })
+            .unwrap_or(false);
+        println!(
+            "  history: датасетов после удаления={}, дыр для дозагрузки={}, удалено={}",
+            state.history_datasets().len(),
+            plan.len(),
+            removed
+        );
 
         Ok(())
     }

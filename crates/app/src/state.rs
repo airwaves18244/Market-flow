@@ -6,6 +6,7 @@
 
 use std::sync::Mutex;
 
+use domain::history::{Catalog, DataSource, DatasetMeta};
 #[cfg(feature = "ingest")]
 use domain::Bar;
 use domain::TimeFrame;
@@ -18,10 +19,14 @@ use domain::backtest::StrategyParams;
 use crate::api;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
-    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, FlowEdgeDto, FootprintBarDto, FutureGroupDto,
-    InstrumentDto, OrderDto, OrderInput, PositionDto, RobotConfigInput, RobotSignalDto,
-    RrgSectorDto, SectorEntryDto, SectorRow, StrategyDescriptorDto, SubmitResultDto, TopMoverDto,
-    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    BondIssuerDto, BreadthDto, CrossAssetSummaryDto, DatasetIdInput, DatasetMetaDto, FlowEdgeDto,
+    FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
+    InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
+    KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderDto, OrderInput, PositionDto,
+    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SmileFitDto,
+    SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput,
+    SubmitResultDto, TimeRangeDto, TopMoverDto, TurnoverByClassPoint, TurnoverPoint,
+    YieldCurvePoint,
 };
 use crate::trade::TradeSession;
 
@@ -30,6 +35,9 @@ pub struct AppState {
     store: Mutex<Box<dyn Store + Send>>,
     /// Сессия симулированной торговли (paper trading).
     trade: TradeSession,
+    /// Каталог локальных датасетов истории (фаза 11). Пока в памяти; боевой
+    /// загрузчик/DuckDB-хранилище наполняют его по мере загрузки.
+    history: Mutex<Catalog>,
 }
 
 // В headless-live режиме IPC-read-методы (обработчики команд) не вызываются —
@@ -41,6 +49,7 @@ impl AppState {
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
+            history: Mutex::new(Catalog::new()),
         }
     }
 
@@ -272,6 +281,94 @@ impl AppState {
     pub fn account(&self) -> AccountDto {
         self.trade.account()
     }
+
+    // ── Фаза 12 — Опционы (чистые расчёты, без хранилища) ─────────────────────
+
+    /// Каталог моделей улыбки для селектора в UI.
+    pub fn list_smile_models(&self) -> Vec<SmileModelDto> {
+        api::list_smile_models()
+    }
+
+    /// Теоретическая цена + греки опциона.
+    pub fn option_price(&self, input: &OptionPriceInput) -> Result<OptionPriceDto, String> {
+        api::option_price(input)
+    }
+
+    /// Подразумеваемая волатильность из рыночной цены.
+    pub fn option_implied_vol(&self, input: &ImpliedVolInput) -> Result<ImpliedVolDto, String> {
+        api::option_implied_vol(input)
+    }
+
+    /// Калибровка улыбки по рыночным точкам.
+    pub fn smile_fit(&self, input: &SmileFitInput) -> Result<SmileFitDto, String> {
+        api::smile_fit(input)
+    }
+
+    /// Оценка опционной стратегии (payoff, греки, безубыток).
+    pub fn strategy_eval(&self, input: &StrategyEvalInput) -> Result<StrategyEvalDto, String> {
+        api::strategy_eval(input)
+    }
+
+    // ── Фаза 10 — MOEX ALGO: Key Activity ─────────────────────────────────────
+
+    /// Ключевая активность за период по образцам метрик (встроенные правила).
+    pub fn key_activity(
+        &self,
+        samples: &[KeyActivitySampleInput],
+        period: Option<&str>,
+    ) -> Vec<KeyActivityRowDto> {
+        api::key_activity(samples, period)
+    }
+
+    /// Локальный (без LLM) свод «ИТОГО» по ключевой активности.
+    pub fn key_activity_summary(
+        &self,
+        samples: &[KeyActivitySampleInput],
+        period: Option<&str>,
+    ) -> KeyActivitySummaryDto {
+        api::key_activity_summary(samples, period)
+    }
+
+    /// Встроенные правила Key Activity (для настроек/справки).
+    pub fn key_activity_rules(&self) -> Vec<KeyActivityRuleDto> {
+        api::key_activity_rules()
+    }
+
+    // ── Фаза 11 — Историзация: каталог локальных датасетов ────────────────────
+
+    /// Список локальных датасетов истории (метаданные).
+    pub fn history_datasets(&self) -> Vec<DatasetMetaDto> {
+        let guard = match self.history.lock() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        guard.datasets.iter().map(DatasetMetaDto::from).collect()
+    }
+
+    /// Зарегистрировать/обновить датасет в каталоге (точка для загрузчика).
+    pub fn history_register(&self, meta: DatasetMeta) {
+        if let Ok(mut guard) = self.history.lock() {
+            guard.upsert(meta);
+        }
+    }
+
+    /// Удалить датасет из каталога. `true` — если запись существовала.
+    pub fn history_delete(&self, input: &DatasetIdInput) -> Result<bool, String> {
+        let source = DataSource::from_code(&input.source)
+            .ok_or_else(|| format!("неизвестный источник: {}", input.source))?;
+        let tf = TimeFrame::from_code(&input.tf)
+            .ok_or_else(|| format!("неизвестный тайм-фрейм: {}", input.tf))?;
+        let mut guard = self
+            .history
+            .lock()
+            .map_err(|_| "history lock poisoned".to_string())?;
+        Ok(guard.remove(source, &input.secid, tf))
+    }
+
+    /// План дозагрузки истории (недостающие диапазоны). Чистая обёртка.
+    pub fn history_plan(&self, input: &HistoryPlanInput) -> Vec<TimeRangeDto> {
+        api::history_plan(input)
+    }
 }
 
 #[cfg(test)]
@@ -287,5 +384,37 @@ mod tests {
         // пустое хранилище читается без паники и блокировок
         assert!(state.instruments().unwrap().is_empty());
         assert!(state.sector_rollup(0, i64::MAX).unwrap().is_empty());
+    }
+
+    #[test]
+    fn history_catalog_register_list_delete() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        let state = AppState::new(store);
+        assert!(state.history_datasets().is_empty());
+
+        state.history_register(DatasetMeta {
+            source: DataSource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::D1,
+            range: domain::history::TimeRange::new(0, 86_400 * 10),
+            bars: 10,
+            updated_ts: 86_400 * 10,
+        });
+        let ds = state.history_datasets();
+        assert_eq!(ds.len(), 1);
+        assert_eq!(ds[0].secid, "SBER");
+        assert_eq!(ds[0].source, "finam");
+        assert_eq!(ds[0].tf, "d1");
+
+        let removed = state
+            .history_delete(&DatasetIdInput {
+                source: "finam".into(),
+                secid: "SBER".into(),
+                tf: "d1".into(),
+            })
+            .unwrap();
+        assert!(removed);
+        assert!(state.history_datasets().is_empty());
     }
 }

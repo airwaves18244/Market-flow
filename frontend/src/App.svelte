@@ -5,6 +5,9 @@
   import DeltaView from "./lib/components/DeltaView.svelte";
   import TradePanel from "./lib/components/TradePanel.svelte";
   import Backtester from "./lib/components/Backtester.svelte";
+  import OptionsTab from "./lib/components/OptionsTab.svelte";
+  import MoexAlgoTab from "./lib/components/MoexAlgoTab.svelte";
+  import HistoryTab from "./lib/components/HistoryTab.svelte";
   import { ipc } from "./lib/ipc";
   import type { InstrumentDto } from "./lib/types";
 
@@ -13,6 +16,9 @@
     { id: "delta", label: "Delta" },
     { id: "trade", label: "Торговля" },
     { id: "backtest", label: "Бэктест" },
+    { id: "data", label: "Данные" },
+    { id: "moexalgo", label: "MOEX ALGO" },
+    { id: "options", label: "Опционы" },
   ];
 
   let instruments = $state<InstrumentDto[]>([]);
@@ -35,7 +41,7 @@
 <div class="app">
   <header class="app-header">
     <h1>Market Terminal</h1>
-    <span class="sub">Обзор · Delta · Торговля · Бэктест</span>
+    <span class="sub">Обзор · Delta · Торговля · Бэктест · Данные · MOEX ALGO · Опционы</span>
     <span class="status">{instruments.length} инструментов · {selected}</span>
   </header>
 
@@ -53,5 +59,11 @@
     <TradePanel {instruments} {selected} onSelect={select} />
   {:else if activeTab === "backtest"}
     <Backtester {instruments} {selected} />
+  {:else if activeTab === "data"}
+    <HistoryTab {instruments} />
+  {:else if activeTab === "moexalgo"}
+    <MoexAlgoTab />
+  {:else if activeTab === "options"}
+    <OptionsTab />
   {/if}
 </div>

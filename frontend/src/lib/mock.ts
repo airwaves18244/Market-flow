@@ -10,10 +10,19 @@ import type {
   BondIssuerDto,
   BreadthDto,
   CrossAssetSummaryDto,
+  DatasetMetaDto,
   FlowEdgeDto,
   FootprintBarDto,
   FutureGroupDto,
+  ImpliedVolDto,
+  ImpliedVolInput,
   InstrumentDto,
+  KeyActivityRowDto,
+  KeyActivityRuleDto,
+  KeyActivitySampleInput,
+  KeyActivitySummaryDto,
+  OptionPriceDto,
+  OptionPriceInput,
   OrderBookDto,
   OrderDto,
   OrderInput,
@@ -22,8 +31,14 @@ import type {
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  SmileFitDto,
+  SmileFitInput,
+  SmileModelDto,
   StrategyDescriptorDto,
+  StrategyEvalDto,
+  StrategyEvalInput,
   SubmitResultDto,
+  TimeRangeDto,
   TopMoverDto,
   TradeDto,
   TurnoverByClassPoint,
@@ -492,6 +507,299 @@ function mockSubmit(input: OrderInput): SubmitResultDto {
   return { order, fills };
 }
 
+// ── Фаза 12 — Опционы (компактный Блэк-76 для браузерного мок-режима) ─────────
+// Зеркалит доменную математику (`domain::options`) достаточно, чтобы UI
+// выглядел «как настоящий» без бэкенда. Точные значения даёт Rust-ядро в Tauri.
+
+function erf(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-x * x);
+  return x >= 0 ? y : -y;
+}
+const normCdf = (x: number) => 0.5 * (1 + erf(x / Math.SQRT2));
+const normPdf = (x: number) => Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+
+function black76(
+  forward: number,
+  strike: number,
+  t: number,
+  vol: number,
+  kind: "call" | "put",
+  rate = 0,
+): { price: number; delta: number; gamma: number; vega: number; theta: number; rho: number } {
+  const df = Math.exp(-rate * t);
+  const sign = kind === "call" ? 1 : -1;
+  if (t <= 0 || vol <= 0) {
+    const intrinsic = df * Math.max(sign * (forward - strike), 0);
+    return { price: intrinsic, delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0 };
+  }
+  const sqrtT = Math.sqrt(t);
+  const d1 = (Math.log(forward / strike) + 0.5 * vol * vol * t) / (vol * sqrtT);
+  const d2 = d1 - vol * sqrtT;
+  const price = df * sign * (forward * normCdf(sign * d1) - strike * normCdf(sign * d2));
+  const delta = df * sign * normCdf(sign * d1);
+  const gamma = (df * normPdf(d1)) / (forward * vol * sqrtT);
+  const vega = df * forward * normPdf(d1) * sqrtT;
+  const theta =
+    -(df * forward * normPdf(d1) * vol) / (2 * sqrtT) - rate * price * (rate === 0 ? 0 : 1);
+  const rho = -t * price;
+  return { price, delta, gamma, vega, theta, rho };
+}
+
+function mockOptionPrice(input: OptionPriceInput): OptionPriceDto {
+  const g = black76(
+    input.forward,
+    input.strike,
+    input.t,
+    input.vol,
+    input.kind,
+    input.rate ?? 0,
+  );
+  return {
+    price: g.price,
+    greeks: { delta: g.delta, gamma: g.gamma, vega: g.vega, theta: g.theta, rho: g.rho },
+  };
+}
+
+function mockImpliedVol(input: ImpliedVolInput): ImpliedVolDto {
+  const df = Math.exp(-(input.rate ?? 0) * input.t);
+  const sign = input.kind === "call" ? 1 : -1;
+  const intrinsic = df * Math.max(sign * (input.forward - input.strike), 0);
+  if (input.t <= 0 || input.marketPrice < intrinsic - 1e-9) return { iv: null };
+  // Бисекция по волатильности.
+  let lo = 1e-4;
+  let hi = 5;
+  for (let i = 0; i < 100; i++) {
+    const mid = 0.5 * (lo + hi);
+    const p = black76(input.forward, input.strike, input.t, mid, input.kind, input.rate ?? 0).price;
+    if (p > input.marketPrice) hi = mid;
+    else lo = mid;
+  }
+  return { iv: 0.5 * (lo + hi) };
+}
+
+function mockSmileFit(input: SmileFitInput): SmileFitDto {
+  const pts = input.points;
+  const f = input.forward;
+  // Квадратичная подгонка IV по лог-моней­ности (наглядная «улыбка»).
+  const xs = pts.map((p) => Math.log(p.strike / f));
+  const ys = pts.map((p) => p.iv);
+  const n = xs.length || 1;
+  const mean = (a: number[]) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
+  const mx = mean(xs);
+  const my = mean(ys);
+  let sxx = 0;
+  let sxy = 0;
+  let sx2y = 0;
+  let sx2x2 = 0;
+  let sx2 = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const dx = xs[i] - mx;
+    sxx += dx * dx;
+    sxy += dx * (ys[i] - my);
+    const x2 = xs[i] * xs[i];
+    sx2 += x2;
+    sx2y += x2 * ys[i];
+    sx2x2 += x2 * x2;
+  }
+  const skew = sxx > 0 ? sxy / sxx : 0;
+  const curv = sx2x2 > 0 ? Math.max(0, (sx2y - (sx2 / n) * my * n) / sx2x2) : 0.2;
+  const s0 = my;
+  const ivAt = (strike: number) => {
+    const k = Math.log(strike / f);
+    return Math.max(0.01, s0 + skew * k + curv * k * k);
+  };
+  const lo = input.curveLo ?? Math.min(...pts.map((p) => p.strike));
+  const hi = input.curveHi ?? Math.max(...pts.map((p) => p.strike));
+  const steps = input.curveSteps ?? 41;
+  const curve = Array.from({ length: steps }, (_, i) => {
+    const strike = lo + ((hi - lo) * i) / (steps - 1);
+    return { strike, iv: ivAt(strike) };
+  });
+  const rmse = Math.sqrt(mean(pts.map((p) => (ivAt(p.strike) - p.iv) ** 2)));
+  const params =
+    input.model === "svi"
+      ? [
+          { name: "a", value: s0 * s0 * input.t },
+          { name: "b", value: curv },
+          { name: "rho", value: Math.max(-0.99, Math.min(0.99, skew)) },
+          { name: "m", value: mx },
+          { name: "sigma", value: 0.1 },
+        ]
+      : [
+          { name: "s0", value: s0 },
+          { name: "skew", value: skew },
+          { name: "curv", value: curv },
+        ];
+  return { model: input.model, params, rmse, curve };
+}
+
+function mockStrategyEval(input: StrategyEvalInput): StrategyEvalDto {
+  const rate = input.rate ?? 0;
+  const legSign = (side: string) => (side === "long" ? 1 : -1);
+  const intrinsic = (kind: string, strike: number, spot: number) =>
+    kind === "call" ? Math.max(spot - strike, 0) : kind === "put" ? Math.max(strike - spot, 0) : spot;
+  const payoffAt = (spot: number) =>
+    input.legs.reduce(
+      (s, l) => s + legSign(l.side) * l.quantity * (intrinsic(l.kind, l.strike, spot) - l.entryPrice),
+      0,
+    );
+  const markAt = (spot: number) =>
+    input.legs.reduce((s, l) => {
+      const val =
+        l.kind === "underlying"
+          ? spot
+          : black76(spot, l.strike, l.expiryT, input.vol, l.kind as "call" | "put", rate).price;
+      return s + legSign(l.side) * l.quantity * (val - l.entryPrice);
+    }, 0);
+  const steps = input.steps ?? 61;
+  const payoff = Array.from({ length: steps }, (_, i) => {
+    const price = input.priceLo + ((input.priceHi - input.priceLo) * i) / (steps - 1);
+    return { price, pnlExpiry: payoffAt(price), pnlNow: markAt(price) };
+  });
+  // Безубытки — смены знака payoff на экспирацию.
+  const breakevens: number[] = [];
+  for (let i = 1; i < payoff.length; i++) {
+    const a = payoff[i - 1];
+    const b = payoff[i];
+    if (a.pnlExpiry === 0) breakevens.push(a.price);
+    else if (a.pnlExpiry * b.pnlExpiry < 0) {
+      const w = a.pnlExpiry / (a.pnlExpiry - b.pnlExpiry);
+      breakevens.push(a.price + w * (b.price - a.price));
+    }
+  }
+  const pnls = payoff.map((p) => p.pnlExpiry);
+  const netCost = input.legs.reduce((s, l) => s + legSign(l.side) * l.quantity * l.entryPrice, 0);
+  const g = input.legs.reduce(
+    (acc, l) => {
+      if (l.kind === "underlying") {
+        acc.delta += legSign(l.side) * l.quantity;
+        return acc;
+      }
+      const bg = black76(input.forward, l.strike, l.expiryT, input.vol, l.kind as "call" | "put", rate);
+      const s = legSign(l.side) * l.quantity;
+      acc.delta += s * bg.delta;
+      acc.gamma += s * bg.gamma;
+      acc.vega += s * bg.vega;
+      acc.theta += s * bg.theta;
+      acc.rho += s * bg.rho;
+      return acc;
+    },
+    { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0 },
+  );
+  return {
+    breakevens,
+    maxProfit: Math.max(...pnls),
+    maxLoss: Math.min(...pnls),
+    netCost,
+    payoff,
+    greeks: g,
+  };
+}
+
+const smileModels: SmileModelDto[] = [
+  { id: "moex", name: "MOEX (параметрическая)" },
+  { id: "sabr", name: "SABR (Hagan)" },
+  { id: "svi", name: "SVI (Gatheral)" },
+  { id: "kalenkovich", name: "Каленкович" },
+];
+
+// ── Фаза 10 — MOEX ALGO: Key Activity (упрощённые правила для мок-режима) ─────
+// Зеркалит доменный `default_rules()` достаточно, чтобы таблица «Ключевая
+// активность» и панель «ИТОГО» работали без бэкенда.
+
+const keyActivityRules: KeyActivityRuleDto[] = [
+  { id: "anomalous_volume", name: "Аномальный объём", weight: 1 },
+  { id: "flow_imbalance", name: "Сильный дисбаланс потока", weight: 0.9 },
+  { id: "concentration_spike", name: "Всплеск концентрации HI2", weight: 0.8 },
+  { id: "price_move", name: "Резкое движение цены", weight: 0.7 },
+];
+
+function mockSampleSet(): KeyActivitySampleInput[] {
+  return [
+    { secid: "SBER", ts: 4, volume: 5200, volumeZ: 3.8, disb: 0.55, hi2: 0.22, priceChange: 0.031 },
+    { secid: "GAZP", ts: 4, volume: 900, volumeZ: 0.6, disb: -0.62, hi2: 0.71, priceChange: -0.008 },
+    { secid: "LKOH", ts: 4, volume: 2100, volumeZ: 1.2, disb: 0.15, hi2: 0.34, priceChange: 0.026 },
+    { secid: "GMKN", ts: 4, volume: 1500, volumeZ: 2.9, disb: 0.05, hi2: 0.28, priceChange: -0.004 },
+  ];
+}
+
+function evalKeyActivity(samples: KeyActivitySampleInput[]): KeyActivityRowDto[] {
+  const rows: KeyActivityRowDto[] = [];
+  for (const s of samples) {
+    if ((s.volumeZ ?? 0) >= 3) {
+      rows.push(row(s, "anomalous_volume", "Аномальный объём", "z-score объёма", s.volumeZ ?? 0, 1));
+    }
+    if (Math.abs(s.disb ?? 0) >= 0.4) {
+      rows.push(row(s, "flow_imbalance", "Сильный дисбаланс потока", "дисбаланс", s.disb ?? 0, 0.9));
+    }
+    if ((s.hi2 ?? 0) >= 0.6) {
+      rows.push(row(s, "concentration_spike", "Всплеск концентрации HI2", "концентрация HI2", s.hi2 ?? 0, 0.8));
+    }
+    if (Math.abs(s.priceChange ?? 0) >= 0.02) {
+      rows.push(row(s, "price_move", "Резкое движение цены", "изменение цены", s.priceChange ?? 0, 0.7));
+    }
+  }
+  return rows.sort((a, b) => b.importance - a.importance || a.secid.localeCompare(b.secid));
+}
+
+function row(
+  s: KeyActivitySampleInput,
+  ruleId: string,
+  ruleName: string,
+  metric: string,
+  value: number,
+  importance: number,
+): KeyActivityRowDto {
+  return { secid: s.secid, ruleId, ruleName, metric, value, ts: s.ts, importance };
+}
+
+function mockKeyActivitySummary(
+  samples: KeyActivitySampleInput[],
+  period: string,
+): KeyActivitySummaryDto {
+  const rows = evalKeyActivity(samples);
+  const lines = rows
+    .slice(0, 8)
+    .map((r) => `• ${r.secid}: ${r.ruleName.toLowerCase()} (${r.metric} = ${r.value.toFixed(3)})`);
+  const text =
+    rows.length === 0
+      ? `За период ${period} значимых активностей не выявлено.`
+      : `Ключевая активность за ${period} (${rows.length} сигналов):\n${lines.join("\n")}`;
+  return { text, period, rowCount: rows.length, fallback: true };
+}
+
+// ── Фаза 11 — Историзация: демо-каталог датасетов ────────────────────────────
+const DAY = 86_400;
+const mockDatasets: DatasetMetaDto[] = [
+  { source: "finam", secid: "SBER", tf: "d1", fromTs: 0, toTs: DAY * 365, bars: 365, updatedTs: DAY * 365, looksComplete: true },
+  { source: "finam", secid: "GAZP", tf: "h1", fromTs: 0, toTs: DAY * 90, bars: 90 * 9, updatedTs: DAY * 90, looksComplete: true },
+  { source: "moex_algo", secid: "SBER", tf: "m5", fromTs: 0, toTs: DAY * 30, bars: 30 * 78, updatedTs: DAY * 30, looksComplete: false },
+];
+
+function mockHistoryPlan(input: {
+  covered: { from: number; till: number }[];
+  requestedFrom: number;
+  requestedTill: number;
+}): TimeRangeDto[] {
+  // Нормализуем покрытие и вычитаем из запрошенного окна (как domain::missing_ranges).
+  const covered = [...input.covered].sort((a, b) => a.from - b.from);
+  const gaps: TimeRangeDto[] = [];
+  let cursor = input.requestedFrom;
+  for (const c of covered) {
+    if (c.till <= cursor) continue;
+    if (c.from > cursor) gaps.push({ from: cursor, till: Math.min(c.from, input.requestedTill) });
+    cursor = Math.max(cursor, c.till);
+    if (cursor >= input.requestedTill) break;
+  }
+  if (cursor < input.requestedTill) gaps.push({ from: cursor, till: input.requestedTill });
+  return gaps.filter((g) => g.till > g.from);
+}
+
 export async function handle<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "instruments":
@@ -574,6 +882,52 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
         .map(([symbol, p]) => ({ symbol, qty: p.qty, avgPrice: p.avg })) as unknown as T;
     case "account":
       return { cash: sim.cash, realizedPnl: sim.realizedPnl } as unknown as T;
+
+    // ── Фаза 12 / Опционы ──────────────────────────────────────────────────────
+    case "list_smile_models":
+      return smileModels as unknown as T;
+    case "option_price":
+      return mockOptionPrice(args?.input as OptionPriceInput) as unknown as T;
+    case "option_implied_vol":
+      return mockImpliedVol(args?.input as ImpliedVolInput) as unknown as T;
+    case "smile_fit":
+      return mockSmileFit(args?.input as SmileFitInput) as unknown as T;
+    case "strategy_eval":
+      return mockStrategyEval(args?.input as StrategyEvalInput) as unknown as T;
+
+    // ── Фаза 10 / MOEX ALGO: Key Activity ───────────────────────────────────────
+    case "key_activity": {
+      const samples = (args?.samples as KeyActivitySampleInput[]) ?? mockSampleSet();
+      return evalKeyActivity(samples) as unknown as T;
+    }
+    case "key_activity_summary": {
+      const samples = (args?.samples as KeyActivitySampleInput[]) ?? mockSampleSet();
+      const period = String(args?.period ?? "1h");
+      return mockKeyActivitySummary(samples, period) as unknown as T;
+    }
+    case "key_activity_rules":
+      return keyActivityRules as unknown as T;
+
+    // ── Фаза 11 / Историзация ────────────────────────────────────────────────────
+    case "history_datasets":
+      return mockDatasets as unknown as T;
+    case "history_delete": {
+      const id = args?.id as { source: string; secid: string; tf: string };
+      const idx = mockDatasets.findIndex(
+        (d) => d.source === id.source && d.secid === id.secid && d.tf === id.tf,
+      );
+      if (idx >= 0) mockDatasets.splice(idx, 1);
+      return (idx >= 0) as unknown as T;
+    }
+    case "history_plan": {
+      const inp = args?.input as {
+        covered: { from: number; till: number }[];
+        requestedFrom: number;
+        requestedTill: number;
+      };
+      return mockHistoryPlan(inp) as unknown as T;
+    }
+
     default:
       throw new Error(`mock: неизвестная команда ${cmd}`);
   }
