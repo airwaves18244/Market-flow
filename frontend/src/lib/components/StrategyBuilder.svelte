@@ -23,27 +23,42 @@
     entryPrice,
   });
   const templates: Template[] = [
-    { id: "long_call", label: "Лонг колл", build: () => [T("call", "long", 100, 5)] },
+    { id: "vertical", label: "Вертикаль", build: () => [T("call", "long", 95, 7), T("call", "short", 110, 2)] },
     { id: "straddle", label: "Стрэддл", build: () => [T("call", "long", 100, 5), T("put", "long", 100, 5)] },
-    {
-      id: "call_spread",
-      label: "Вертикальный колл-спред",
-      build: () => [T("call", "long", 100, 5), T("call", "short", 110, 2)],
-    },
+    { id: "strangle", label: "Стрэнгл", build: () => [T("call", "long", 110, 3), T("put", "long", 90, 3)] },
     {
       id: "butterfly",
-      label: "Бабочка (колл)",
+      label: "Бабочка",
       build: () => [
         T("call", "long", 90, 12),
         { ...T("call", "short", 100, 5), quantity: 2 },
         T("call", "long", 110, 2),
       ],
     },
+    {
+      id: "condor",
+      label: "Кондор",
+      build: () => [
+        T("call", "long", 85, 16),
+        T("call", "short", 95, 8),
+        T("call", "short", 110, 3),
+        T("call", "long", 120, 1),
+      ],
+    },
+    {
+      id: "covered",
+      label: "Покрытый колл",
+      build: () => [T("underlying", "long", 100, 100), T("call", "short", 110, 3)],
+    },
   ];
 
+  let activePreset = $state("");
   function applyTemplate(id: string) {
     const t = templates.find((x) => x.id === id);
-    if (t) legs = t.build();
+    if (t) {
+      legs = t.build();
+      activePreset = id;
+    }
   }
 
   function addLeg() {
@@ -80,15 +95,18 @@
     <div class="controls">
       <label>Форвард<input type="number" bind:value={forward} step="1" /></label>
       <label>Волатильность, %<input type="number" bind:value={volPct} step="1" /></label>
-      <label>
-        Шаблон
-        <select onchange={(e) => applyTemplate((e.target as HTMLSelectElement).value)}>
-          <option value="">— выбрать —</option>
+      <div class="presets">
+        <span class="field-label">Шаблон</span>
+        <div class="preset-chips">
           {#each templates as t (t.id)}
-            <option value={t.id}>{t.label}</option>
+            <button
+              class="chip-btn"
+              class:active={activePreset === t.id}
+              onclick={() => applyTemplate(t.id)}>{t.label}</button
+            >
           {/each}
-        </select>
-      </label>
+        </div>
+      </div>
     </div>
 
     <table class="legs">
@@ -160,6 +178,15 @@
   .controls {
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .presets .field-label {
+    margin-bottom: 3px;
+  }
+  .preset-chips {
+    display: flex;
+    gap: 5px;
     flex-wrap: wrap;
   }
   label {
