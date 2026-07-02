@@ -11,9 +11,20 @@ describe("settings", () => {
   });
 
   it("round-trips a saved value", () => {
-    const custom = { tapeLimit: 100, domDepth: 20, topMoversLimit: 5 };
+    const custom = { ...DEFAULTS, tapeLimit: 100, domDepth: 20, topMoversLimit: 5 };
     saveSettings(custom);
     expect(loadSettings()).toEqual(custom);
+  });
+
+  it("fills in missing nested passport/LLM keys with defaults", () => {
+    localStorage.setItem(
+      "market-terminal:settings",
+      JSON.stringify({ markets: { fx: true } }),
+    );
+    const loaded = loadSettings();
+    expect(loaded.markets).toEqual({ ...DEFAULTS.markets, fx: true });
+    expect(loaded.watchlist).toEqual(DEFAULTS.watchlist);
+    expect(loaded.llmProvider).toBe(DEFAULTS.llmProvider);
   });
 
   it("fills in missing keys with defaults", () => {
