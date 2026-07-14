@@ -1,273 +1,145 @@
-# ROADMAP — Market Terminal
+# ROADMAP — Market Terminal (фазы 0–12)
 
-Пошаговый план. Отметка ✅ — сделано в текущей итерации.
+Единый план развития проекта. Здесь — «карта высот»: цель каждой фазы, её
+статус и что осталось. Детальная спецификация с поштучными отметками — в
+**`SPEC_0-12.md`**; задачи по оставшейся работе и план оркестрации — в
+**`TASKS_list.md`**.
 
-## Статус верификации (ревизия 2026-07)
-Фазы 0–9 (ядро) реализованы и проверены; фронт покрывает **все фазы 0–12**
-единым интерфейсом (вкладки **Обзор · Delta · Торговля · Бэктест · Данные ·
-MOEX ALGO · Опционы · Настройки**). Зелёный CI-контур:
-- `cargo test --workspace` — 244 теста зелёные (в т.ч. `--features ingest` — 40);
-- `cargo fmt --all --check` и `cargo clippy --workspace -- -D warnings` — чисто;
-- фронт: `svelte-check` — 0 ошибок, `vitest` — 26 тестов, `vite build` — ок;
-- IPC-контракт согласован end-to-end: одни и те же 26 команд в `frontend/src/lib/mock.ts`,
-  `frontend/src/lib/ipc.ts` и регистрации `crates/app/src/tauri_app.rs`.
+Статусы: ✅ готово · 🟡 частично (ядро есть, есть недоделки) · ⛔ не начато.
 
-Фиче-гейтед сборки (`ingest`, `live-trading`, `grpc` с vendored protoc) компилируются;
-`duckdb` собирается штатно (bundled C++ — долгая сборка), `tauri` требует webkit2gtk.
+## Сводная таблица
 
-Оставшиеся ниже пункты `⏳` — не незавершённая инженерия, а шаги, требующие
-десктопного окружения (упаковка MSI/NSIS) или полировки (полный dockview); они
-вне кросс-платформенного CI по конструкции.
+| Фаза | Название | Статус | Что осталось |
+|------|----------|--------|--------------|
+| 0 | Фундамент (workspace, слои, gRPC, auth, лимиты, секреты) | ✅ | — |
+| 1 | Хранилище и ингест (DuckDB, Store, планировщик, live-режим) | ✅ | боевой прогон (egress) |
+| 2 | Аналитика `domain` (turnover, flow, breadth, sector, RRG, cross-asset) | ✅ | — |
+| 3 | Tauri-оболочка + каркас фронта | ✅ | полный dockview (полировка) |
+| 4 | Представление 1 — Акции/секторы | ✅ | — |
+| 5 | Представления 2–3 — Фьючерсы, Облигации | ✅ | — |
+| 6 | Представление 4 — Сумма всех | ✅ | — |
+| 7 | Live-функции (стримы, DOM, алёрты, replay) | ✅ | — |
+| 8 | Полировка и сборка | 🟡 | упаковка MSI/NSIS + иконки (десктоп) |
+| 9 | V2 — Бэктестер · Торговля · Delta | ✅ | реальный OrderService (вне v1) |
+| 10 | MOEX ALGO (Super Candles · FUTOI · HI2 · Mega · Key Activity · LLM) | 🟡 | транспорт `data::moex`, storage, LLM, боевой IPC 4 модулей |
+| 11 | Историзация для бэктестера | 🟡 | `HistorySource`, storage истории, загрузчик, Parquet |
+| 12 | Опционы (калькулятор · улыбка · конструктор) | 🟡 | живая доска ISS, `option_board`, верификация методики MOEX |
+| — | Сквозное: HTTP-слой, персист настроек, egress | 🟡 | `data::http`, персист правил/настроек, allowlist |
 
-## Фаза 0 — Фундамент ✅
-- ✅ Cargo workspace, члены: `finam-proto`, `domain`, `data`, `storage`, `app`.
-- ✅ Дисциплина слоёв (аналитика в `domain` без внешних зависимостей).
-- ✅ Контракты `data` (трейт `MarketData`, ошибки, `TimeFrame`), классификация секторов.
-- ✅ DDL схемы DuckDB в `storage::schema`.
-- ✅ Per-method rate-limiter: чистый, без внешних зависимостей, скользящее окно
-  по каждому методу (`data::RateLimiter`, лимит Finam 200 req/min по умолчанию),
-  кросс-платформенно протестирован.
-- ✅ Учёт авторизации: `data::TokenState` отслеживает короткоживущий JWT и его
-  срок, решает об упреждающем refresh (с запасом-skew) — чистая, тестируемая
-  логика; сетевой обмен `AuthService.Auth` подключается в фазе интеграции.
-- ✅ Повторы: `data::Backoff` — экспоненциальный backoff с потолком, полным
-  джиттером и классификацией ретраябельности ошибок (`DataError::is_retryable`).
-- ✅ `tracing`: инициализация подписчика в `app::telemetry::init` (фильтр уровней
-  из `RUST_LOG`, по умолчанию `info`), стартовый структурированный лог.
-- ✅ Канонические методы API: `data::Method` (Auth/Assets/Bars/LastQuote/
-  LatestTrades) — единый источник имён для ключей лимитера и меток трейсинга;
-  `RateLimiter` принимает `Method` напрямую.
-- ✅ Хранилище секрета: контракт `data::SecretStore` + in-memory `MemSecretStore`
-  (тестируемо кросс-платформенно).
-- ✅ ОС-keyring реализация `SecretStore`: `data::KeyringSecretStore` за фичей
-  `keyring` — нативный бэкенд под платформу (Windows → Credential Manager,
-  macOS → Keychain, Linux → ключи ядра/keyutils). Фича выключена в кросс-
-  платформенном CI (как `duckdb`/`tauri`), зависимость не подтягивается.
-  Контрактный тест компилируется всегда; live-roundtrip помечен `#[ignore]`
-  (нужна реальная keyring-сессия).
-- ✅ gRPC-кодоген: `finam-proto` генерирует клиентские стабы из vendored
-  `.proto` (`proto/`, санитизированные копии из `FinamWeb/finam-trade-api`:
-  `AuthService`, `AssetsService`, `MarketDataService`, `side`, плюс
-  `google/type/*`) через `tonic-build` + `protoc-bin-vendored` (свой `protoc`,
-  без системного) — за фичей `grpc`. По умолчанию фича выключена: тяжёлые
-  `tonic`/`prost` и build-tooling не подтягиваются (лёгкий CI, как
-  `duckdb`/`tauri`).
-- ✅ Сетевой обмен auth (`AuthService.Auth`): `data::AuthManager` +
-  `data::GrpcAuthTransport` за фичей `grpc`. Менеджер связывает чистые примитивы
-  (`TokenState`/`RateLimiter`/`Backoff`/`SecretStore`): переиспользует
-  действующий JWT, упреждающе обновляет, держит лимит метода `Auth`, повторяет
-  транзиентные сбои с backoff и не повторяет ошибки авторизации. Транспорт
-  отделён трейтом `AuthTransport`, поэтому оркестрация покрыта тестами без сети.
-- ✅ Реализация `MarketData` поверх gRPC: `data::FinamMarketData` за фичей
-  `grpc` реализует `assets`/`bars`/`last_quote`/`latest_trades`. Каждый вызов
-  берёт JWT у `AuthManager` (метаданные `authorization`), держит per-method
-  лимит, повторяет транзиентные сбои с backoff и переводит протобаф-типы
-  (Decimal/Timestamp/Side) в чистые доменные значения. Маппинг вынесен в чистые
-  функции и покрыт тестами; сетевые вызовы интеграционно проверяются при наличии
-  реального секрета (в CI выключено).
+## Фазы 0–9 — ядро терминала ✅
 
-## Фаза 1 — Хранилище и ингест ✅
-- ✅ Нативный `duckdb` (bundled) за фичей `duckdb`, применение DDL, миграции
-  (версия схемы, идемпотентный прогон).
-- ✅ Контракт `Store` + реализации: `MemStore` (в памяти, кросс-платформенно
-  тестируемая) и `DuckStore` (DuckDB).
-- ✅ Writer ингеста баров/снимков оборота/инструментов; снимок оборота из серии
-  баров (`snapshot_from_bars`); планировщик батч-поллинга (`BatchCursor`).
-- ✅ Загрузка таблицы классификации секторов (`Writer::load_sector_map`).
-- ✅ Бэкфилл исторических баров: `plan_backfill` + `chunk_range` (страницы под
-  лимит баров на запрос).
-- ✅ Асинхронный цикл опроса: `app::ingest::IngestService` (фича `ingest`)
-  связывает источник `data::MarketData` с хранилищем через `AppState`. Такт
-  (`tick`) обходит вотчлист круговым `BatchCursor`, держит per-method лимит
-  (`RateLimiter`), тянет бары и пишет их со снимком оборота; боевой цикл (`run`)
-  крутит такты по таймеру tokio. Источник абстрактный (трейт `MarketData`) —
-  такт покрыт тестами на фейке (без сети).
-- ✅ Подключение реального источника: боевой режим `app` (фича `live`) связывает
-  `FinamMarketData` (gRPC) с планировщиком — авторизация → справочник → цикл
-  опроса баров в хранилище. Секрет берётся из переменной окружения
-  `FINAM_API_SECRET`, файла `.env` (ключи `FINAM_API_SECRET`/`FINAM_SECRET`, без
-  учёта регистра; файл в `.gitignore`) или ОС-keyring (фича `keyring`). Загрузчик
-  `.env` — чистый парсер без зависимостей (`data::dotenv`, покрыт тестами).
-  Требует egress-доступа к `trade-api.finam.ru:443`; проверено до сетевой границы
-  (с секретом из `.env` пайплайн доходит до allowlist-проверки egress). Живой
-  smoke пайплайна — `cargo run -p data --features grpc --example live_check`.
+Реализованы и проверены (детали и полный список отметок — `SPEC_0-12.md`):
 
-## Фаза 2 — Аналитика (`domain`) ✅
-- ✅ turnover, directional turnover, unusual volume.
-- ✅ money flow, MFI, CVD.
-- ✅ breadth (A/D, % растущих).
-- ✅ sector rollups (взвешенные по обороту).
-- ✅ RRG (RS-Ratio / RS-Momentum, квадранты).
-- ✅ cross-asset shares + flow matrix (Sankey).
+- **0 — Фундамент**: cargo workspace (`finam-proto`, `domain`, `data`,
+  `storage`, `app`), дисциплина слоёв (математика в `domain` без внешних
+  зависимостей), gRPC-кодоген (vendored proto + vendored protoc, фича `grpc`),
+  auth-обмен с кэшем JWT и упреждающим refresh, per-method `RateLimiter`
+  (~200 req/мин), `Backoff`, секрет-резолвер env → `.env` → ОС-keyring.
+- **1 — Хранилище и ингест**: контракт `Store` (`MemStore`/`DuckStore`),
+  миграции, ингест баров/снимков, бэкфилл, асинхронный планировщик
+  (`app::ingest`), боевой режим `app --features live` (Finam gRPC → стор).
+- **2 — Аналитика**: turnover/directional/unusual volume, money flow/MFI/CVD,
+  breadth, sector rollups, RRG, cross-asset shares + flow matrix.
+- **3–6 — Оболочка и представления**: ядро IPC + Tauri-привязка (фича `tauri`),
+  фронт Vite + Svelte 5 + TS; панели акций/секторов, фьючерсов, облигаций,
+  «суммы всех» (gauge, donut, stacked area, Sankey).
+- **7 — Live**: серверные стримы с авто-reconnect, DOM-стакан, движок алёртов
+  (edge-trigger), offline-replay, панели Time&Sales/DOM/алёртов.
+- **8 — Полировка**: настройки представления, чанкинг тяжёлых библиотек,
+  метаданные бандла, обработка ошибок. *Осталось:* финальная сборка MSI/NSIS
+  и иконки — требуют десктопного окружения (webkit2gtk).
+- **9 — V2**: бэктестер (движок + библиотека стратегий + метрики), delta
+  (footprint, CVD, роботы-детекторы), симулятор торговли (`SimBroker`, paper
+  trading), вкладки фронта, каркас боевого роутинга (`FinamOrderRouter` —
+  заглушка за фичей `live-trading`).
 
-## Фаза 3 — Tauri-оболочка + каркас фронта ✅
-- ✅ Ядро IPC: `AppState` поверх `Store`, DTO (camelCase) и обработчики
-  команд (`instruments`, `bars`, `turnover_series`, `sector_rollup`,
-  `sector_map`) — чистые, протестированные на `MemStore`.
-- ✅ Привязка Tauri за фичей `tauri`: `#[tauri::command]`-обёртки, заготовка
-  событий live-push, `tauri.conf.json` + capabilities + `build.rs`. Сборка
-  десктопа требует webkit2gtk, поэтому фича выключена в кросс-платформенном CI.
-- ✅ Фронт: Vite + Svelte 5 + TS, тёмная тема, каркас докуемых панелей,
-  типизированный IPC-клиент с мок-режимом (работает в браузере без бэкенда),
-  ECharts treemap и Lightweight Charts свечи.
-- ✅ Асинхронный планировщик ингеста — `app::ingest` (фича `ingest`), см. фазу 1.
-- ⏳ Полноценный dockview (фронт) — в фазе полировки.
+## Сквозные предпосылки для фаз 10–12 (S.*) 🟡
 
-## Фаза 4 — Представление 1 (Акции/секторы) ✅
-- ✅ treemap (размер=оборот, цвет=%изм) — уже реализовано в Фазе 3.
-- ✅ heatmap — ECharts компонент по секторам и изменениям.
-- ✅ breadth — индикатор ширины рынка (advancers/decliners/A/D ratio).
-- ✅ топ-движения — таблица инструментов с наибольшим абсолютным изменением.
-- ✅ RRG — scatter-график RS-Ratio vs RS-Momentum по секторам с квадрантами.
-- API: новые обработчики `breadth_data()`, `top_movers()`, `rrg_sectors()` в `crates/app/src/api.rs`.
-- Frontend: компоненты `BreadthIndicator.svelte`, `TopMoversTable.svelte`, `HeatmapChart.svelte`, `RrgChart.svelte`.
-- Tauri: команды `breadth_data`, `top_movers`, `rrg_sectors` зарегистрированы.
+- ✅ Вкладочная навигация фронта (8 вкладок, единый интерфейс 0–12).
+- ✅ Секционные настройки UI (`lib/settings.ts` + `SettingsTab`).
+- ✅ `.env.example` с `MOEX_ALGO_API`; секрет-резолвер поддерживает ключи.
+- ⛔ **HTTP-слой** `data::http` (reqwest/rustls + `Backoff` + `RateLimiter`) —
+  транспортная основа ISS/LLM; gRPC-стек для них не годится.
+- ⛔ Egress-allowlist окружения: `apim.moex.com`, `iss.moex.com`,
+  LLM-хосты (`openrouter.ai`, `api.openai.com`, `api.anthropic.com`).
+- ⛔ Персист приватных настроек/правил в ядро (сейчас — только localStorage).
 
-## Фаза 5 — Представления 2 и 3 (Фьючерсы, Облигации) ✅
-- ✅ Фьючерсы: treemap по группам (2-символьный префикс), open interest, оборот/поток.
-- ✅ Облигации: кривая доходности (8 стандартных сроков); таблица эмитентов (3-символ).
-- API: новые обработчики `futures_rollup()`, `bonds_rollup()`, `yield_curve()`.
-- Store: новый метод `instruments_by_asset_class()` для фильтрации по классу активов.
-- Frontend: компоненты `FuturesTreemap.svelte`, `YieldCurve.svelte`, `BondsTable.svelte`.
-- Таури: команды `futures_rollup`, `bonds_rollup`, `yield_curve` зарегистрированы.
+## Фаза 10 — MOEX ALGO 🟡
 
-## Фаза 6 — Представление 4 (Сумма всех) ✅
-- ✅ Общий оборот (gauge), donut долей, stacked area во времени, Sankey перетоков.
-- API: `cross_asset_summary()` (gauge+donut), `turnover_timeline()` (stacked area),
-  `flow_sankey()` (перетоки долей) — поверх `domain::metrics::crossasset`.
-- DTO: `CrossAssetSummaryDto`, `AssetClassShareDto`, `TurnoverByClassPoint`, `FlowEdgeDto`.
-- Tauri: команды `cross_asset_summary`, `turnover_timeline`, `flow_sankey`.
-- Frontend: `TotalTurnoverGauge`, `SharesDonut`, `TurnoverStackedArea`, `FlowSankey`
-  (+ общий помощник `assetClass.ts` с подписями/цветами классов).
+**Готово:** доменное ядро полностью (`domain::algo`: Super Candles, FUTOI,
+HI2, Mega Alerts; `domain::keyactivity`: правила AND/OR/NOT/IfThen, дефолтный
+набор, периоды, LLM-промпт + локальный свод) — всё в тестах без сети. Контракт
+API подтверждён (URL `apim.moex.com`, авторизация Bearer). IPC и фронт
+Key Activity + ИТОГО — боевые. Вкладка MOEX ALGO с 5 модулями свёрстана.
 
-## Фаза 7 — Live-функции ✅
-- ✅ Транспорт live-стримов: `data::stream` (фича `grpc`) — хэндлы
-  `QuoteStream`/`TradeStream`/`BarStream` поверх серверных стримов
-  `MarketDataService.Subscribe*` с авторизацией и переводом протобаф→домен;
-  методы `FinamMarketData::subscribe_quotes`/`subscribe_trades`/`subscribe_bars`.
-- ✅ Авто-reconnect: `data::StreamReconnect` — экспоненциальная пауза с
-  джиттером до потолка, сброс после успешных данных (стрим Finam рвётся ~раз в
-  24 ч). Чистый контроллер и маппинг сообщений (включая `StreamError`) покрыты
-  тестами без сети; сам стрим интеграционно проверяется при наличии секрета.
-- ✅ DOM (стакан): доменный `OrderBook`/`BookLevel` + `FinamMarketData::order_book`
-  (`MarketDataService.OrderBook`) с маппингом строк в биды/аски (сортировка,
-  спред); метод `Method::OrderBook` для лимита. Маппинг покрыт тестами.
-- ✅ Алёрты: `domain::metrics::alerts` — `AlertEngine` с фронтовым срабатыванием
-  (цена/изменение, без повторного спама), чистый и протестированный.
-- ✅ Replay-режим: `app::replay::ReplaySource` реализует `MarketData` из
-  сохранённых баров (в т.ч. `from_store`) — тот же путь ингеста/аналитики без
-  сети; покрыт тестами. Time&Sales — это лента `subscribe_trades`.
-- ✅ Фронтовые панели Time&Sales/DOM/алёртов: компоненты `TimeSales`,
-  `OrderBook` (лесенка с барами глубины и спредом), `AlertsPanel` (правила +
-  срабатывания). DTO `TradeDto`/`OrderBookDto`/`AlertEventDto` + вход
-  `AlertRuleInput`; команда `alerts_scan` (прогон правил по сохранённым барам)
-  и команды-контракты `latest_trades`/`order_book`. Живые обновления —
-  события `trade:tick`/`orderbook:tick` (эмиттеры `emit_trade`/
-  `emit_order_book`), фронт подписывается через `onTrade`/`onOrderBook`
-  (в браузере — мок-снимок). DTO-маппинг и `alerts_scan` покрыты тестами.
+**Осталось:**
+- транспорт `data::moex` (клиент ALGOPACK: tradestats/orderstats/obstats/
+  hi2/futoi, пагинация, парсер ISS JSON на фикстурах, трейт `AlgoSource`);
+- фикстуры живых ответов (нужны боевой ключ + egress);
+- storage-таблицы ALGOPACK + writer'ы + запросы (schema v3);
+- IPC `algo_tradestats`/`algo_futoi`/`algo_hi2`/`algo_mega_alerts` + ингест
+  ALGOPACK в планировщик;
+- перевод модулей Супер-свечи/FUTOI/HI2/Мега с демо-генераторов
+  (`lib/algoMock.ts`) на боевой IPC;
+- LLM-провайдер (`LlmProvider`: OpenRouter/Anthropic/OpenAI, фича `llm`) +
+  подключение к `key_activity_summary`, кэш, деградация без ключа;
+- персист правил Key Activity и настроек паспорта в ядро.
 
-## Фаза 8 — Полировка и сборка
-- ✅ Настройки представления: `frontend/src/lib/settings.ts` (localStorage) +
-  панель `SettingsPanel` — глубина стакана, размер ленты сделок, лимит
-  топ-движений; изменения сохраняются и перезагружают зависимые данные.
-- ✅ Производительность фронта: разнесение тяжёлых библиотек (ECharts,
-  Lightweight Charts) в отдельные кешируемые чанки (`manualChunks`) — код
-  приложения ужался с ~1.27 МБ до ~73 КБ.
-- ✅ Конфигурация упаковки: метаданные бандла в `tauri.conf.json`
-  (издатель, категория, описания, NSIS-языки RU/EN), цели `msi`/`nsis`.
-- ✅ Обработка ошибок: верхнеуровневый баннер ошибки + локальные состояния
-  ошибок/пустоты в панелях (алёрты, стакан, лента).
-- ⏳ Финальная сборка MSI/NSIS (`cargo tauri build`) и иконки — требуют
-  десктопного окружения (webkit2gtk) вне кросс-платформенного CI.
+## Фаза 11 — Историзация 🟡
 
-## Фаза 9 — V2: Бэктестер, Торговля, Delta ✅
-Превращение терминала из «обзора» в «рабочую станцию» (по образцу CQG/MultiCharts).
-Новый каркас фронта — верхние вкладки: **Обзор · Delta · Торговля · Бэктест**.
+**Готово:** доменная модель (`domain::history`: расширенная свеча с
+источником/TF, каталог `DatasetMeta`/`Catalog`, нормализация диапазонов,
+`missing_ranges`); решение по формату — **DuckDB как основное хранилище,
+Parquet как экспорт**; IPC `history_datasets`/`history_delete`/`history_plan`;
+вкладка «Данные» (форма загрузки + менеджер датасетов).
 
-- ✅ Хранилище тиковой ленты: таблица `trades` (схема v2), `Store::insert_trades`/
-  `trades`, `Writer::trades` — основа footprint/дельты и заполнения симулятора.
-- ✅ Бэктестер (`domain::backtest`): трейт `Strategy`, детерминированный движок
-  (позиция/комиссия/слиппедж), отчёт (P&L, win-rate, profit factor, просадка,
-  Sharpe) и библиотека стратегий — «известные сценарии» (`ma_cross`, `same_lot`,
-  `iceberg`, `cvd_momentum`) по id + параметрам.
-- ✅ Delta (`domain::delta`): footprint (объём по ценам и сторонам агрессора,
-  дельта/CVD) и детектирующие роботы — равные лоты, айсберг (по стакану),
-  поглощение. Только анализ/визуализация (роботы не торгуют).
-- ✅ Симулятор торговли (`domain::trading`): заявки/исполнения, счёт и позиции
-  (средняя цена, реализованный/нереализованный P&L), предторговый риск и
-  `SimBroker` (рыночные проходят стакан, лимитки стоят и исполняются на ленте,
-  стопы срабатывают по пробою). Paper trading — движок исполнения V2.
-- ✅ Слой `app`: чистые обработчики `list_strategies`/`run_backtest`/
-  `delta_footprint`/`robot_scan`, сессия торговли `TradeSession` в `AppState`
-  (`submit_order`/`cancel_order`/`order_blotter`/`positions`/`account`), DTO,
-  команды Tauri и канал событий `fill:tick`.
-- ✅ Фронт: вкладки (`TabBar`, `Overview`), `Backtester` (пикер стратегий +
-  форма параметров + кривая капитала + метрики + сделки), `DeltaView`
-  (`DeltaChart`: свечи + гистограмма дельты + накопленная дельта + маркеры
-  роботов; footprint-лесенка; переключатели роботов), `TradePanel` (кликабельный
-  DOM-стакан + тикет + блоттер + позиции + счёт). Типизированный IPC + мок-режим
-  (включая мок-симулятор) — все вкладки работают в браузере без бэкенда.
-- ✅ Каркас боевого роутинга: контракт `data::OrderRouter` + `SimOrderRouter`
-  (по умолчанию) и заглушка `FinamOrderRouter` за фичей `live-trading`
-  (по умолчанию выключена; реальный gRPC `OrderService`/`AccountsService` —
-  отдельная интеграция).
+**Осталось:**
+- трейт `HistorySource` + адаптеры `FinamHistory` (gRPC bars) и `MoexHistory`
+  (ISS candles/tradestats);
+- storage истории: таблицы, идемпотентный upsert/дедуп, инкрементальная
+  дозагрузка, персист `DatasetMeta`, экспорт/импорт Parquet;
+- сервис историзации `app::history` (очередь, лимиты, отмена) + события
+  `history:progress`/`done`/`error` + IPC `history_load`/`history_cancel`;
+- превью датасета (свечи) во вкладке «Данные»;
+- фид для бэктестера: мульти-TF `ReplaySource` + детерминированный курсор.
 
-## Фазы 10–12 — MOEX ALGO · Историзация · Опционы ✅ (фронт)
-Ядро (`domain::algo`, `domain::options`, историзация) реализовано в фазах 0–9;
-в этой итерации новые вкладки сведены с обзорным фронтом (фазы 0–9) в **единый
-интерфейс** по дизайн-прототипу Claude Design (`Market_Terminal.dc.html`).
-Ключевая логика и IPC-контракт унаследованы от текущего фронта; недостающие для
-10–12 модули добавлены из прототипа.
+## Фаза 12 — Опционы 🟡
 
-### Фаза 10 — вкладка MOEX ALGO ✅
-- ✅ Тулбар: инструмент · период (1ч/1д/1н/1м/3м) · рынок; переключатель модулей.
-- ✅ **Ключевая активность + ИТОГО** — боевой IPC (`key_activity`,
-  `key_activity_summary`): таблица правил с фильтрами + ИИ-резюме/локальный свод.
-- ✅ **Супер-свечи** (`SuperCandlesChart`): свечи + VWAP-полоса + объём +
-  под-график дисбаланса покупок/продаж + таблица метрик (аномальные бары).
-- ✅ **FUTOI** (`FutoiChart`): открытые позиции физ/юр, режимы Long/Short/Нетто +
-  таблица по группам (доля long, ΔOI).
-- ✅ **Концентрация HI2** (`Hi2Chart`): временной ряд с зонами «умеренная»/
-  «доминирование» + ранжирование тикеров.
-- ✅ **Мега-алёрты**: лента событий с важностью и фильтром по типу.
-- Ряды модулей Супер-свечи/FUTOI/HI2/Мега идут из детерминированных демо-
-  генераторов (`lib/algoMock.ts`) до подключения боевого транспорта ALGOPACK
-  (`data::moex`); аналитика уже в `domain::algo`.
+**Готово:** доменное ядро полностью (`domain::options`: Black-76 + Bachelier,
+аналитические греки, устойчивый IV-решатель; 4 модели улыбки — MOEX / SABR /
+SVI / Каленкович — с общим калибратором Нелдера–Мида и RMSE; конструктор
+стратегий: ноги, шаблоны, payoff, греки портфеля, безубытки); IPC
+`option_price`/`option_implied_vol`/`smile_fit`/`strategy_eval`/
+`list_smile_models`; вкладка «Опционы» (калькулятор, улыбка, конструктор);
+справочник `docs/options-smile-models.html`.
 
-### Фаза 11 — историзация (вкладка «Данные») ✅
-- ✅ Форма загрузки (источник Finam/MOEX ALGO · инструмент · таймфреймы · период)
-  с планом дозагрузки (`history_plan`) и прогрессом.
-- ✅ Менеджер локальных датасетов (`history_datasets`/`history_delete`).
+**Осталось:**
+- загрузка живой опционной доски MOEX через ISS (`data::moex`), маппинг доски
+  → точки улыбки, трейт `OptionsSource` + фейк;
+- IPC `option_board` + фронт улыбки на живых данных (сейчас — мок-точки);
+- опц. историзация доски/снимков IV в storage;
+- верификация формы улыбки MOEX по официальной «Методике…» НКЦ, финализация
+  `docs/options-smile-models.html`;
+- профиль риска стратегии (тепловая карта цена/время) — полировка.
 
-### Фаза 12 — опционы ✅
-- ✅ **Калькулятор** (`option_price`/`option_implied_vol`): цена/греки/IV,
-  Black-76 · Bachelier.
-- ✅ **Улыбка волатильности** (`smile_fit`): одновременная калибровка всех моделей,
-  карточки параметров + RMSE, чипы видимости, выбор «активной» модели,
-  OI-взвешенный scatter рыночных точек.
-- ✅ **Конструктор стратегий** (`strategy_eval`): пресеты-чипы (вертикаль/стрэддл/
-  стрэнгл/бабочка/кондор/покрытый колл) + payoff + греки/безубытки.
+## Порядок работ
 
-### Вкладка «Настройки» (10–12) ✅
-- ✅ Отображение (глубина стакана · лента · лимит лидеров).
-- ✅ MOEX ALGO / Passport: статус секрета, рынки, вотчлист ALGOPACK.
-- ✅ Конструктор правил Key Activity: правила (важность · условия метрика/оператор/
-  порог/область · связки И/ИЛИ/НЕ) с импортом/экспортом JSON; засев из доменных
-  правил ядра (`key_activity_rules`).
-- ✅ LLM · ИИ-резюме: провайдер/модель/статус ключа/лимит токенов/авто-резюме/
-  период по умолчанию (секреты в UI не хранятся).
-- ✅ Данные/историзация и опционы (модель ценообразования · ставка · улыбка).
+1. **HTTP-слой + egress + фикстуры** — разблокируют весь сетевой контур 10–12.
+2. **Фаза 10 транспорт** (`data::moex`) — переиспользуется фазами 11
+   (MoexHistory) и 12 (опционная доска).
+3. **Фаза 11** (storage + загрузчик) и **LLM** — параллельно после транспорта.
+4. **Фаза 12 данные** (доска, `option_board`) — после `data::moex`.
+5. **Финализация**: персист настроек, превью, упаковка MSI/NSIS (десктоп).
 
-Единый визуальный язык вынесен в общие классы `app.css` (сегменты, чипы,
-стат-карточки, бейджи, чипы важности), палитра совпадает с прототипом.
+Пошаговая разбивка с исполнителями — `TASKS_list.md`.
 
-Справочные материалы:
-- **`ROADMAP_PHASE_10-12.md`** — детальный TO-DO по фазам 10–12.
-- **`design/claude-design-brief.md`** — бриф (EN) для Claude Design.
-- **`Market_Terminal.dc.html`** — дизайн-прототип (новая итерация 10–12).
+## Дисциплина и качество
 
-### Осталось (вне кросс-платформенного CI)
-- ⏳ Боевой транспорт ALGOPACK (`data::moex`) для рядов Супер-свечи/FUTOI/HI2/Мега
-  вместо демо-генераторов.
-- ⏳ Персист правил Key Activity и настроек паспорта в ядро (сейчас — localStorage).
-- ⏳ Упаковка десктоп-приложения (MSI/NSIS) — требует десктоп-окружения.
+- Вся математика/правила/промпты — в `domain`, чисто, в тестах без сети.
+- Сетевое/тяжёлое — за cargo-фичами (`grpc`, `duckdb`, `tauri`, `ingest`,
+  `live`, будущие `http`/`moex`/`llm`); кросс-платформенный CI зелёный без них.
+- Секреты — только через резолвер (env → `.env` → keyring), не в localStorage
+  и не в логах.
+- Каждый PR: `cargo fmt --check`, `cargo clippy -D warnings`,
+  `cargo test --workspace`, `npm run check` + `npm run test` + `npm run build`.
+- Коммиты — конвенциональные (`feat:`/`fix:`/...), как в истории репозитория.
