@@ -11,6 +11,7 @@
 
 mod api;
 mod dto;
+mod settings;
 mod state;
 mod telemetry;
 mod trade;
@@ -527,6 +528,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.history_datasets().len(),
             plan.len(),
             removed
+        );
+
+        // T3 — персист настроек и правил Key Activity в JSON-файл config-директории.
+        println!(
+            "  settings_get(): tapeLimit(дефолт)={}",
+            state.settings_get().tape_limit
+        );
+        let mut custom_settings = state.settings_get();
+        custom_settings.dom_depth = 15;
+        state.settings_set(custom_settings)?;
+        println!(
+            "  settings_set(domDepth=15): settings_get()={}",
+            state.settings_get().dom_depth
+        );
+        let ka_rules_json = r#"[{
+            "id": "custom_1",
+            "name": "Пользовательское правило",
+            "scope": {"kind": "market"},
+            "expr": {"Cond": {"metric": "volume_z_score", "cmp": "ge", "threshold": 3.0}},
+            "weight": 1.0
+        }]"#;
+        let saved_rules = state.key_activity_rules_set(ka_rules_json)?;
+        println!(
+            "  key_activity_rules_set(): сохранено {} правило(-а), в файле сейчас {}",
+            saved_rules.len(),
+            state.key_activity_rules_get().len()
         );
 
         Ok(())

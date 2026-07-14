@@ -40,6 +40,7 @@ import type {
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  SettingsDto,
   SmileFitDto,
   SmileFitInput,
   SmileModelDto,
@@ -57,7 +58,7 @@ import type {
 } from "./types";
 import * as mock from "./mock";
 
-function inTauri(): boolean {
+export function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
@@ -189,6 +190,15 @@ export const ipc = {
   historyDatasets: () => invoke<DatasetMetaDto[]>("history_datasets"),
   historyDelete: (id: DatasetIdInput) => invoke<boolean>("history_delete", { id }),
   historyPlan: (input: HistoryPlanInput) => invoke<TimeRangeDto[]>("history_plan", { input }),
+
+  // ── T3 / Настройки и правила Key Activity (10.5.3/S.2.2) ────────────────────
+  settingsGet: () => invoke<SettingsDto>("settings_get"),
+  settingsSet: (doc: SettingsDto) => invoke<void>("settings_set", { doc }),
+  keyActivityRulesGet: () => invoke<KeyActivityRuleDto[]>("key_activity_rules_get"),
+  // `rulesJson` — JSON-массив в формате доменной модели `domain::keyactivity::Rule`
+  // (сериализуется вызывающей стороной; см. `SettingsTab.svelte`).
+  keyActivityRulesSet: (rulesJson: string) =>
+    invoke<KeyActivityRuleDto[]>("key_activity_rules_set", { rulesJson }),
 };
 
 // Подписки на live-push события (каналы `trade:tick` / `orderbook:tick`).

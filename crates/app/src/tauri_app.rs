@@ -20,7 +20,7 @@ use crate::dto::{
     InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
     KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderBookDto, OrderDto, OrderInput,
     PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
+    SettingsDto, SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
     StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
     TurnoverPoint, YieldCurvePoint,
 };
@@ -263,6 +263,31 @@ fn key_activity_rules(state: State<AppState>) -> CmdResult<Vec<KeyActivityRuleDt
     Ok(state.key_activity_rules())
 }
 
+// ── T3 — Настройки и правила Key Activity (10.5.3/S.2.2/10.8.*/11.6.1/12.8.1) ─
+
+#[tauri::command]
+fn settings_get(state: State<AppState>) -> CmdResult<SettingsDto> {
+    Ok(state.settings_get())
+}
+
+#[tauri::command]
+fn settings_set(state: State<AppState>, doc: SettingsDto) -> CmdResult<()> {
+    state.settings_set(doc)
+}
+
+#[tauri::command]
+fn key_activity_rules_get(state: State<AppState>) -> CmdResult<Vec<KeyActivityRuleDto>> {
+    Ok(state.key_activity_rules_get())
+}
+
+#[tauri::command]
+fn key_activity_rules_set(
+    state: State<AppState>,
+    rules_json: String,
+) -> CmdResult<Vec<KeyActivityRuleDto>> {
+    state.key_activity_rules_set(&rules_json)
+}
+
 // ── Фаза 11 — Историзация: каталог датасетов ─────────────────────────────────
 
 #[tauri::command]
@@ -408,6 +433,10 @@ pub fn run() {
             key_activity,
             key_activity_summary,
             key_activity_rules,
+            settings_get,
+            settings_set,
+            key_activity_rules_get,
+            key_activity_rules_set,
             history_datasets,
             history_delete,
             history_plan,

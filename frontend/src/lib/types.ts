@@ -490,3 +490,39 @@ export interface DatasetIdInput {
   secid: string;
   tf: string;
 }
+
+// ── T3 — Персист настроек и правил Key Activity в ядро ───────────────────────
+// (10.5.3 / S.2.2 / 10.8.* / 11.6.1 / 12.8.1)
+//
+// `SettingsDto` — документ, который `app::settings::SettingsStore` хранит в
+// JSON-файле ОС-config-директории (единый источник истины вместо
+// localStorage). Поля намеренно совпадают с `lib/settings.ts::Settings`
+// (только перечисления здесь — простой `string`, а не литеральный union: см.
+// конвертеры `toDto`/`fromDto` в `settings.ts`). Секретов здесь нет — только
+// флаг `llmHasKey`.
+
+export interface MarketsDto {
+  eq: boolean;
+  fo: boolean;
+  fx: boolean;
+}
+
+export interface SettingsDto {
+  tapeLimit: number;
+  domDepth: number;
+  topMoversLimit: number;
+  markets: MarketsDto;
+  watchlist: Record<string, boolean>;
+  llmProvider: string;
+  llmModel: string;
+  llmHasKey: boolean;
+  llmTokenLimit: number;
+  llmAuto: boolean;
+  defaultPeriod: string;
+  dataSource: string;
+  dataDir: string;
+  concurrency: number;
+  pricingModel: string;
+  rate: number;
+  defaultSmile: string;
+}

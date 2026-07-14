@@ -4,6 +4,8 @@
 //! `camelCase` (привычно для TypeScript), чтобы фронт получал готовые к
 //! отрисовке структуры (treemap/heatmap/свечи/временные ряды) без доустройки.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use domain::backtest::{
@@ -1091,6 +1093,165 @@ pub struct KeyActivityRuleDto {
     pub weight: f64,
 }
 
+impl From<&domain::keyactivity::Rule> for KeyActivityRuleDto {
+    fn from(r: &domain::keyactivity::Rule) -> Self {
+        Self {
+            id: r.id.clone(),
+            name: r.name.clone(),
+            weight: r.weight,
+        }
+    }
+}
+
+// ── T3 — Персист настроек и правил Key Activity в ядро ───────────────────────
+// (10.5.3 / S.2.2 / 10.8.* / 11.6.1 / 12.8.1)
+//
+// Документ настроек, который хранит `crate::settings::SettingsStore` в
+// JSON-файле ОС-config-директории — единый источник истины вместо
+// localStorage. Зеркалит `frontend/src/lib/settings.ts::Settings` поле в
+// поле (camelCase), КРОМЕ секретов: ключ LLM-провайдера/токен ALGOPACK сюда
+// не попадают — только флаг `llmHasKey` («секрет задан»). Сами секреты живут
+// в ОС-keyring/`.env` (`data::SecretStore`).
+
+/// Активные рынки паспорта MOEX ALGOPACK.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketsDto {
+    pub eq: bool,
+    pub fo: bool,
+    pub fx: bool,
+}
+
+impl Default for MarketsDto {
+    fn default() -> Self {
+        Self {
+            eq: true,
+            fo: true,
+            fx: false,
+        }
+    }
+}
+
+/// Документ пользовательских настроек терминала (см. пояснение к разделу выше).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SettingsDto {
+    pub tape_limit: i64,
+    pub dom_depth: i64,
+    pub top_movers_limit: i64,
+
+    // ── Паспорт MOEX ALGO ──────────────────────────────────────────────────
+    pub markets: MarketsDto,
+    pub watchlist: BTreeMap<String, bool>,
+
+    // ── LLM · ИИ-резюме ────────────────────────────────────────────────────
+    pub llm_provider: String,
+    pub llm_model: String,
+    /// Флаг «ключ провайдера задан» — сам ключ не хранится (S.2.2).
+    pub llm_has_key: bool,
+    pub llm_token_limit: i64,
+    pub llm_auto: bool,
+    pub default_period: String,
+
+    // ── Данные / Историзация ───────────────────────────────────────────────
+    pub data_source: String,
+    pub data_dir: String,
+    pub concurrency: i64,
+
+    // ── Опционы ────────────────────────────────────────────────────────────
+    pub pricing_model: String,
+    pub rate: f64,
+    pub default_smile: String,
+}
+
+impl Default for SettingsDto {
+    fn default() -> Self {
+        Self {
+            tape_limit: 50,
+            dom_depth: 10,
+            top_movers_limit: 10,
+
+            markets: MarketsDto::default(),
+            watchlist: [
+                ("SBER", true),
+                ("GAZP", true),
+                ("LKOH", true),
+                ("GMKN", false),
+                ("ROSN", true),
+                ("VTBR", false),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+
+            llm_provider: "openrouter".to_string(),
+            llm_model: "anthropic/claude-3.5-sonnet".to_string(),
+            llm_has_key: false,
+            llm_token_limit: 2000,
+            llm_auto: true,
+            default_period: "1h".to_string(),
+
+            data_source: "finam".to_string(),
+            data_dir: "~/.market-terminal/history".to_string(),
+            concurrency: 4,
+
+            pricing_model: "black76".to_string(),
+            rate: 0.0,
+            default_smile: "moex".to_string(),
+        }
+    }
+}
+
+impl SettingsDto {
+    /// Проверить значения перед атомарной записью (`settings_set`): отклоняет
+    /// заведомо нерабочие настройки (неположительные лимиты, неизвестные коды
+    /// перечислений, неконечную ставку) с понятной причиной по-русски.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.tape_limit <= 0 {
+            return Err("tapeLimit должен быть положительным".into());
+        }
+        if self.dom_depth <= 0 {
+            return Err("domDepth должен быть положительным".into());
+        }
+        if self.top_movers_limit <= 0 {
+            return Err("topMoversLimit должен быть положительным".into());
+        }
+        if self.llm_token_limit <= 0 {
+            return Err("llmTokenLimit должен быть положительным".into());
+        }
+        if self.concurrency <= 0 {
+            return Err("concurrency должен быть положительным".into());
+        }
+        if !self.rate.is_finite() {
+            return Err("rate должен быть конечным числом".into());
+        }
+        const PROVIDERS: [&str; 3] = ["openrouter", "anthropic", "openai"];
+        if !PROVIDERS.contains(&self.llm_provider.as_str()) {
+            return Err(format!("неизвестный llmProvider: {}", self.llm_provider));
+        }
+        const PERIODS: [&str; 5] = ["1h", "1d", "1w", "1m", "3m"];
+        if !PERIODS.contains(&self.default_period.as_str()) {
+            return Err(format!(
+                "неизвестный defaultPeriod: {}",
+                self.default_period
+            ));
+        }
+        const SOURCES: [&str; 2] = ["finam", "moex_algo"];
+        if !SOURCES.contains(&self.data_source.as_str()) {
+            return Err(format!("неизвестный dataSource: {}", self.data_source));
+        }
+        const PRICING: [&str; 2] = ["black76", "bachelier"];
+        if !PRICING.contains(&self.pricing_model.as_str()) {
+            return Err(format!("неизвестный pricingModel: {}", self.pricing_model));
+        }
+        const SMILES: [&str; 4] = ["moex", "sabr", "svi", "kalen"];
+        if !SMILES.contains(&self.default_smile.as_str()) {
+            return Err(format!("неизвестный defaultSmile: {}", self.default_smile));
+        }
+        Ok(())
+    }
+}
+
 // ── Фаза 11 — Историзация: каталог локальных датасетов ───────────────────────
 
 /// Метаданные локального датасета истории (строка «Локальные датасеты»).
@@ -1230,6 +1391,44 @@ mod tests {
         assert_eq!(dto.bids.len(), 2);
         assert_eq!(dto.bids[0].price, 100.0);
         assert_eq!(dto.asks[0].size, 4.0);
+    }
+
+    // ── T3 — Настройки ───────────────────────────────────────────────────────
+
+    #[test]
+    fn settings_dto_defaults_pass_validation() {
+        assert!(SettingsDto::default().validate().is_ok());
+    }
+
+    #[test]
+    fn settings_dto_rejects_unknown_enum_codes_and_bad_numbers() {
+        let d = SettingsDto {
+            llm_provider: "bogus".into(),
+            ..SettingsDto::default()
+        };
+        assert!(d.validate().is_err());
+
+        let d = SettingsDto {
+            dom_depth: 0,
+            ..SettingsDto::default()
+        };
+        assert!(d.validate().is_err());
+
+        let d = SettingsDto {
+            rate: f64::NAN,
+            ..SettingsDto::default()
+        };
+        assert!(d.validate().is_err());
+    }
+
+    #[test]
+    fn settings_dto_missing_fields_fill_from_defaults() {
+        // Частичный JSON (как из старого/будущего формата файла) не должен падать —
+        // отсутствующие поля берутся из Default (container-level `#[serde(default)]`).
+        let partial: SettingsDto = serde_json::from_str(r#"{"tapeLimit":100}"#).unwrap();
+        assert_eq!(partial.tape_limit, 100);
+        assert_eq!(partial.dom_depth, SettingsDto::default().dom_depth);
+        assert_eq!(partial.llm_provider, SettingsDto::default().llm_provider);
     }
 
     #[test]

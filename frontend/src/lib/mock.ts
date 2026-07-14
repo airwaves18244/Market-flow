@@ -31,6 +31,7 @@ import type {
   RrgSectorDto,
   SectorEntryDto,
   SectorRow,
+  SettingsDto,
   SmileFitDto,
   SmileFitInput,
   SmileModelDto,
@@ -800,6 +801,46 @@ function mockHistoryPlan(input: {
   return gaps.filter((g) => g.till > g.from);
 }
 
+// ── T3 — Настройки и правила Key Activity (мок ядра для браузера) ────────────
+// Имитирует персист в core JSON-файл в памяти вкладки: браузерный мок-режим
+// не переживает перезагрузку страницы — там источником истины остаётся
+// localStorage (см. `lib/settings.ts`). Здесь — только чтобы `settings_get`/
+// `settings_set`/`key_activity_rules_*` были рабочими командами в dev-режиме
+// без Tauri (нужно для тестов миграции и локальной разработки UI).
+
+function defaultMockSettings(): SettingsDto {
+  return {
+    tapeLimit: 50,
+    domDepth: 10,
+    topMoversLimit: 10,
+    markets: { eq: true, fo: true, fx: false },
+    watchlist: { SBER: true, GAZP: true, LKOH: true, GMKN: false, ROSN: true, VTBR: false },
+    llmProvider: "openrouter",
+    llmModel: "anthropic/claude-3.5-sonnet",
+    llmHasKey: false,
+    llmTokenLimit: 2000,
+    llmAuto: true,
+    defaultPeriod: "1h",
+    dataSource: "finam",
+    dataDir: "~/.market-terminal/history",
+    concurrency: 4,
+    pricingModel: "black76",
+    rate: 0,
+    defaultSmile: "moex",
+  };
+}
+
+let mockSettings: SettingsDto | null = null;
+let mockKeyActivityRules: KeyActivityRuleDto[] = [];
+
+/** Сбросить мок-состояние «ядра» (настройки/правила Key Activity) между
+ * тестами — модульные переменные иначе переживают отдельные `it()` в одном
+ * файле. Только для тестов. */
+export function resetCoreMockForTests(): void {
+  mockSettings = null;
+  mockKeyActivityRules = [];
+}
+
 export async function handle<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   switch (cmd) {
     case "instruments":
@@ -926,6 +967,31 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
         requestedTill: number;
       };
       return mockHistoryPlan(inp) as unknown as T;
+    }
+
+    // ── T3 / Настройки и правила Key Activity ───────────────────────────────────
+    case "settings_get":
+      if (!mockSettings) mockSettings = defaultMockSettings();
+      return mockSettings as unknown as T;
+    case "settings_set":
+      mockSettings = args?.doc as SettingsDto;
+      return undefined as unknown as T;
+    case "key_activity_rules_get":
+      return mockKeyActivityRules as unknown as T;
+    case "key_activity_rules_set": {
+      const rulesJson = String(args?.rulesJson ?? "[]");
+      let parsed: { id?: string; name?: string; weight?: number }[];
+      try {
+        parsed = JSON.parse(rulesJson);
+      } catch {
+        throw new Error("невалидные правила Key Activity: битый JSON");
+      }
+      mockKeyActivityRules = parsed.map((r) => ({
+        id: r.id ?? "",
+        name: r.name ?? "",
+        weight: r.weight ?? 0,
+      }));
+      return mockKeyActivityRules as unknown as T;
     }
 
     default:
