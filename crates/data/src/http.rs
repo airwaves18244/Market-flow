@@ -35,9 +35,9 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
-/// Транспорт одного HTTP `GET`-запроса. Абстрагирует сеть, чтобы оркестрацию
-/// [`HttpClient`] (лимиты, ретраи, маппинг ошибок) можно было тестировать
-/// детерминированно, без реального HTTP.
+/// Транспорт одного HTTP `GET`/`POST`-запроса. Абстрагирует сеть, чтобы
+/// оркестрацию [`HttpClient`] (лимиты, ретраи, маппинг ошибок) можно было
+/// тестировать детерминированно, без реального HTTP.
 ///
 /// Возвращает `Err` только при сбое самого обмена (сеть, DNS, тайм-аут,
 /// некорректные заголовки) — любой полученный HTTP-ответ, включая 4xx/5xx,
@@ -49,12 +49,24 @@ pub trait HttpTransport: Send + Sync {
         url: &str,
         headers: &[(String, String)],
     ) -> impl Future<Output = Result<HttpResponse, DataError>> + Send;
+
+    /// Выполнить `POST url` с заголовками `headers` и телом `body` (сырые байты
+    /// — JSON-тело сериализует вызывающая сторона в [`HttpClient::post_json`]).
+    fn post(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        body: Vec<u8>,
+    ) -> impl Future<Output = Result<HttpResponse, DataError>> + Send;
 }
 
 /// HTTP/JSON-клиент: держит per-method rate-limit и повторяет транзиентные
 /// сбои с [`Backoff`], поверх произвольного [`HttpTransport`].
 pub struct HttpClient<T: HttpTransport> {
-    transport: T,
+    // `pub(crate)`, а не приватное: тестам смежных модулей (`crate::llm`) нужен
+    // прямой доступ к фейковому транспорту (счётчик вызовов, захваченные
+    // запросы) без искусственного публичного геттера в боевом API.
+    pub(crate) transport: T,
     limiter: RateLimiter,
     backoff: Backoff,
 }
@@ -102,6 +114,47 @@ impl<T: HttpTransport> HttpClient<T> {
             }
 
             let outcome = match self.transport.get(url, headers).await {
+                Ok(resp) => response_to_result(method, resp),
+                Err(e) => Err(e),
+            };
+
+            match outcome {
+                Ok(value) => return Ok(value),
+                Err(e) if e.is_retryable() && !self.backoff.is_exhausted(attempt) => {
+                    self.sleep_for(attempt).await;
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// `POST url` с заголовками `headers` и JSON-телом `body`, ответ разобран
+    /// как JSON. Та же политика лимитов/ретраев/маппинга ошибок, что и у
+    /// [`HttpClient::get_json`] (нужна LLM-провайдерам: их API — POST с
+    /// JSON-телом запроса).
+    pub async fn post_json(
+        &self,
+        method: Method,
+        url: &str,
+        headers: &[(String, String)],
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, DataError> {
+        let body_bytes = serde_json::to_vec(body)
+            .map_err(|e| DataError::Other(format!("не удалось сериализовать JSON-тело: {e}")))?;
+
+        let mut attempt = 0u32;
+        loop {
+            if let Err(e) = self.limiter.try_acquire(method) {
+                if self.backoff.is_exhausted(attempt) {
+                    return Err(e);
+                }
+                self.sleep_for(attempt).await;
+                attempt += 1;
+                continue;
+            }
+
+            let outcome = match self.transport.post(url, headers, body_bytes.clone()).await {
                 Ok(resp) => response_to_result(method, resp),
                 Err(e) => Err(e),
             };
@@ -199,14 +252,7 @@ impl HttpTransport for ReqwestTransport {
         url: &str,
         headers: &[(String, String)],
     ) -> Result<HttpResponse, DataError> {
-        let mut header_map = reqwest::header::HeaderMap::new();
-        for (name, value) in headers {
-            let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
-                .map_err(|_| DataError::Other(format!("неверное имя заголовка: {name}")))?;
-            let header_value = reqwest::header::HeaderValue::from_str(value)
-                .map_err(|_| DataError::Other(format!("неверное значение заголовка {name}")))?;
-            header_map.insert(header_name, header_value);
-        }
+        let header_map = build_header_map(headers)?;
 
         let resp = self
             .client
@@ -216,14 +262,52 @@ impl HttpTransport for ReqwestTransport {
             .await
             .map_err(|e| DataError::Transport(describe_request_error(&e)))?;
 
-        let status = resp.status().as_u16();
-        let body = resp
-            .bytes()
-            .await
-            .map_err(|e| DataError::Transport(format!("чтение тела ответа: {e}")))?
-            .to_vec();
-        Ok(HttpResponse { status, body })
+        read_response(resp).await
     }
+
+    async fn post(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        body: Vec<u8>,
+    ) -> Result<HttpResponse, DataError> {
+        let header_map = build_header_map(headers)?;
+
+        let resp = self
+            .client
+            .post(url)
+            .headers(header_map)
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| DataError::Transport(describe_request_error(&e)))?;
+
+        read_response(resp).await
+    }
+}
+
+/// Собрать `reqwest::HeaderMap` из пар «имя, значение» (общая часть `get`/`post`).
+fn build_header_map(headers: &[(String, String)]) -> Result<reqwest::header::HeaderMap, DataError> {
+    let mut header_map = reqwest::header::HeaderMap::new();
+    for (name, value) in headers {
+        let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+            .map_err(|_| DataError::Other(format!("неверное имя заголовка: {name}")))?;
+        let header_value = reqwest::header::HeaderValue::from_str(value)
+            .map_err(|_| DataError::Other(format!("неверное значение заголовка {name}")))?;
+        header_map.insert(header_name, header_value);
+    }
+    Ok(header_map)
+}
+
+/// Прочитать статус и тело ответа (общая часть `get`/`post`).
+async fn read_response(resp: reqwest::Response) -> Result<HttpResponse, DataError> {
+    let status = resp.status().as_u16();
+    let body = resp
+        .bytes()
+        .await
+        .map_err(|e| DataError::Transport(format!("чтение тела ответа: {e}")))?
+        .to_vec();
+    Ok(HttpResponse { status, body })
 }
 
 /// Короткое, без секретов, описание сетевой ошибки `reqwest` (тайм-аут/сеть).
@@ -247,11 +331,13 @@ mod tests {
     use std::sync::Mutex;
 
     /// Один зафиксированный вызов фейкового транспорта (для проверки, что
-    /// URL/заголовки действительно доходят из `HttpClient` до транспорта).
+    /// URL/заголовки/тело действительно доходят из `HttpClient` до транспорта).
     #[derive(Debug, Clone)]
     struct CapturedCall {
         url: String,
         headers: Vec<(String, String)>,
+        /// `None` — вызов был `GET`; `Some(body)` — `POST` с телом `body`.
+        body: Option<Vec<u8>>,
     }
 
     /// Фейковый транспорт: считает вызовы, запоминает их аргументы и отдаёт
@@ -297,6 +383,25 @@ mod tests {
                 .push(CapturedCall {
                     url: url.to_owned(),
                     headers: headers.to_vec(),
+                    body: None,
+                });
+            let i = self.calls.fetch_add(1, Ordering::SeqCst) as usize;
+            self.program[i.min(self.program.len() - 1)].clone()
+        }
+
+        async fn post(
+            &self,
+            url: &str,
+            headers: &[(String, String)],
+            body: Vec<u8>,
+        ) -> Result<HttpResponse, DataError> {
+            self.captured
+                .lock()
+                .expect("mutex отравлен")
+                .push(CapturedCall {
+                    url: url.to_owned(),
+                    headers: headers.to_vec(),
+                    body: Some(body),
                 });
             let i = self.calls.fetch_add(1, Ordering::SeqCst) as usize;
             self.program[i.min(self.program.len() - 1)].clone()
@@ -493,5 +598,66 @@ mod tests {
         let debug = format!("{resp:?}");
         assert!(!debug.contains("Bearer"));
         assert!(!debug.contains("Authorization"));
+    }
+
+    #[tokio::test]
+    async fn post_json_carries_url_headers_and_body_to_transport() {
+        let c = client(FakeTransport::always(ok_json(200, r#"{"ok":true}"#)), 3);
+        let headers = vec![("Authorization".to_owned(), "Bearer secret-token".to_owned())];
+        let body = serde_json::json!({"model": "x", "messages": []});
+        let value = c
+            .post_json(Method::Llm, "https://example.invalid/llm", &headers, &body)
+            .await
+            .unwrap();
+        assert_eq!(value["ok"], serde_json::Value::Bool(true));
+
+        let calls = c.transport.captured_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].url, "https://example.invalid/llm");
+        assert_eq!(
+            calls[0].headers,
+            vec![("Authorization".to_owned(), "Bearer secret-token".to_owned())]
+        );
+        let sent_body: serde_json::Value =
+            serde_json::from_slice(calls[0].body.as_ref().unwrap()).unwrap();
+        assert_eq!(sent_body, body);
+    }
+
+    #[tokio::test]
+    async fn post_json_retries_transient_errors_then_succeeds() {
+        let c = client(
+            FakeTransport::new(vec![
+                Ok(ok_json(503, "unavailable")),
+                Ok(ok_json(200, r#"{"data":1}"#)),
+            ]),
+            5,
+        );
+        let value = c
+            .post_json(
+                Method::Llm,
+                "https://example.invalid/llm",
+                &[],
+                &serde_json::json!({}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(value["data"], serde_json::json!(1));
+        assert_eq!(c.transport.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn post_json_unauthorized_does_not_retry() {
+        let c = client(FakeTransport::always(ok_json(401, "unauthorized")), 5);
+        let err = c
+            .post_json(
+                Method::Llm,
+                "https://example.invalid/llm",
+                &[],
+                &serde_json::json!({}),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DataError::Auth(_)));
+        assert_eq!(c.transport.calls(), 1);
     }
 }

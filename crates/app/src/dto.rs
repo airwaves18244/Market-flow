@@ -1070,7 +1070,7 @@ impl From<&KeyActivityRow> for KeyActivityRowDto {
 }
 
 /// Итоговое ИИ-резюме по ключевой активности (панель «ИТОГО»). В отсутствие
-/// LLM-ключа/сети — локально собранный текстовый свод (`fallback`).
+/// LLM-ключа/сети — локально собранный текстовый свод (`fallback`/`source`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyActivitySummaryDto {
@@ -1080,8 +1080,13 @@ pub struct KeyActivitySummaryDto {
     pub period: String,
     /// Число строк ключевой активности, попавших в свод.
     pub row_count: usize,
-    /// Локальный свод (`true`) vs. ответ LLM (`false`).
+    /// Локальный свод (`true`) vs. ответ LLM (`false`). Сохранён для
+    /// обратной совместимости с фронтом; эквивалентен `source != "llm"`.
     pub fallback: bool,
+    /// Источник текста: `"llm"` — живой ответ провайдера, `"local"` —
+    /// локальный текстовый свод (фича `llm` выключена, ключ не найден, либо
+    /// провайдер недоступен/ошибся — 10.4.3, грациозная деградация).
+    pub source: String,
 }
 
 /// Описание правила Key Activity по умолчанию (для UI-настроек/справки).

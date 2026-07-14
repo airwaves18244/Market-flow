@@ -771,7 +771,7 @@ function mockKeyActivitySummary(
     rows.length === 0
       ? `За период ${period} значимых активностей не выявлено.`
       : `Ключевая активность за ${period} (${rows.length} сигналов):\n${lines.join("\n")}`;
-  return { text, period, rowCount: rows.length, fallback: true };
+  return { text, period, rowCount: rows.length, fallback: true, source: "local" };
 }
 
 // ── Фаза 11 — Историзация: демо-каталог датасетов ────────────────────────────

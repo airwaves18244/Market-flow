@@ -56,6 +56,9 @@ grpc = ["dep:tonic", "dep:tokio", "dep:prost-types", "finam-proto/grpc"]
 # Async-runtime (`tokio`) переиспользуется из фичи `grpc` — здесь та же
 # зависимость подключается независимо от неё.
 http = ["dep:reqwest", "dep:tokio", "dep:serde_json"]
+# LLM-провайдеры (OpenRouter/OpenAI/Anthropic) для живого ИИ-резюме Key Activity
+# (фаза 10.4). Поверх транспорта `http` — своих сетевых зависимостей не тянет.
+llm = ["http"]
 # Боевой роутинг заявок в Finam (OrderService/AccountsService). Каркас: контракт
 # `OrderRouter` есть всегда (с симулятором по умолчанию), а заглушка
 # `FinamOrderRouter` компилируется только под этой фичей. Реальный транспорт

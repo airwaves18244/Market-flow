@@ -249,6 +249,25 @@ fn key_activity(
     Ok(state.key_activity(&samples, period.as_deref()))
 }
 
+/// Свод «ИТОГО» по ключевой активности. Со включённой фичей `llm` — живой
+/// ИИ-провайдер из настроек с грациозной деградацией в локальный свод
+/// (см. [`AppState::key_activity_summary_live`]); команда асинхронная, чтобы
+/// сетевой вызов не блокировал IPC-поток.
+#[cfg(feature = "llm")]
+#[tauri::command]
+async fn key_activity_summary(
+    state: State<'_, AppState>,
+    samples: Vec<KeyActivitySampleInput>,
+    period: Option<String>,
+) -> CmdResult<KeyActivitySummaryDto> {
+    Ok(state
+        .key_activity_summary_live(&samples, period.as_deref())
+        .await)
+}
+
+/// Свод «ИТОГО» по ключевой активности: без фичи `llm` — всегда локальный
+/// текстовый свод (как и раньше).
+#[cfg(not(feature = "llm"))]
 #[tauri::command]
 fn key_activity_summary(
     state: State<AppState>,

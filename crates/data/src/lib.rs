@@ -19,6 +19,8 @@ pub mod endpoint;
 pub mod grpc;
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(feature = "llm")]
+pub mod llm;
 #[cfg(feature = "grpc")]
 pub mod market;
 pub mod orders;
@@ -35,6 +37,10 @@ pub use endpoint::Method;
 pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
 #[cfg(feature = "http")]
 pub use http::{HttpClient, HttpResponse, HttpTransport, ReqwestTransport};
+#[cfg(feature = "llm")]
+pub use llm::{
+    Anthropic as AnthropicLlm, LlmProvider, LlmRequest, OpenAi as OpenAiLlm, OpenRouter,
+};
 #[cfg(feature = "grpc")]
 pub use market::FinamMarketData;
 #[cfg(feature = "live-trading")]
