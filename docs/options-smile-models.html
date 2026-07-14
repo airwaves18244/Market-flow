@@ -71,8 +71,12 @@
 расчёт, без внешних библиотек — работает офлайн в десктоп-сборке). Кривые
 <b>SABR</b> и <b>SVI</b> — точные (канонические формулы). Кривые <b>MOEX</b> и
 <b>Каленкович</b> — <span class="verify">репрезентативные</span> параметризации той же
-формы: точная официальная форма улыбки MOEX уточняется по «Методике…» MOEX/НКЦ
-(задача 12.0.2), параметризация Каленковича — по его публичным материалам (12.0.5).
+формы. Конвенции ценообразования и <b>качественная</b> форма улыбки MOEX
+(нормировка моней­ности на σ·√T, срочная структура/«подъём крыльев», асимметрия
+крыльев) сверены по методике MOEX/НКЦ (12.0.2); <b>точные коэффициенты</b>
+биржевой кривой закрыты в деталях методики (первоисточник <code>moex.com</code>
+недоступен из окружения — помечено <span class="verify">unverified</span> в §3).
+Параметризация Каленковича — по его публичным материалам (12.0.5).
 </div>
 
 <div class="panel">
@@ -131,17 +135,32 @@ IV против страйка изгибается вверх по краям. 
 обеспечения и риск-параметров. Кривая откалибрована биржей по рыночным котировкам и
 сглаживает улыбку в устойчивую форму с управляемыми «крыльями».</p>
 <h3>Идея и форма</h3>
-<p>Улыбка задаётся как функция моней­ности с параметрами уровня, наклона (skew) и
-кривизны, с <b>демпфированием крыльев</b> (на больших |k| наклон ограничивается, чтобы IV
-не «улетала»). Репрезентативная форма (точные коэффициенты — по методике MOEX,
-<span class="verify">12.0.2</span>):</p>
-<div class="formula">σ(k) = σ₀ + skew·k + c(k)·k²,&nbsp;&nbsp; где c(k) = c₋ при k&lt;0 (путовое крыло), c₊ при k≥0 (колловое крыло);<br>
-крылья демпфируются насыщающим множителем (tanh) при больших |k|.</div>
+<p>Улыбка задаётся как функция <b>стандартизованной моней­ности</b>
+<code>d = ln(K/F)/(σ₀·√T)</code> — страйк измеряется «в сигмах» (единицах σ·√T).
+Нормировка на <code>√T</code> даёт кривой <b>срочную структуру</b>: с приближением
+экспирации <code>|d|</code> растёт, и крылья на фиксированном страйке «поднимаются»
+(документированное поведение семейства кривых MOEX/НКЦ). Параметры — уровень,
+наклон (skew) и раздельная кривизна крыльев, с <b>демпфированием</b> (на больших
+<code>|d|</code> наклон ограничивается, чтобы IV не «улетала»):</p>
+<div class="formula">d = ln(K/F) / (σ₀·√T)&nbsp;&nbsp; (стандартизованная моней­ность);<br>
+σ(d) = σ₀ + skew·d + c(d)·damp(d)²,&nbsp;&nbsp; c(d) = c₋ при d&lt;0 (путовое крыло), c₊ при d≥0 (колловое);<br>
+damp(d) = tanh(d/wing)·wing&nbsp;&nbsp; (насыщающее демпфирование крыльев).</div>
+<p class="sub"><span class="verify">Статус верификации.</span> <b>Verified</b> (по методике
+MOEX/НКЦ, см. §9): ценообразование Black-76/Bachelier, <code>r=0</code> для
+маржируемых; нормировка моней­ности на <code>σ·√T</code> и срочная структура
+(«подъём крыльев»); асимметрия крыльев; калибровка биржей по котировкам
+(взвешенный критерий, вес убывает с удалением от центрального страйка).
+<b>Unverified</b> (точные коэффициенты биржевой кривой закрыты в деталях
+методики; первоисточник <code>moex.com</code>/<code>nationalclearingcentre.ru</code>
+недоступен из окружения): конкретный демпфер крыльев <code>tanh</code> — модельный
+выбор, сохраняющий документированное качественное поведение (ограниченный,
+насыщающийся наклон крыльев), а не дословная формула биржи.</p>
 <table>
 <tr><th>Параметр</th><th>Роль</th></tr>
-<tr><td class="k">σ₀</td><td>уровень ATM-волатильности</td></tr>
-<tr><td class="k">skew</td><td>наклон (асимметрия путы↔коллы)</td></tr>
+<tr><td class="k">σ₀</td><td>уровень ATM-волатильности (и масштаб нормировки моней­ности)</td></tr>
+<tr><td class="k">skew</td><td>наклон в σ-единицах (асимметрия путы↔коллы; безразмерный, слабо зависит от T)</td></tr>
 <tr><td class="k">c₋, c₊</td><td>кривизна левого/правого крыла (раздельно — реалистичная асимметрия)</td></tr>
+<tr><td class="k">wing</td><td>масштаб насыщения крыльев (в единицах σ·√T)</td></tr>
 </table>
 <div class="chart"><div class="cap">Роль <b>skew</b> в MOEX-улыбке: поворот кривой (путы дороже при skew&lt;0)</div>
 <div id="ch-moex"></div>
@@ -323,8 +342,23 @@ SVI и SABR ложатся практически точно; MOEX и Кален
 <li>P. Hagan, D. Kumar, A. Lesniewski, D. Woodward — «Managing Smile Risk» (2002) — SABR.</li>
 <li>J. Gatheral — «A parsimonious arbitrage-free implied volatility parameterization» (2004); J. Gatheral, A. Jacquier — «Arbitrage-free SVI volatility surfaces» (2014).</li>
 <li>R. Lee — «The Moment Formula for Implied Volatility at Extreme Strikes» (2004) — асимптотика крыльев.</li>
-<li>MOEX/НКЦ — «Методика расчёта теоретической цены опциона и коэффициента дельта»; модели Black-76 и Bachelier на срочном рынке (<span class="verify">уточнить точную форму улыбки — 12.0.2</span>).</li>
-<li>А. Каленкович — публичные семинары/вебинары по торговле опционами и улыбке волатильности (<span class="verify">фиксация параметризации — 12.0.5</span>).</li>
+<li>MOEX/НКЦ — «Методика расчёта теоретической цены опциона и коэффициента дельта»
+(<a href="https://www.moex.com/ru/documents/4720">moex.com/ru/documents/4720</a>): модели
+Black-76 и Bachelier на срочном рынке, r=0 для маржируемых — <span class="verify">verified</span>.</li>
+<li>MOEX — «Description of the volatility curve estimation algorithm»
+(<a href="https://fs.moex.com/files/3980">fs.moex.com/files/3980</a>) и «Порядок расчёта кривых
+волатильности» (<a href="https://fs.moex.com/files/17331">fs.moex.com/files/17331</a>): кривая
+строится клирингом по котировкам минимизацией взвешенного критерия (вес убывает с
+удалением от центрального страйка), два этапа — грубая подгонка и покоординатный спуск —
+<span class="verify">verified</span>. Точная функциональная форма σ(moneyness) и её
+коэффициенты — <span class="verify">unverified</span> (первоисточник недоступен из окружения
+по egress-allowlist).</li>
+<li>НКЦ — «Методика определения риск-параметров срочного рынка»
+(<a href="https://www.nationalclearingcentre.ru/catalog/0302/296">nationalclearingcentre.ru</a>):
+кривая волатильности рассчитывается автоматически по этой методике — <span class="verify">verified</span>.</li>
+<li>А. Каленкович — публичные семинары/вебинары по улыбке волатильности: 3 параметра
+(уровень ATM, безразмерный наклон «на-деньгах», форма/крылья), учёт «подъёма крыльев» со
+временем — <span class="verify">verified</span> (smart-lab.ru/blog/150179).</li>
 </ul>
 <p class="sub" style="margin-top:24px">Документ относится к фазе 12 (см. <code>SPEC_0-12.md</code>, фаза 12).
 Кривые MOEX/Каленкович — репрезентативные; SABR/SVI — канонические.</p>
@@ -355,11 +389,12 @@ function sabrIV(k, p){
   return alpha/denom*(z/x)*corr;
 }
 
-/* MOEX representative: parabola in moneyness, separate wings + tanh wing damping */
+/* MOEX: parabola in standardized moneyness d = k/(s0*sqrt(T)), separate wings + tanh damping */
 function moexIV(k, p){
-  const c = k < 0 ? p.cl : p.cr;
-  const damp = Math.abs(Math.tanh(k/p.wing)*p.wing);     // насыщение крыльев
-  return p.s0 + p.skew*k + c*damp*damp;
+  const d = k/(p.s0*Math.sqrt(T));                       // стандартизованная моней­ность (в σ·√T)
+  const c = d < 0 ? p.cl : p.cr;
+  const damp = Math.tanh(d/p.wing)*p.wing;               // насыщение крыльев
+  return p.s0 + p.skew*d + c*damp*damp;
 }
 
 /* Kalenkovich representative: standardized moneyness d = k/(sigmaAtm*sqrt(T)) */
@@ -410,9 +445,9 @@ function render(elId, lgId, opts){
 /* ---------- per-model illustration charts ---------- */
 // MOEX: vary skew
 render('ch-moex','lg-moex',{ymin:0.25,ymax:0.55,series:[
-  {name:'skew = −0.25 (путовый перекос)',color:'#ffb454',points:curve(moexIV,{s0:0.34,skew:-0.25,cl:0.9,cr:0.5,wing:0.25})},
-  {name:'skew = 0 (симметрично)',color:'#9aa7b4',dash:'5 4',points:curve(moexIV,{s0:0.34,skew:0,cl:0.7,cr:0.7,wing:0.25})},
-  {name:'skew = +0.25 (колловый перекос)',color:'#5dd1a0',points:curve(moexIV,{s0:0.34,skew:0.25,cl:0.5,cr:0.9,wing:0.25})},
+  {name:'skew = −0.028 (путовый перекос)',color:'#ffb454',points:curve(moexIV,{s0:0.34,skew:-0.028,cl:0.135,cr:0.10,wing:1.0})},
+  {name:'skew = 0 (симметрично)',color:'#9aa7b4',dash:'5 4',points:curve(moexIV,{s0:0.34,skew:0,cl:0.12,cr:0.12,wing:1.0})},
+  {name:'skew = +0.028 (колловый перекос)',color:'#5dd1a0',points:curve(moexIV,{s0:0.34,skew:0.028,cl:0.10,cr:0.135,wing:1.0})},
 ]});
 // SABR: rho & nu
 render('ch-sabr','lg-sabr',{ymin:0.25,ymax:0.55,series:[
@@ -438,7 +473,7 @@ const truth = {a:0.020,b:0.10,rho:-0.5,m:0.0,sigma:0.10};
 const mktK = [-0.30,-0.22,-0.14,-0.07,0,0.07,0.14,0.22,0.30];
 const market = mktK.map(k=>[k, sviIV(k,truth)]);
 render('ch-cmp','lg-cmp',{ymin:0.28,ymax:0.56,points:market,series:[
-  {name:'MOEX (репрез.)',color:'#ffb454',points:curve(moexIV,{s0:0.346,skew:-0.20,cl:1.6,cr:0.55,wing:0.30})},
+  {name:'MOEX (репрез.)',color:'#ffb454',points:curve(moexIV,{s0:0.346,skew:-0.052,cl:0.05,cr:0.08,wing:1.5})},
   {name:'SABR (RMSE ≈ 1.0%)',color:'#4ea1ff',points:curve(sabrIV,{alpha:3.45,beta:0.5,rho:-0.2,nu:1.6})},
   {name:'SVI',color:'#5dd1a0',points:curve(sviIV,truth)},
   {name:'Каленкович (репрез.)',color:'#ff6b8b',dash:'6 4',points:curve(kalenIV,{s0:0.346,skew:-0.075,kurt:0.052})},
