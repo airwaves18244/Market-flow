@@ -21,17 +21,41 @@ pub enum Method {
     OrderBook,
     /// `MarketDataService.LatestTrades` — последние сделки.
     LatestTrades,
+    /// MOEX ALGOPACK `tradestats` (Super Candles) — REST поверх `data::http`.
+    MoexTradestats,
+    /// MOEX ALGOPACK `futoi` (нетто-позиции фьючерсов) — REST поверх `data::http`.
+    MoexFutoi,
+    /// MOEX ALGOPACK `hi2` (индекс концентрации Херфиндаля) — REST поверх `data::http`.
+    MoexHi2,
+    /// MOEX ALGOPACK `obstats` (статистика стакана) — REST поверх `data::http`.
+    MoexObstats,
+    /// MOEX ALGOPACK `orderstats` (статистика заявок) — REST поверх `data::http`.
+    MoexOrderstats,
+    /// MOEX ALGOPACK свечи — REST поверх `data::http`.
+    MoexCandles,
+    /// MOEX ALGOPACK опционная доска — REST поверх `data::http`.
+    MoexOptions,
+    /// LLM-провайдер (сводки/аннотации) — REST поверх `data::http`.
+    Llm,
 }
 
 impl Method {
     /// Все методы — для итерирования (например, прогрев/диагностика лимитов).
-    pub const ALL: [Method; 6] = [
+    pub const ALL: [Method; 14] = [
         Method::Auth,
         Method::Assets,
         Method::Bars,
         Method::LastQuote,
         Method::OrderBook,
         Method::LatestTrades,
+        Method::MoexTradestats,
+        Method::MoexFutoi,
+        Method::MoexHi2,
+        Method::MoexObstats,
+        Method::MoexOrderstats,
+        Method::MoexCandles,
+        Method::MoexOptions,
+        Method::Llm,
     ];
 
     /// Стабильное строковое имя метода (ключ лимитера, метка трейсинга).
@@ -43,6 +67,14 @@ impl Method {
             Method::LastQuote => "last_quote",
             Method::OrderBook => "order_book",
             Method::LatestTrades => "latest_trades",
+            Method::MoexTradestats => "moex_tradestats",
+            Method::MoexFutoi => "moex_futoi",
+            Method::MoexHi2 => "moex_hi2",
+            Method::MoexObstats => "moex_obstats",
+            Method::MoexOrderstats => "moex_orderstats",
+            Method::MoexCandles => "moex_candles",
+            Method::MoexOptions => "moex_options",
+            Method::Llm => "llm",
         }
     }
 }
