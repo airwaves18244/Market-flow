@@ -8,6 +8,7 @@
   import OptionsTab from "./lib/components/OptionsTab.svelte";
   import MoexAlgoTab from "./lib/components/MoexAlgoTab.svelte";
   import HistoryTab from "./lib/components/HistoryTab.svelte";
+  import SettingsTab from "./lib/components/SettingsTab.svelte";
   import { ipc } from "./lib/ipc";
   import type { InstrumentDto } from "./lib/types";
 
@@ -19,6 +20,7 @@
     { id: "data", label: "Данные" },
     { id: "moexalgo", label: "MOEX ALGO" },
     { id: "options", label: "Опционы" },
+    { id: "settings", label: "Настройки" },
   ];
 
   let instruments = $state<InstrumentDto[]>([]);
@@ -41,7 +43,7 @@
 <div class="app">
   <header class="app-header">
     <h1>Market Terminal</h1>
-    <span class="sub">Обзор · Delta · Торговля · Бэктест · Данные · MOEX ALGO · Опционы</span>
+    <span class="sub">Обзор · Delta · Торговля · Бэктест · Данные · MOEX ALGO · Опционы · Настройки</span>
     <span class="status">{instruments.length} инструментов · {selected}</span>
   </header>
 
@@ -65,5 +67,7 @@
     <MoexAlgoTab />
   {:else if activeTab === "options"}
     <OptionsTab />
+  {:else if activeTab === "settings"}
+    <SettingsTab />
   {/if}
 </div>

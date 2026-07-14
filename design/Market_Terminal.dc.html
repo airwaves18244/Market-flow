@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:#0d1117;color:#e6edf3;font-family:'Inter','Segoe UI',system-ui,sans-serif;font-size:14px}
+  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:.75}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#1d2530;border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:#2a3542}
+  ::-webkit-scrollbar-track{background:transparent}
+  select option{background:#131a23;color:#e6edf3}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;height:100vh;background:#0d1117">
+
+  <header style="display:flex;align-items:baseline;gap:12px;padding:10px 16px;border-bottom:1px solid #1d2530;background:#131a23;flex:none">
+    <h1 style="font-size:15px;font-weight:600;margin:0;letter-spacing:.3px">Market Terminal</h1>
+    <span style="color:#8b98a9;font-size:12px">MOEX ALGO · Бэктестер · Опционы</span>
+    <span style="margin-left:auto;color:#8b98a9;font-size:12px;font-variant-numeric:tabular-nums">{{ statusLine }}</span>
+    <div style="display:flex;gap:2px;margin-left:12px;padding:2px;background:#0d1117;border:1px solid #1d2530;border-radius:7px">
+      <sc-for list="{{ statesView }}" as="s" hint-placeholder-count="4">
+        <button onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</button>
+      </sc-for>
+    </div>
+  </header>
+
+  <nav style="display:flex;gap:2px;padding:0 12px;border-bottom:1px solid #1d2530;background:#131a23;flex:none">
+    <sc-for list="{{ tabsView }}" as="t" hint-placeholder-count="5">
+      <button onClick="{{ t.onClick }}" style="{{ t.style }}">{{ t.label }}</button>
+    </sc-for>
+  </nav>
+
+  <div style="flex:1;min-height:0;overflow:auto">
+
+    <!-- ============ OVERVIEW ============ -->
+    <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));grid-auto-rows:minmax(260px,auto);gap:8px;padding:8px">
+        <section style="{{ st.panel }};grid-column:span 2;grid-row:span 2">
+          <header style="{{ st.head }}">Секторы · оборот и изменение</header>
+          <div style="{{ st.body }};padding:0"><div data-chart="treemap" data-chart-id="ov-treemap" style="width:100%;height:100%;min-height:420px"></div></div>
+        </section>
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">Оборот рынка</header>
+          <div style="{{ st.body }};padding:0"><div data-chart="gauge" data-chart-id="ov-gauge" style="width:100%;height:100%;min-height:240px"></div></div>
+        </section>
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">Лидеры движения</header>
+          <div style="{{ st.body }}">
+            <table style="{{ st.table }}"><thead><tr><th style="{{ st.th }}">Тикер</th><th style="{{ st.th }}">Сектор</th><th style="{{ st.thn }}">Изм.</th><th style="{{ st.thn }}">Цена</th></tr></thead>
+            <tbody><sc-for list="{{ moversView }}" as="m" hint-placeholder-count="8">
+              <tr style="cursor:default" style-hover="background:#1a232e">
+                <td style="{{ st.td }};font-weight:600;color:#4f9cf9">{{ m.ticker }}</td>
+                <td style="{{ st.td }};color:#8b98a9">{{ m.sector }}</td>
+                <td style="{{ m.chStyle }}">{{ m.change }}</td>
+                <td style="{{ st.tdn }}">{{ m.price }}</td>
+              </tr></sc-for></tbody></table>
+          </div>
+        </section>
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">Ширина рынка</header>
+          <div style="{{ st.body }};padding:0"><div data-chart="breadth" data-chart-id="ov-breadth" style="width:100%;height:100%;min-height:240px"></div></div>
+        </section>
+      </div>
+    </sc-if>
+
+    <!-- ============ MOEX ALGO ============ -->
+    <sc-if value="{{ isAlgo }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid #1d2530;background:#131a23;flex:none;flex-wrap:wrap">
+          <span style="{{ st.tbLabel }}">Инструмент</span>
+          <select value="{{ ticker }}" onChange="{{ onTicker }}" style="{{ st.select }};min-width:160px">
+            <sc-for list="{{ tickerOpts }}" as="o" hint-placeholder-count="6"><option value="{{ o.ticker }}">{{ o.opt }}</option></sc-for>
+          </select>
+          <span style="{{ st.tbLabel }};margin-left:6px">Период</span>
+          <div style="{{ st.segWrap }}"><sc-for list="{{ periodsView }}" as="p" hint-placeholder-count="5"><button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.label }}</button></sc-for></div>
+          <span style="{{ st.tbLabel }};margin-left:6px">Рынок</span>
+          <div style="{{ st.segWrap }}"><sc-for list="{{ marketsView }}" as="mk" hint-placeholder-count="3"><button onClick="{{ mk.onClick }}" style="{{ mk.style }}">{{ mk.label }}</button></sc-for></div>
+        </div>
+        <div style="display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid #1d2530;background:#0d1117;flex:none;flex-wrap:wrap">
+          <sc-for list="{{ modulesView }}" as="m" hint-placeholder-count="5"><button onClick="{{ m.onClick }}" style="{{ m.style }}">{{ m.label }}</button></sc-for>
+        </div>
+
+        <div style="flex:1;min-height:0;overflow:auto;padding:8px">
+
+          <sc-if value="{{ modKey }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:8px;align-items:stretch;height:100%;min-height:0;flex-wrap:wrap">
+              <section style="{{ st.panel }};flex:2;min-width:520px;min-height:440px">
+                <header style="{{ st.head }};display:flex;align-items:center;gap:10px">
+                  <span>Ключевая активность</span>
+                  <span style="color:#4f9cf9;font-weight:700;text-transform:none;letter-spacing:0">{{ periodLabel }}</span>
+                  <div style="margin-left:auto;display:flex;gap:6px;align-items:center;text-transform:none;letter-spacing:0">
+                    <select value="{{ kaRule }}" onChange="{{ onKaRule }}" style="{{ st.selectSm }}"><sc-for list="{{ kaRuleOpts }}" as="r" hint-placeholder-count="4"><option value="{{ r.id }}">{{ r.label }}</option></sc-for></select>
+                    <select value="{{ kaTicker }}" onChange="{{ onKaTicker }}" style="{{ st.selectSm }}"><sc-for list="{{ kaTickerOpts }}" as="r" hint-placeholder-count="4"><option value="{{ r.id }}">{{ r.label }}</option></sc-for></select>
+                  </div>
+                </header>
+                <div style="{{ st.body }};padding:0">
+                  <sc-if value="{{ isData }}" hint-placeholder-val="{{ true }}">
+                    <table style="{{ st.table }}"><thead><tr>
+                      <th style="{{ st.th }}">Время</th><th style="{{ st.th }}">Тикер</th><th style="{{ st.th }}">Правило</th><th style="{{ st.th }}">Метрика</th><th style="{{ st.thn }}">Значение</th><th style="{{ st.th }};text-align:center">Важность</th>
+                    </tr></thead><tbody>
+                      <sc-for list="{{ kaView }}" as="r" hint-placeholder-count="14">
+                        <tr style="cursor:default" style-hover="background:#1a232e">
+                          <td style="{{ st.td }};color:#8b98a9;font-variant-numeric:tabular-nums">{{ r.time }}</td>
+                          <td style="{{ st.td }};font-weight:600;color:#4f9cf9">{{ r.ticker }}</td>
+                          <td style="{{ st.td }}">{{ r.rule }}</td>
+                          <td style="{{ st.td }};color:#8b98a9">{{ r.metric }}</td>
+                          <td style="{{ st.tdn }};font-weight:600">{{ r.value }}</td>
+                          <td style="{{ st.td }};text-align:center"><span style="{{ r.sevStyle }}">{{ r.sevLabel }}</span></td>
+                        </tr>
+                      </sc-for>
+                    </tbody></table>
+                  </sc-if>
+                  <sc-if value="{{ notData }}" hint-placeholder-val="{{ false }}"><div style="{{ phBoxStyle }}">{{ phText }}</div></sc-if>
+                </div>
+              </section>
+
+              <section style="{{ st.panel }};flex:1;min-width:320px;min-height:440px">
+                <header style="{{ st.head }};display:flex;align-items:center;gap:8px">
+                  <span>ИТОГО · ИИ-резюме</span>
+                  <span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:500;color:#8b98a9;font-size:11px">{{ summaryBadge }}</span>
+                </header>
+                <div style="{{ st.body }};display:flex;flex-direction:column;gap:10px">
+                  <div style="display:flex;align-items:center;gap:8px;flex:none">
+                    <button onClick="{{ regenSummary }}" style="{{ st.btnPrimary }}">Обновить</button>
+                    <span style="color:#8b98a9;font-size:11px">{{ summaryTime }}</span>
+                  </div>
+                  <sc-if value="{{ sumData }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:flex;flex-direction:column;gap:9px;font-size:13px;line-height:1.55">
+                      <sc-for list="{{ summaryPars }}" as="p" hint-placeholder-count="4"><p style="{{ p.style }}">{{ p.text }}</p></sc-for>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ sumLoading }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:center;gap:10px;color:#8b98a9;font-size:13px;padding:10px 0">
+                      <span style="width:15px;height:15px;border:2px solid #1d2530;border-top-color:#4f9cf9;border-radius:50%;display:inline-block;animation:spin .8s linear infinite"></span>
+                      Генерация резюме…
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:8px"><sc-for list="{{ skelLines }}" as="k" hint-placeholder-count="5"><div style="{{ k.style }}"></div></sc-for></div>
+                  </sc-if>
+                  <sc-if value="{{ sumError }}" hint-placeholder-val="{{ false }}">
+                    <div style="{{ st.errorBanner }}">Ошибка генерации резюме. Проверьте подключение и ключ провайдера в Настройках.</div>
+                  </sc-if>
+                  <sc-if value="{{ sumNoKey }}" hint-placeholder-val="{{ false }}">
+                    <div style="border:1px solid #f5a623;background:rgba(245,166,35,.08);color:#f5a623;padding:8px 10px;border-radius:6px;font-size:12px;flex:none">Ключ LLM не задан — показан локальный свод без ИИ. Добавьте ключ в Настройках → LLM.</div>
+                    <div style="display:flex;flex-direction:column;gap:9px;font-size:13px;line-height:1.55">
+                      <sc-for list="{{ fallbackPars }}" as="p" hint-placeholder-count="3"><p style="{{ p.style }}">{{ p.text }}</p></sc-for>
+                    </div>
+                  </sc-if>
+                </div>
+              </section>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ modSc }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px;height:100%;min-height:0">
+              <section style="{{ st.panel }};flex:none">
+                <header style="{{ st.head }};display:flex;gap:10px;align-items:center"><span>Супер-свечи · {{ ticker }}</span><span style="text-transform:none;letter-spacing:0;color:#8b98a9;font-weight:500">5-мин · VWAP-полоса · дисбаланс</span></header>
+                <div style="{{ st.body }};padding:8px">
+                  <sc-if value="{{ isData }}" hint-placeholder-val="{{ true }}">
+                    <div data-chart="supercandles" data-chart-id="sc-main" style="width:100%;height:290px"></div>
+                    <div style="display:flex;align-items:center;gap:6px;margin:8px 0 2px;color:#8b98a9;font-size:11px;text-transform:uppercase;letter-spacing:.4px">Дисбаланс покупок/продаж</div>
+                    <div data-chart="disb" data-chart-id="sc-disb" style="width:100%;height:70px"></div>
+                  </sc-if>
+                  <sc-if value="{{ notData }}" hint-placeholder-val="{{ false }}"><div style="{{ phBoxStyle }};min-height:360px">{{ phText }}</div></sc-if>
+                </div>
+              </section>
+              <section style="{{ st.panel }};flex:1;min-height:200px">
+                <header style="{{ st.head }}">Метрики (последние бары)</header>
+                <div style="{{ st.body }};padding:0">
+                  <table style="{{ st.table }}"><thead><tr>
+                    <th style="{{ st.th }}">Время</th><th style="{{ st.thn }}">O</th><th style="{{ st.thn }}">H</th><th style="{{ st.thn }}">L</th><th style="{{ st.thn }}">C</th><th style="{{ st.thn }}">VWAP</th><th style="{{ st.thn }}">Объём</th><th style="{{ st.thn }}">Оборот</th><th style="{{ st.thn }}">Сделки</th><th style="{{ st.thn }}">disb</th>
+                  </tr></thead><tbody>
+                    <sc-for list="{{ scRows }}" as="r" hint-placeholder-count="12">
+                      <tr style="cursor:default;{{ r.rowStyle }}" style-hover="background:#1a232e">
+                        <td style="{{ st.td }};color:#8b98a9;font-variant-numeric:tabular-nums">{{ r.time }}</td>
+                        <td style="{{ st.tdn }}">{{ r.o }}</td><td style="{{ st.tdn }}">{{ r.h }}</td><td style="{{ st.tdn }}">{{ r.l }}</td><td style="{{ st.tdn }}">{{ r.c }}</td>
+                        <td style="{{ st.tdn }};color:#f5a623">{{ r.vwap }}</td><td style="{{ st.tdn }}">{{ r.vol }}</td><td style="{{ st.tdn }}">{{ r.val }}</td><td style="{{ st.tdn }}">{{ r.trades }}</td>
+                        <td style="{{ st.tdn }};{{ r.disbStyle }}">{{ r.disb }}</td>
+                      </tr>
+                    </sc-for>
+                  </tbody></table>
+                </div>
+              </section>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ modFutoi }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px;height:100%">
+              <section style="{{ st.panel }};flex:none">
+                <header style="{{ st.head }};display:flex;gap:10px;align-items:center">
+                  <span>Открытые позиции (FUTOI) · физ/юр</span>
+                  <div style="margin-left:auto;{{ st.segWrap }}"><sc-for list="{{ futoiModesView }}" as="f" hint-placeholder-count="3"><button onClick="{{ f.onClick }}" style="{{ f.style }}">{{ f.label }}</button></sc-for></div>
+                </header>
+                <div style="{{ st.body }};padding:8px">
+                  <sc-if value="{{ isData }}" hint-placeholder-val="{{ true }}"><div data-chart="futoi" data-chart-id="futoi-main" style="width:100%;height:320px"></div></sc-if>
+                  <sc-if value="{{ notData }}" hint-placeholder-val="{{ false }}"><div style="{{ phBoxStyle }};min-height:320px">{{ phText }}</div></sc-if>
+                </div>
+              </section>
+              <section style="{{ st.panel }};flex:1;min-height:160px">
+                <header style="{{ st.head }}">Позиции по группам</header>
+                <div style="{{ st.body }};padding:0"><table style="{{ st.table }}"><thead><tr>
+                  <th style="{{ st.th }}">Время</th><th style="{{ st.th }}">Группа</th><th style="{{ st.thn }}">Long</th><th style="{{ st.thn }}">Short</th><th style="{{ st.thn }}">Нетто</th><th style="{{ st.thn }}">Доля long</th><th style="{{ st.thn }}">ΔOI</th>
+                </tr></thead><tbody><sc-for list="{{ futoiRows }}" as="r" hint-placeholder-count="8">
+                  <tr style="cursor:default" style-hover="background:#1a232e">
+                    <td style="{{ st.td }};color:#8b98a9">{{ r.time }}</td><td style="{{ st.td }};font-weight:600;color:{{ r.color }}">{{ r.group }}</td>
+                    <td style="{{ st.tdn }}">{{ r.long }}</td><td style="{{ st.tdn }}">{{ r.short }}</td>
+                    <td style="{{ st.tdn }};{{ r.netStyle }}">{{ r.net }}</td><td style="{{ st.tdn }}">{{ r.share }}</td><td style="{{ st.tdn }};{{ r.oiStyle }}">{{ r.doi }}</td>
+                  </tr>
+                </sc-for></tbody></table></div>
+              </section>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ modHi2 }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px;height:100%">
+              <section style="{{ st.panel }};flex:none">
+                <header style="{{ st.head }}">Концентрация рынка (HI2) · {{ ticker }}</header>
+                <div style="{{ st.body }};padding:8px">
+                  <sc-if value="{{ isData }}" hint-placeholder-val="{{ true }}"><div data-chart="hi2" data-chart-id="hi2-main" style="width:100%;height:300px"></div></sc-if>
+                  <sc-if value="{{ notData }}" hint-placeholder-val="{{ false }}"><div style="{{ phBoxStyle }};min-height:300px">{{ phText }}</div></sc-if>
+                </div>
+              </section>
+              <section style="{{ st.panel }};flex:1;min-height:160px">
+                <header style="{{ st.head }}">Ранжирование по концентрации</header>
+                <div style="{{ st.body }};padding:0"><table style="{{ st.table }}"><thead><tr>
+                  <th style="{{ st.th }}">Тикер</th><th style="{{ st.thn }}">HI2</th><th style="{{ st.th }}">Уровень</th><th style="{{ st.th }};text-align:center">Всплеск</th>
+                </tr></thead><tbody><sc-for list="{{ hi2Rows }}" as="r" hint-placeholder-count="10">
+                  <tr style="cursor:default" style-hover="background:#1a232e">
+                    <td style="{{ st.td }};font-weight:600;color:#4f9cf9">{{ r.ticker }}</td>
+                    <td style="{{ st.tdn }};font-weight:600">{{ r.hi2 }}</td>
+                    <td style="{{ st.td }};color:{{ r.color }}">{{ r.level }}</td>
+                    <td style="{{ st.td }};text-align:center">{{ r.spike }}</td>
+                  </tr>
+                </sc-for></tbody></table></div>
+              </section>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ modMega }}" hint-placeholder-val="{{ false }}">
+            <section style="{{ st.panel }};height:100%">
+              <header style="{{ st.head }};display:flex;gap:8px;align-items:center">
+                <span>Мега-алёрты</span>
+                <div style="margin-left:auto;display:flex;gap:6px;text-transform:none;letter-spacing:0">
+                  <select value="{{ megaType }}" onChange="{{ onMegaType }}" style="{{ st.selectSm }}"><sc-for list="{{ megaTypeOpts }}" as="o" hint-placeholder-count="4"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select>
+                </div>
+              </header>
+              <div style="{{ st.body }}">
+                <sc-if value="{{ isData }}" hint-placeholder-val="{{ true }}">
+                  <div style="display:flex;flex-direction:column;gap:5px">
+                    <sc-for list="{{ megaView }}" as="a" hint-placeholder-count="12">
+                      <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;background:#1a232e;border-radius:5px;border-left:3px solid {{ a.sevColor }}">
+                        <span style="width:44px;color:#8b98a9;font-size:11px;font-variant-numeric:tabular-nums">{{ a.time }}</span>
+                        <span style="font-weight:600;color:#4f9cf9;width:56px">{{ a.ticker }}</span>
+                        <span style="flex:none;font-size:12px">{{ a.type }}</span>
+                        <span style="margin-left:auto;color:#8b98a9;font-size:12px">{{ a.metric }}</span>
+                        <span style="font-weight:600;font-variant-numeric:tabular-nums;{{ a.valStyle }}">{{ a.value }}</span>
+                        <span style="{{ a.sevStyle }}">{{ a.sevLabel }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ notData }}" hint-placeholder-val="{{ false }}"><div style="{{ phBoxStyle }};min-height:300px">{{ phText }}</div></sc-if>
+              </div>
+            </section>
+          </sc-if>
+
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ============ BACKTESTER ============ -->
+    <sc-if value="{{ isBacktest }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:minmax(340px,420px) 1fr;gap:8px;padding:8px;height:100%;min-height:0">
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">Загрузка истории</header>
+          <div style="{{ st.body }};display:flex;flex-direction:column;gap:14px">
+            <div>
+              <div style="{{ st.fieldLabel }}">Источник</div>
+              <div style="{{ st.segWrap }};width:100%"><sc-for list="{{ sourceView }}" as="s" hint-placeholder-count="2"><button onClick="{{ s.onClick }}" style="{{ s.style }};flex:1">{{ s.label }}</button></sc-for></div>
+            </div>
+            <div>
+              <div style="{{ st.fieldLabel }}">Инструменты</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px"><sc-for list="{{ tickerChips }}" as="c" hint-placeholder-count="8"><button onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.ticker }}</button></sc-for></div>
+            </div>
+            <div>
+              <div style="{{ st.fieldLabel }}">Таймфреймы</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px"><sc-for list="{{ tfChips }}" as="c" hint-placeholder-count="5"><button onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</button></sc-for></div>
+            </div>
+            <div style="display:flex;gap:10px">
+              <div style="flex:1"><div style="{{ st.fieldLabel }}">С даты</div><input type="date" value="{{ loadFrom }}" onChange="{{ onLoadFrom }}" style="{{ st.input }};width:100%"></div>
+              <div style="flex:1"><div style="{{ st.fieldLabel }}">По дату</div><input type="date" value="{{ loadTill }}" onChange="{{ onLoadTill }}" style="{{ st.input }};width:100%"></div>
+            </div>
+            <button onClick="{{ startLoad }}" style="{{ st.btnPrimary }};padding:8px 14px;font-size:13px">Загрузить</button>
+            <sc-if value="{{ hasProgress }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:8px;border-top:1px solid #1d2530;padding-top:12px">
+                <div style="{{ st.fieldLabel }};display:flex;margin:0"><span>Прогресс</span><button onClick="{{ cancelLoad }}" style="{{ st.btnGhost }};margin-left:auto;padding:1px 8px;font-size:11px">Отменить</button></div>
+                <sc-for list="{{ progressView }}" as="p" hint-placeholder-count="3">
+                  <div style="display:flex;flex-direction:column;gap:3px">
+                    <div style="display:flex;font-size:11px;color:#8b98a9"><span style="color:#e6edf3;font-weight:500">{{ p.label }}</span><span style="margin-left:auto;font-variant-numeric:tabular-nums">{{ p.pctLabel }}</span></div>
+                    <div style="height:5px;background:#0d1117;border-radius:3px;overflow:hidden"><div style="height:100%;background:{{ p.color }};border-radius:3px;width:{{ p.width }}"></div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </section>
+        <section style="{{ st.panel }};min-height:0">
+          <header style="{{ st.head }}">Локальные датасеты</header>
+          <div style="{{ st.body }};display:flex;flex-direction:column;gap:0;padding:0">
+            <div style="overflow:auto">
+              <table style="{{ st.table }}"><thead><tr>
+                <th style="{{ st.th }}">Источник</th><th style="{{ st.th }}">Тикер</th><th style="{{ st.th }}">ТФ</th><th style="{{ st.th }}">Диапазон</th><th style="{{ st.thn }}">Баров</th><th style="{{ st.thn }}">Размер</th><th style="{{ st.th }}">Обновлено</th><th style="{{ st.th }}"></th>
+              </tr></thead><tbody><sc-for list="{{ datasetView }}" as="d" hint-placeholder-count="6">
+                <tr onClick="{{ d.onSelect }}" style="{{ d.rowStyle }}" style-hover="background:#1a232e">
+                  <td style="{{ st.td }};color:#8b98a9">{{ d.source }}</td><td style="{{ st.td }};font-weight:600;color:#4f9cf9">{{ d.ticker }}</td>
+                  <td style="{{ st.td }}">{{ d.tf }}</td><td style="{{ st.td }};color:#8b98a9;font-variant-numeric:tabular-nums">{{ d.range }}</td>
+                  <td style="{{ st.tdn }}">{{ d.bars }}</td><td style="{{ st.tdn }}">{{ d.size }}</td><td style="{{ st.td }};color:#8b98a9">{{ d.updated }}</td>
+                  <td style="{{ st.td }};text-align:right;white-space:nowrap"><button onClick="{{ d.onRefresh }}" style="{{ st.btnGhost }};padding:1px 7px;font-size:11px">обновить</button> <button onClick="{{ d.onDelete }}" style="{{ st.btnGhost }};padding:1px 7px;font-size:11px;color:#ef5350">удалить</button></td>
+                </tr>
+              </sc-for></tbody></table>
+            </div>
+            <div style="flex:1;min-height:220px;border-top:1px solid #1d2530;display:flex;flex-direction:column;padding:8px">
+              <div style="{{ st.fieldLabel }}">Превью: {{ previewLabel }}</div>
+              <div data-chart="preview" data-chart-id="bt-preview" style="width:100%;flex:1;min-height:200px"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </sc-if>
+
+    <!-- ============ OPTIONS ============ -->
+    <sc-if value="{{ isOptions }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+        <div style="display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid #1d2530;background:#131a23;flex:none">
+          <sc-for list="{{ optabsView }}" as="o" hint-placeholder-count="3"><button onClick="{{ o.onClick }}" style="{{ o.style }}">{{ o.label }}</button></sc-for>
+        </div>
+        <div style="flex:1;min-height:0;overflow:auto;padding:8px">
+
+          <sc-if value="{{ optCalc }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:minmax(300px,360px) 1fr;gap:8px">
+              <section style="{{ st.panel }}">
+                <header style="{{ st.head }}">Параметры</header>
+                <div style="{{ st.body }};display:flex;flex-direction:column;gap:11px">
+                  <div style="display:flex;gap:10px">
+                    <label style="flex:1"><div style="{{ st.fieldLabel }}">Форвард F</div><input type="number" value="{{ calcF }}" onChange="{{ onCalcF }}" style="{{ st.input }};width:100%"></label>
+                    <label style="flex:1"><div style="{{ st.fieldLabel }}">Страйк K</div><input type="number" value="{{ calcK }}" onChange="{{ onCalcK }}" style="{{ st.input }};width:100%"></label>
+                  </div>
+                  <div style="display:flex;gap:10px">
+                    <label style="flex:1"><div style="{{ st.fieldLabel }}">До экспирации, дней</div><input type="number" value="{{ calcDays }}" onChange="{{ onCalcDays }}" style="{{ st.input }};width:100%"></label>
+                    <label style="flex:1"><div style="{{ st.fieldLabel }}">Волатильность σ, %</div><input type="number" value="{{ calcVol }}" onChange="{{ onCalcVol }}" style="{{ st.input }};width:100%"></label>
+                  </div>
+                  <div style="display:flex;gap:10px">
+                    <label style="flex:1"><div style="{{ st.fieldLabel }}">Ставка r, %</div><input type="number" value="{{ calcR }}" onChange="{{ onCalcR }}" style="{{ st.input }};width:100%"></label>
+                    <label style="flex:1"><div style="{{ st.fieldLabel }}">Рыночная цена</div><input type="number" value="{{ calcMkt }}" onChange="{{ onCalcMkt }}" style="{{ st.input }};width:100%"></label>
+                  </div>
+                  <div>
+                    <div style="{{ st.fieldLabel }}">Тип опциона</div>
+                    <div style="{{ st.segWrap }}"><sc-for list="{{ calcTypeView }}" as="c" hint-placeholder-count="2"><button onClick="{{ c.onClick }}" style="{{ c.style }};flex:1">{{ c.label }}</button></sc-for></div>
+                  </div>
+                  <div>
+                    <div style="{{ st.fieldLabel }}">Модель</div>
+                    <div style="{{ st.segWrap }}"><sc-for list="{{ calcModelView }}" as="c" hint-placeholder-count="2"><button onClick="{{ c.onClick }}" style="{{ c.style }};flex:1">{{ c.label }}</button></sc-for></div>
+                  </div>
+                </div>
+              </section>
+              <section style="{{ st.panel }}">
+                <header style="{{ st.head }}">Результаты</header>
+                <div style="{{ st.body }};display:flex;flex-direction:column;gap:12px">
+                  <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <div style="{{ st.statCard }}"><div style="{{ st.statLabel }}">Теор. цена</div><div style="{{ st.statBig }}">{{ calcPrice }}</div></div>
+                    <div style="{{ st.statCard }}"><div style="{{ st.statLabel }}">Implied Vol</div><div style="{{ st.statBig }};color:#f5a623">{{ calcIV }}</div></div>
+                  </div>
+                  <table style="{{ st.table }}"><thead><tr><th style="{{ st.th }}">Грек</th><th style="{{ st.thn }}">Значение</th><th style="{{ st.th }}">Единица</th></tr></thead>
+                  <tbody><sc-for list="{{ greeksView }}" as="g" hint-placeholder-count="5">
+                    <tr style="cursor:default" style-hover="background:#1a232e"><td style="{{ st.td }};font-weight:600">{{ g.name }}</td><td style="{{ st.tdn }};font-weight:600;color:#4f9cf9">{{ g.value }}</td><td style="{{ st.td }};color:#8b98a9">{{ g.unit }}</td></tr>
+                  </sc-for></tbody></table>
+                  <div style="color:#8b98a9;font-size:11px;line-height:1.5">Модель {{ calcModelLabel }} · r={{ calcR }}% · для маржируемых опционов MOEX r=0. IV решается из рыночной цены методом бисекции.</div>
+                </div>
+              </section>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ optSmile }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:1fr minmax(280px,320px);gap:8px;height:100%;min-height:0">
+              <section style="{{ st.panel }}">
+                <header style="{{ st.head }};display:flex;gap:8px;align-items:center">
+                  <span>Улыбка волатильности · {{ ticker }}</span>
+                  <div style="margin-left:auto;display:flex;gap:5px;text-transform:none;letter-spacing:0">
+                    <sc-for list="{{ smileToggles }}" as="m" hint-placeholder-count="4"><button onClick="{{ m.onClick }}" style="{{ m.style }}">{{ m.label }}</button></sc-for>
+                  </div>
+                </header>
+                <div style="{{ st.body }};padding:8px">
+                  <sc-if value="{{ isData }}" hint-placeholder-val="{{ true }}"><div data-chart="smile" data-chart-id="smile-main" style="width:100%;height:100%;min-height:380px"></div></sc-if>
+                  <sc-if value="{{ notData }}" hint-placeholder-val="{{ false }}"><div style="{{ phBoxStyle }};min-height:380px">{{ phText }}</div></sc-if>
+                </div>
+              </section>
+              <section style="{{ st.panel }}">
+                <header style="{{ st.head }}">Параметры моделей</header>
+                <div style="{{ st.body }};display:flex;flex-direction:column;gap:8px">
+                  <sc-for list="{{ smileFitsView }}" as="f" hint-placeholder-count="4">
+                    <div style="border:1px solid #1d2530;border-radius:6px;overflow:hidden;{{ f.dim }}">
+                      <div style="display:flex;align-items:center;gap:7px;padding:6px 9px;background:#1a232e;border-bottom:1px solid #1d2530">
+                        <span style="width:9px;height:9px;border-radius:2px;background:{{ f.color }}"></span>
+                        <span style="font-weight:600;font-size:12px">{{ f.name }}</span>
+                        <span style="margin-left:auto;font-size:11px;color:#8b98a9">RMSE {{ f.rmse }}</span>
+                        <button onClick="{{ f.onActive }}" style="{{ f.activeStyle }}">{{ f.activeLabel }}</button>
+                      </div>
+                      <div style="padding:7px 9px;display:flex;flex-wrap:wrap;gap:x;gap:4px 12px;font-size:11px;color:#8b98a9;font-variant-numeric:tabular-nums">
+                        <sc-for list="{{ f.params }}" as="p" hint-placeholder-count="4"><span><span style="color:#e6edf3">{{ p.k }}</span> = {{ p.v }}</span></sc-for>
+                      </div>
+                    </div>
+                  </sc-for>
+                  <div style="color:#8b98a9;font-size:11px;line-height:1.5;margin-top:2px">Размер точки ∝ открытому интересу (OI). Активная модель задаёт «рабочую» улыбку доски.</div>
+                </div>
+              </section>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ optStrat }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px;height:100%;min-height:0">
+              <section style="{{ st.panel }};flex:none">
+                <header style="{{ st.head }};display:flex;gap:8px;align-items:center">
+                  <span>Конструктор стратегий</span>
+                  <div style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;text-transform:none;letter-spacing:0">
+                    <sc-for list="{{ presetView }}" as="p" hint-placeholder-count="6"><button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.label }}</button></sc-for>
+                  </div>
+                </header>
+                <div style="{{ st.body }};padding:0">
+                  <table style="{{ st.table }}"><thead><tr>
+                    <th style="{{ st.th }}">Тип</th><th style="{{ st.th }}">Сторона</th><th style="{{ st.thn }}">Страйк</th><th style="{{ st.thn }}">Кол-во</th><th style="{{ st.thn }}">Цена входа</th><th style="{{ st.th }}"></th>
+                  </tr></thead><tbody>
+                    <sc-for list="{{ legsView }}" as="l" hint-placeholder-count="2">
+                      <tr style="cursor:default">
+                        <td style="{{ st.td }}"><select value="{{ l.type }}" onChange="{{ l.onType }}" style="{{ st.selectSm }}"><option value="call">Call</option><option value="put">Put</option><option value="ubl">Базовый актив</option></select></td>
+                        <td style="{{ st.td }}"><button onClick="{{ l.onSide }}" style="{{ l.sideStyle }}">{{ l.sideLabel }}</button></td>
+                        <td style="{{ st.tdn }}"><input type="number" value="{{ l.strike }}" onChange="{{ l.onStrike }}" style="{{ st.inputSm }};width:76px;text-align:right"></td>
+                        <td style="{{ st.tdn }}"><input type="number" value="{{ l.qty }}" onChange="{{ l.onQty }}" style="{{ st.inputSm }};width:56px;text-align:right"></td>
+                        <td style="{{ st.tdn }};color:#8b98a9">{{ l.entry }}</td>
+                        <td style="{{ st.td }};text-align:right"><button onClick="{{ l.onRemove }}" style="{{ st.btnGhost }};padding:1px 8px;color:#ef5350">×</button></td>
+                      </tr>
+                    </sc-for>
+                  </tbody></table>
+                  <div style="padding:8px"><button onClick="{{ addLeg }}" style="{{ st.btnGhost }}">+ Добавить ногу</button></div>
+                </div>
+              </section>
+              <div style="display:grid;grid-template-columns:1fr minmax(260px,300px);gap:8px;flex:1;min-height:0">
+                <section style="{{ st.panel }}">
+                  <header style="{{ st.head }}">Диаграмма выплат (P&amp;L)</header>
+                  <div style="{{ st.body }};padding:8px"><div data-chart="payoff" data-chart-id="payoff-main" style="width:100%;height:100%;min-height:300px"></div></div>
+                </section>
+                <section style="{{ st.panel }}">
+                  <header style="{{ st.head }}">Итоги позиции</header>
+                  <div style="{{ st.body }};display:flex;flex-direction:column;gap:10px">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                      <div style="{{ st.statCard }};flex:1"><div style="{{ st.statLabel }}">Макс. прибыль</div><div style="{{ st.statBig }};color:#26a69a;font-size:16px">{{ maxProfit }}</div></div>
+                      <div style="{{ st.statCard }};flex:1"><div style="{{ st.statLabel }}">Макс. убыток</div><div style="{{ st.statBig }};color:#ef5350;font-size:16px">{{ maxLoss }}</div></div>
+                    </div>
+                    <div><div style="{{ st.fieldLabel }}">Точки безубытка</div><div style="font-variant-numeric:tabular-nums;font-weight:600">{{ breakevens }}</div></div>
+                    <table style="{{ st.table }}"><thead><tr><th style="{{ st.th }}">Грек</th><th style="{{ st.thn }}">Позиция</th></tr></thead>
+                    <tbody><sc-for list="{{ posGreeksView }}" as="g" hint-placeholder-count="5"><tr style="cursor:default"><td style="{{ st.td }};font-weight:600">{{ g.name }}</td><td style="{{ st.tdn }};color:#4f9cf9;font-weight:600">{{ g.value }}</td></tr></sc-for></tbody></table>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- ============ SETTINGS ============ -->
+    <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+      <div style="max-width:940px;margin:0 auto;padding:12px;display:flex;flex-direction:column;gap:10px">
+
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">Отображение</header>
+          <div style="{{ st.body }};display:flex;gap:20px;flex-wrap:wrap">
+            <label style="display:flex;flex-direction:column;gap:4px"><span style="{{ st.fieldLabel }};margin:0">Глубина стакана</span><input type="number" value="{{ setDom }}" onChange="{{ onSetDom }}" style="{{ st.input }};width:120px"></label>
+            <label style="display:flex;flex-direction:column;gap:4px"><span style="{{ st.fieldLabel }};margin:0">Размер ленты</span><input type="number" value="{{ setTape }}" onChange="{{ onSetTape }}" style="{{ st.input }};width:120px"></label>
+            <label style="display:flex;flex-direction:column;gap:4px"><span style="{{ st.fieldLabel }};margin:0">Лимит лидеров</span><input type="number" value="{{ setMovers }}" onChange="{{ onSetMovers }}" style="{{ st.input }};width:120px"></label>
+          </div>
+        </section>
+
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">MOEX ALGO / Passport</header>
+          <div style="{{ st.body }};display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:13px">Подключение MOEX ALGOPACK</span>
+              <span style="{{ st.keyBadge }}">секрет задан: да</span>
+              <span style="color:#8b98a9;font-size:11px">env → .env (MOEX_ALGO_API) → keyring · значение не хранится в UI</span>
+            </div>
+            <div style="display:flex;gap:20px;flex-wrap:wrap">
+              <div><div style="{{ st.fieldLabel }}">Рынки</div><div style="display:flex;gap:5px"><sc-for list="{{ setMarketsView }}" as="m" hint-placeholder-count="3"><button onClick="{{ m.onClick }}" style="{{ m.style }}">{{ m.label }}</button></sc-for></div></div>
+              <div style="flex:1;min-width:220px"><div style="{{ st.fieldLabel }}">Вотчлист ALGOPACK</div><div style="display:flex;flex-wrap:wrap;gap:5px"><sc-for list="{{ watchlistView }}" as="w" hint-placeholder-count="6"><button onClick="{{ w.onClick }}" style="{{ w.style }}">{{ w.ticker }}</button></sc-for></div></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- RULE BUILDER -->
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }};display:flex;align-items:center;gap:8px">
+            <span>Конструктор правил · Key Activity</span>
+            <div style="margin-left:auto;display:flex;gap:6px;text-transform:none;letter-spacing:0">
+              <button onClick="{{ toggleJson }}" style="{{ st.btnGhost }}">{{ jsonBtnLabel }}</button>
+              <button onClick="{{ resetRules }}" style="{{ st.btnGhost }}">Сбросить к дефолтам</button>
+              <button onClick="{{ saveRules }}" style="{{ st.btnPrimary }}">{{ saveBtnLabel }}</button>
+            </div>
+          </header>
+          <div style="{{ st.body }};display:flex;flex-direction:column;gap:10px">
+            <sc-for list="{{ rulesView }}" as="rule" hint-placeholder-count="2">
+              <div style="border:1px solid #1d2530;border-radius:8px;overflow:hidden;background:#0d1117">
+                <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#1a232e;border-bottom:1px solid #1d2530">
+                  <span style="width:7px;height:7px;border-radius:50%;background:{{ rule.dot }}"></span>
+                  <input value="{{ rule.name }}" onChange="{{ rule.onName }}" style="{{ st.inputSm }};font-weight:600;width:230px;background:transparent;border-color:transparent">
+                  <span style="font-size:11px;color:#8b98a9">важность:</span>
+                  <select value="{{ rule.severity }}" onChange="{{ rule.onSeverity }}" style="{{ st.selectSm }}"><option value="high">Высокая</option><option value="med">Средняя</option><option value="low">Низкая</option></select>
+                  <button onClick="{{ rule.onRemove }}" style="{{ st.btnGhost }};margin-left:auto;color:#ef5350;padding:1px 8px">Удалить правило</button>
+                </div>
+                <div style="padding:9px 10px;display:flex;flex-direction:column;gap:6px">
+                  <div style="font-size:11px;color:#8b98a9;text-transform:uppercase;letter-spacing:.4px">ЕСЛИ выполнены условия:</div>
+                  <sc-for list="{{ rule.conds }}" as="c" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                      <sc-if value="{{ c.showConn }}" hint-placeholder-val="{{ false }}">
+                        <div style="{{ st.segWrapSm }}"><sc-for list="{{ c.connView }}" as="cn" hint-placeholder-count="3"><button onClick="{{ cn.onClick }}" style="{{ cn.style }}">{{ cn.label }}</button></sc-for></div>
+                      </sc-if>
+                      <sc-if value="{{ c.firstRow }}" hint-placeholder-val="{{ true }}"><span style="width:96px;font-size:11px;color:#8b98a9">метрика</span></sc-if>
+                      <select value="{{ c.metric }}" onChange="{{ c.onMetric }}" style="{{ st.selectSm }};min-width:150px"><sc-for list="{{ metricOpts }}" as="o" hint-placeholder-count="6"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select>
+                      <select value="{{ c.op }}" onChange="{{ c.onOp }}" style="{{ st.selectSm }};min-width:150px"><sc-for list="{{ opOpts }}" as="o" hint-placeholder-count="6"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select>
+                      <input value="{{ c.threshold }}" onChange="{{ c.onThreshold }}" style="{{ st.inputSm }};width:80px;text-align:right" placeholder="порог">
+                      <span style="font-size:11px;color:#8b98a9">область</span>
+                      <select value="{{ c.scope }}" onChange="{{ c.onScope }}" style="{{ st.selectSm }};min-width:150px"><sc-for list="{{ scopeOpts }}" as="o" hint-placeholder-count="4"><option value="{{ o.id }}">{{ o.label }}</option></sc-for></select>
+                      <button onClick="{{ c.onRemove }}" style="{{ st.btnGhost }};padding:1px 8px;color:#ef5350">×</button>
+                    </div>
+                  </sc-for>
+                  <div style="display:flex;align-items:center;gap:10px;margin-top:2px">
+                    <button onClick="{{ rule.onAddCond }}" style="{{ st.btnGhost }};padding:2px 9px">+ Условие</button>
+                    <span style="font-size:11px;color:#8b98a9">ТО пометить событие правилом «{{ rule.name }}»</span>
+                  </div>
+                </div>
+              </div>
+            </sc-for>
+            <button onClick="{{ addRule }}" style="{{ st.btnGhost }};align-self:flex-start;padding:5px 12px">+ Новое правило</button>
+            <sc-if value="{{ showJson }}" hint-placeholder-val="{{ false }}">
+              <div style="border:1px solid #1d2530;border-radius:6px;background:#0d1117;overflow:hidden">
+                <div style="{{ st.head }};display:flex;align-items:center"><span>JSON конфигурация (импорт/экспорт)</span></div>
+                <textarea readonly style="width:100%;height:180px;background:#0d1117;color:#8b98a9;border:none;padding:10px;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;resize:vertical">{{ rulesJson }}</textarea>
+              </div>
+            </sc-if>
+          </div>
+        </section>
+
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">LLM · ИИ-резюме</header>
+          <div style="{{ st.body }};display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">
+              <div><div style="{{ st.fieldLabel }}">Провайдер</div><div style="{{ st.segWrap }}"><sc-for list="{{ providerView }}" as="p" hint-placeholder-count="3"><button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.label }}</button></sc-for></div></div>
+              <label style="flex:1;min-width:220px"><div style="{{ st.fieldLabel }}">Модель</div><input value="{{ llmModel }}" onChange="{{ onLlmModel }}" style="{{ st.input }};width:100%"></label>
+            </div>
+            <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">Ключ провайдера</span><span style="{{ setHasKey ? st.keyBadge : st.keyBadgeOff }}">{{ keyStatusLabel }}</span><button onClick="{{ toggleSetKey }}" style="{{ st.btnGhost }}">переключить</button></div>
+              <label style="display:flex;flex-direction:column;gap:4px"><span style="{{ st.fieldLabel }};margin:0">Лимит токенов</span><input type="number" value="{{ tokenLimit }}" onChange="{{ onTokenLimit }}" style="{{ st.input }};width:120px"></label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:14px"><button onClick="{{ toggleAuto }}" style="{{ autoToggleStyle }}"><span style="{{ autoKnobStyle }}"></span></button><span style="font-size:13px">Авто-резюме</span></label>
+            </div>
+            <div><div style="{{ st.fieldLabel }}">Период анализа по умолчанию</div><div style="{{ st.segWrap }}"><sc-for list="{{ defPeriodView }}" as="p" hint-placeholder-count="5"><button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.label }}</button></sc-for></div></div>
+          </div>
+        </section>
+
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">Данные / Историзация</header>
+          <div style="{{ st.body }};display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">
+            <div><div style="{{ st.fieldLabel }}">Источник по умолчанию</div><div style="{{ st.segWrap }}"><sc-for list="{{ setSourceView }}" as="s" hint-placeholder-count="2"><button onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</button></sc-for></div></div>
+            <label style="flex:1;min-width:240px"><div style="{{ st.fieldLabel }}">Директория хранения</div><input value="{{ dataDir }}" onChange="{{ onDataDir }}" style="{{ st.input }};width:100%"></label>
+            <label style="display:flex;flex-direction:column;gap:4px"><span style="{{ st.fieldLabel }};margin:0">Параллелизм</span><input type="number" value="{{ concurrency }}" onChange="{{ onConcurrency }}" style="{{ st.input }};width:100px"></label>
+          </div>
+        </section>
+
+        <section style="{{ st.panel }}">
+          <header style="{{ st.head }}">Опционы</header>
+          <div style="{{ st.body }};display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">
+            <div><div style="{{ st.fieldLabel }}">Модель ценообразования</div><div style="{{ st.segWrap }}"><sc-for list="{{ setPricingView }}" as="s" hint-placeholder-count="2"><button onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</button></sc-for></div></div>
+            <label style="display:flex;flex-direction:column;gap:4px"><span style="{{ st.fieldLabel }};margin:0">Ставка r, %</span><input type="number" value="{{ setRate }}" onChange="{{ onSetRate }}" style="{{ st.input }};width:100px"></label>
+            <div><div style="{{ st.fieldLabel }}">Модель улыбки по умолчанию</div><div style="{{ st.segWrap }}"><sc-for list="{{ setSmileView }}" as="s" hint-placeholder-count="4"><button onClick="{{ s.onClick }}" style="{{ s.style }}">{{ s.label }}</button></sc-for></div></div>
+          </div>
+        </section>
+
+      </div>
+    </sc-if>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;startTab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;algo&quot;,&quot;options&quot;:[&quot;overview&quot;,&quot;algo&quot;,&quot;backtest&quot;,&quot;options&quot;,&quot;settings&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Поведение&quot;},&quot;defaultPeriod&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;1d&quot;,&quot;options&quot;:[&quot;1h&quot;,&quot;1d&quot;,&quot;1w&quot;,&quot;1m&quot;,&quot;3m&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Поведение&quot;}}">
+class Component extends DCLogic {
+  data = this.buildData();
+  state = {
+    tab: (this.props && this.props.startTab) || 'algo',
+    module: 'keyactivity',
+    optab: 'calc',
+    period: (this.props && this.props.defaultPeriod) || '1h',
+    market: 'eq',
+    ticker: 'SBER',
+    viewState: 'data',
+    futoiMode: 'net',
+    kaRule: 'all',
+    kaTicker: 'all',
+    megaType: 'all',
+    summaryState: 'data',
+    summaryStamp: '10:58:22',
+    smile: { moex: true, sabr: true, svi: false, kalen: false },
+    smileActive: 'moex',
+    calc: { F: 300, K: 300, days: 30, vol: 32, r: 0, mkt: 8.9, type: 'call', model: 'black76' },
+    legs: null,
+    loadForm: { source: 'finam', tickers: ['SBER', 'GAZP'], tfs: ['M5', 'H1'], from: '2024-01-01', till: '2024-06-30' },
+    progress: [],
+    selDataset: 0,
+    rules: null,
+    showJson: false,
+    saved: false,
+    settings: {
+      dom: 20, tape: 50, movers: 15,
+      markets: { eq: true, fo: true, fx: false },
+      watchlist: { SBER: true, GAZP: true, LKOH: true, GMKN: false, ROSN: true, VTBR: false },
+      provider: 'openrouter', llmModel: 'anthropic/claude-3.5-sonnet', hasKey: false, tokenLimit: 2000, auto: true, defPeriod: '1h',
+      source: 'finam', dataDir: '~/.market-terminal/history', concurrency: 4,
+      pricing: 'black76', rate: 0, defSmile: 'moex',
+    },
+  };
+
+  constructor(...a) {
+    super(...a);
+    this.state.legs = this.presetLegs('vertical');
+    this.state.rules = this.defaultRules();
+    this._charts = {};
+  }
+
+  // ---------- utilities ----------
+  hash(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  rng(seed) { let a = seed >>> 0; return function () { a = (a + 0x6D2B79F5) >>> 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  fmt(n, d = 2) { return Number(n).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+  fmtInt(n) { return Math.round(n).toLocaleString('ru-RU'); }
+  mlrd(v) { return this.fmt(v / 1e9, 2) + ' млрд ₽'; }
+  hhmm(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(Math.round(min % 60)).padStart(2, '0'); }
+
+  buildData() {
+    const T = [
+      { ticker: 'SBER', name: 'Сбербанк', sector: 'Финансы', base: 302.4 },
+      { ticker: 'GAZP', name: 'Газпром', sector: 'Нефтегаз', base: 128.6 },
+      { ticker: 'LKOH', name: 'Лукойл', sector: 'Нефтегаз', base: 7120 },
+      { ticker: 'GMKN', name: 'ГМК Норникель', sector: 'Металлургия', base: 112.8 },
+      { ticker: 'ROSN', name: 'Роснефть', sector: 'Нефтегаз', base: 565.2 },
+      { ticker: 'VTBR', name: 'ВТБ', sector: 'Финансы', base: 96.3 },
+      { ticker: 'YDEX', name: 'Яндекс', sector: 'IT', base: 4210 },
+      { ticker: 'MGNT', name: 'Магнит', sector: 'Ритейл', base: 6840 },
+      { ticker: 'NVTK', name: 'Новатэк', sector: 'Нефтегаз', base: 1042 },
+      { ticker: 'TATN', name: 'Татнефть', sector: 'Нефтегаз', base: 712.5 },
+      { ticker: 'MOEX', name: 'Мосбиржа', sector: 'Финансы', base: 198.4 },
+      { ticker: 'PLZL', name: 'Полюс', sector: 'Металлургия', base: 11840 },
+    ];
+    const rnd = this.rng(42);
+    T.forEach(t => { t.change = (rnd() - 0.45) * 0.06; t.turnover = (rnd() * 30 + 4) * 1e9; });
+    return { tickers: T };
+  }
+  tk(ticker) { return this.data.tickers.find(t => t.ticker === ticker) || this.data.tickers[0]; }
+
+  // ---------- candle / metric generation ----------
+  candles(ticker) {
+    this._cc = this._cc || {};
+    if (this._cc[ticker]) return this._cc[ticker];
+    const info = this.tk(ticker); const base = info.base;
+    const rnd = this.rng(this.hash(ticker) + 3);
+    let px = base, cumPV = 0, cumV = 0, min = 10 * 60;
+    const bars = [];
+    for (let i = 0; i < 78; i++) {
+      const drift = (rnd() - 0.48) * base * 0.0045;
+      const o = px, c = px + drift;
+      const h = Math.max(o, c) + rnd() * base * 0.0022;
+      const l = Math.min(o, c) - rnd() * base * 0.0022;
+      const anomalous = (i % 17 === 5) || (i % 23 === 3);
+      const vol = Math.round((1800 + rnd() * 6500) * (anomalous ? 3.4 : 1));
+      const val = vol * ((o + c) / 2) * 10;
+      cumPV += ((h + l + c) / 3) * vol; cumV += vol;
+      const vwap = cumPV / cumV;
+      const disb = Math.max(-1, Math.min(1, (rnd() - 0.5) * 2 + drift * 4 / base * 100));
+      bars.push({ min: min + i * 5, o, h, l, c, vol, val, vwap, disb, trades: Math.round(vol / 8), anomalous });
+      px = c;
+    }
+    this._cc[ticker] = bars;
+    return bars;
+  }
+
+  // ---------- Key Activity ----------
+  keyActivity() {
+    const rules = [
+      ['Топ по обороту', 'оборот', 'high'], ['Аномальный объём', 'z-объём', 'high'],
+      ['Разворот дисбаланса', 'disb', 'med'], ['Экстремум FUTOI', 'нетто физ', 'med'],
+      ['Всплеск HI2', 'HI2', 'high'], ['Mega-Alert', 'сигнал', 'low'],
+    ];
+    const tk = this.data.tickers.map(t => t.ticker);
+    const rnd = this.rng(7);
+    const rows = []; let m = 9 * 60 + 5;
+    for (let i = 0; i < 26; i++) {
+      const r = rules[Math.floor(rnd() * rules.length)];
+      const ticker = tk[Math.floor(rnd() * tk.length)];
+      let val;
+      if (r[1] === 'оборот') val = this.fmt(rnd() * 38 + 6, 1) + ' млрд ₽';
+      else if (r[1] === 'z-объём') val = '+' + this.fmt(rnd() * 4 + 2.2, 1) + 'σ';
+      else if (r[1] === 'disb') val = (rnd() > 0.5 ? '+' : '−') + this.fmt(rnd() * 0.55 + 0.25, 2);
+      else if (r[1] === 'HI2') val = this.fmt(rnd() * 0.28 + 0.24, 2);
+      else if (r[1] === 'нетто физ') val = (rnd() > 0.5 ? '+' : '−') + this.fmtInt(rnd() * 90 + 12) + 'k';
+      else val = 'сработал';
+      m += Math.round(rnd() * 20 + 4);
+      rows.push({ time: this.hhmm(m), ticker, rule: r[0], metric: r[1], value: val, severity: r[2] });
+    }
+    return rows.reverse();
+  }
+
+  megaAlerts() {
+    const types = [
+      ['Всплеск объёма', 'объём', 'high'], ['Дисбаланс покупок', 'disb', 'high'],
+      ['Расширение спреда', 'спред', 'med'], ['Скачок OI', 'ΔOI', 'med'], ['Концентрация HI2', 'HI2', 'low'],
+    ];
+    const tk = this.data.tickers.map(t => t.ticker);
+    const rnd = this.rng(19); const rows = []; let m = 10 * 60 + 12;
+    for (let i = 0; i < 18; i++) {
+      const t = types[Math.floor(rnd() * types.length)];
+      const ticker = tk[Math.floor(rnd() * tk.length)];
+      let val, up = rnd() > 0.42;
+      if (t[1] === 'объём') val = '×' + this.fmt(rnd() * 4 + 2.5, 1);
+      else if (t[1] === 'disb') val = (up ? '+' : '−') + this.fmt(rnd() * 0.6 + 0.3, 2);
+      else if (t[1] === 'спред') val = '+' + this.fmt(rnd() * 3 + 1, 1) + ' бп';
+      else if (t[1] === 'ΔOI') val = (up ? '+' : '−') + this.fmtInt(rnd() * 60 + 15) + 'k';
+      else val = this.fmt(rnd() * 0.25 + 0.3, 2);
+      m += Math.round(rnd() * 14 + 3);
+      rows.push({ time: this.hhmm(m), ticker, type: t[0], typeId: t[1], metric: t[0], value: val, severity: t[2], up });
+    }
+    return rows.reverse();
+  }
+
+  // ---------- Options math ----------
+  ncdf(x) { return 0.5 * (1 + this.erf(x / Math.SQRT2)); }
+  npdf(x) { return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI); }
+  erf(x) { const s = x < 0 ? -1 : 1; x = Math.abs(x); const t = 1 / (1 + 0.3275911 * x); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return s * y; }
+  black76(F, K, T, sig, r, type) {
+    if (T <= 0 || sig <= 0 || F <= 0) { const intr = type === 'call' ? Math.max(F - K, 0) : Math.max(K - F, 0); return { price: Math.exp(-r * T) * intr, delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0 }; }
+    const v = sig * Math.sqrt(T), d1 = (Math.log(F / K) + 0.5 * sig * sig * T) / v, d2 = d1 - v, df = Math.exp(-r * T);
+    const Nd1 = this.ncdf(d1), Nd2 = this.ncdf(d2), nd1 = this.npdf(d1);
+    let price, delta;
+    if (type === 'call') { price = df * (F * Nd1 - K * Nd2); delta = df * Nd1; }
+    else { price = df * (K * this.ncdf(-d2) - F * this.ncdf(-d1)); delta = -df * this.ncdf(-d1); }
+    const gamma = df * nd1 / (F * v), vega = df * F * nd1 * Math.sqrt(T);
+    const theta = -df * F * nd1 * sig / (2 * Math.sqrt(T)) + r * price;
+    const rho = -T * price;
+    return { price, delta, gamma, vega: vega / 100, theta: theta / 365, rho: rho / 100 };
+  }
+  bachelier(F, K, T, sig, r, type) {
+    if (T <= 0 || sig <= 0) { const intr = type === 'call' ? Math.max(F - K, 0) : Math.max(K - F, 0); return { price: intr, delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0 }; }
+    const s = sig * Math.sqrt(T), d = (F - K) / s, df = Math.exp(-r * T);
+    let price, delta;
+    if (type === 'call') { price = df * ((F - K) * this.ncdf(d) + s * this.npdf(d)); delta = df * this.ncdf(d); }
+    else { price = df * ((K - F) * this.ncdf(-d) + s * this.npdf(d)); delta = -df * this.ncdf(-d); }
+    const gamma = df * this.npdf(d) / s, vega = df * Math.sqrt(T) * this.npdf(d);
+    return { price, delta, gamma, vega: vega / 100, theta: -vega / (2 * T) / 365, rho: -T * price / 100 };
+  }
+  priceModel(F, K, T, sig, r, type, model) { return model === 'bachelier' ? this.bachelier(F, K, T, sig * F, r, type) : this.black76(F, K, T, sig, r, type); }
+  impliedVol(mkt, F, K, T, r, type, model) {
+    let lo = 0.001, hi = 4;
+    for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; const p = this.priceModel(F, K, T, mid, r, type, model).price; if (p > mkt) hi = mid; else lo = mid; }
+    return (lo + hi) / 2;
+  }
+
+  presetLegs(name) {
+    const F = 300, r = 0, T = 30 / 365, vol = 0.32;
+    const mk = (type, side, strike, qty) => ({ type, side, strike, qty, entry: type === 'ubl' ? strike : this.black76(F, strike, T, vol, r, type).price });
+    switch (name) {
+      case 'vertical': return [mk('call', 'long', 290, 1), mk('call', 'short', 315, 1)];
+      case 'straddle': return [mk('call', 'long', 300, 1), mk('put', 'long', 300, 1)];
+      case 'strangle': return [mk('call', 'long', 315, 1), mk('put', 'long', 285, 1)];
+      case 'butterfly': return [mk('call', 'long', 285, 1), mk('call', 'short', 300, 2), mk('call', 'long', 315, 1)];
+      case 'condor': return [mk('call', 'long', 280, 1), mk('call', 'short', 295, 1), mk('call', 'short', 310, 1), mk('call', 'long', 325, 1)];
+      case 'covered': return [mk('ubl', 'long', 300, 1), mk('call', 'short', 315, 1)];
+      default: return [mk('call', 'long', 300, 1)];
+    }
+  }
+  legPayoff(leg, S) {
+    const sign = leg.side === 'long' ? 1 : -1;
+    let intr;
+    if (leg.type === 'call') intr = Math.max(S - leg.strike, 0);
+    else if (leg.type === 'put') intr = Math.max(leg.strike - S, 0);
+    else intr = S;
+    return sign * leg.qty * (intr - leg.entry);
+  }
+  strategyResult() {
+    const legs = this.state.legs, F = 300, r = 0, Trem = 15 / 365, vol = 0.32;
+    const lo = 240, hi = 360, N = 121, expiry = [], now = [];
+    for (let i = 0; i < N; i++) {
+      const S = lo + (hi - lo) * i / (N - 1);
+      let pe = 0, pn = 0;
+      legs.forEach(l => {
+        pe += this.legPayoff(l, S);
+        const sign = l.side === 'long' ? 1 : -1;
+        let cur;
+        if (l.type === 'ubl') cur = S; else cur = this.black76(S, l.strike, Trem, vol, r, l.type).price;
+        pn += sign * l.qty * (cur - l.entry);
+      });
+      expiry.push([S, pe]); now.push([S, pn]);
+    }
+    const be = []; for (let i = 1; i < expiry.length; i++) { const a = expiry[i - 1], b = expiry[i]; if ((a[1] <= 0 && b[1] > 0) || (a[1] >= 0 && b[1] < 0)) { const t = a[1] / (a[1] - b[1]); be.push(a[0] + t * (b[0] - a[0])); } }
+    const pes = expiry.map(p => p[1]);
+    const g = { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0 };
+    legs.forEach(l => { const sign = l.side === 'long' ? 1 : -1; if (l.type === 'ubl') { g.delta += sign * l.qty; return; } const gr = this.black76(F, l.strike, Trem, vol, r, l.type); ['delta', 'gamma', 'vega', 'theta', 'rho'].forEach(k => g[k] += sign * l.qty * gr[k]); });
+    return { expiry, now, be, maxProfit: Math.max(...pes), maxLoss: Math.min(...pes), greeks: g };
+  }
+
+  smileMarket() {
+    if (this._sm) return this._sm;
+    const F = 300, rnd = this.rng(101), pts = [];
+    for (let K = 250; K <= 350; K += 5) {
+      const m = Math.log(K / F);
+      const iv = 0.30 + 1.8 * m * m - 0.25 * m + (rnd() - 0.5) * 0.012;
+      const oi = Math.round(200 + Math.exp(-m * m * 30) * 4000 + rnd() * 300);
+      pts.push({ K, iv, oi });
+    }
+    this._sm = { F, pts };
+    return this._sm;
+  }
+  smileCurve(model) {
+    const { F } = this.smileMarket(); const curve = [];
+    const P = { moex: [0.30, 1.7, -0.24], sabr: [0.305, 1.55, -0.20], svi: [0.298, 1.95, -0.28], kalen: [0.30, 1.62, -0.22] };
+    const p = P[model];
+    for (let K = 250; K <= 350; K += 2.5) { const m = Math.log(K / F); curve.push([K, p[0] + p[1] * m * m + p[2] * m]); }
+    return curve;
+  }
+  smileFits() {
+    return [
+      { id: 'moex', name: 'MOEX', color: '#4f9cf9', rmse: '0.42%', params: [['σ₀', '30.0%'], ['skew', '−0.24'], ['curv', '1.70']] },
+      { id: 'sabr', name: 'SABR', color: '#26a69a', rmse: '0.51%', params: [['α', '0.305'], ['β', '0.50'], ['ρ', '−0.31'], ['ν', '0.62']] },
+      { id: 'svi', name: 'SVI', color: '#f5a623', rmse: '0.38%', params: [['a', '0.021'], ['b', '0.14'], ['ρ', '−0.42'], ['m', '−0.02'], ['σ', '0.09']] },
+      { id: 'kalen', name: 'Каленкович', color: '#a371f7', rmse: '0.47%', params: [['level', '30.0%'], ['skew', '−0.22'], ['kurt', '1.62']] },
+    ];
+  }
+
+  datasets() {
+    return [
+      { source: 'Finam', ticker: 'SBER', tf: 'M5', from: '2023-01-03', to: '2024-06-28', bars: 74210, size: '3.8 МБ', updated: 'сегодня 09:14' },
+      { source: 'Finam', ticker: 'SBER', tf: 'H1', from: '2021-01-04', to: '2024-06-28', bars: 20880, size: '1.1 МБ', updated: 'сегодня 09:14' },
+      { source: 'MOEX ALGO', ticker: 'GAZP', tf: 'M5', from: '2023-06-01', to: '2024-06-28', bars: 51340, size: '2.6 МБ', updated: 'вчера 18:40' },
+      { source: 'Finam', ticker: 'LKOH', tf: 'D1', from: '2015-01-05', to: '2024-06-28', bars: 2380, size: '184 КБ', updated: '27.06 21:02' },
+      { source: 'MOEX ALGO', ticker: 'GMKN', tf: 'M15', from: '2023-01-03', to: '2024-06-28', bars: 24700, size: '1.3 МБ', updated: '26.06 12:11' },
+      { source: 'Finam', ticker: 'ROSN', tf: 'H1', from: '2020-01-06', to: '2024-06-28', bars: 27100, size: '1.4 МБ', updated: '25.06 08:55' },
+    ];
+  }
+
+  defaultRules() {
+    return [
+      { id: 'r1', name: 'Топ по обороту', severity: 'high', conds: [{ metric: 'turnover', op: 'gt', threshold: '20', scope: 'market' }] },
+      { id: 'r2', name: 'Аномальный объём + разворот дисбаланса', severity: 'high', conds: [{ metric: 'volume', op: 'zscore', threshold: '3', scope: 'set' }, { conn: 'AND', metric: 'disb', op: 'cross', threshold: '0', scope: 'set' }] },
+      { id: 'r3', name: 'Экстремум концентрации', severity: 'med', conds: [{ metric: 'hi2', op: 'gt', threshold: '0.35', scope: 'ticker' }, { conn: 'OR', metric: 'oi', op: 'zscore', threshold: '2.5', scope: 'ticker' }] },
+    ];
+  }
+
+  // ---------- style tokens ----------
+  get st() {
+    return {
+      panel: 'display:flex;flex-direction:column;min-height:0;border:1px solid #1d2530;border-radius:8px;background:#131a23;overflow:hidden',
+      head: 'padding:7px 12px;font-size:12px;font-weight:600;color:#8b98a9;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #1d2530;background:#1a232e',
+      body: 'flex:1;min-height:0;overflow:auto;padding:8px',
+      table: 'width:100%;border-collapse:collapse;font-size:13px',
+      th: 'text-align:left;padding:5px 8px;border-bottom:1px solid #1d2530;color:#8b98a9;font-weight:500;white-space:nowrap;position:sticky;top:0;background:#131a23;z-index:1',
+      thn: 'text-align:right;padding:5px 8px;border-bottom:1px solid #1d2530;color:#8b98a9;font-weight:500;white-space:nowrap;position:sticky;top:0;background:#131a23;z-index:1;font-variant-numeric:tabular-nums',
+      td: 'text-align:left;padding:5px 8px;border-bottom:1px solid #1d2530;white-space:nowrap',
+      tdn: 'text-align:right;padding:5px 8px;border-bottom:1px solid #1d2530;white-space:nowrap;font-variant-numeric:tabular-nums',
+      btnPrimary: 'appearance:none;border:1px solid #4f9cf9;background:rgba(79,156,249,.15);color:#4f9cf9;font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;cursor:pointer',
+      btnGhost: 'appearance:none;border:1px solid #1d2530;background:#1a232e;color:#e6edf3;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer',
+      input: 'background:#0d1117;color:#e6edf3;border:1px solid #1d2530;border-radius:5px;padding:5px 8px;font-size:13px;font-variant-numeric:tabular-nums',
+      inputSm: 'background:#0d1117;color:#e6edf3;border:1px solid #1d2530;border-radius:5px;padding:3px 7px;font-size:12px;font-variant-numeric:tabular-nums',
+      select: 'background:#0d1117;color:#e6edf3;border:1px solid #1d2530;border-radius:5px;padding:5px 8px;font-size:13px;cursor:pointer',
+      selectSm: 'background:#0d1117;color:#e6edf3;border:1px solid #1d2530;border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer',
+      segWrap: 'display:flex;gap:2px;padding:2px;background:#0d1117;border:1px solid #1d2530;border-radius:7px',
+      segWrapSm: 'display:flex;gap:2px;padding:1px;background:#0d1117;border:1px solid #1d2530;border-radius:6px',
+      tbLabel: 'font-size:11px;color:#8b98a9;text-transform:uppercase;letter-spacing:.4px',
+      fieldLabel: 'font-size:11px;color:#8b98a9;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px',
+      statCard: 'background:#1a232e;border:1px solid #1d2530;border-radius:7px;padding:8px 12px;min-width:120px',
+      statLabel: 'font-size:11px;color:#8b98a9;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px',
+      statBig: 'font-size:20px;font-weight:700;font-variant-numeric:tabular-nums',
+      errorBanner: 'border:1px solid #ef5350;background:rgba(239,83,80,.08);color:#ef5350;padding:8px 10px;border-radius:6px;font-size:12px',
+      keyBadge: 'border:1px solid #26a69a;background:rgba(38,166,154,.12);color:#26a69a;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600',
+      keyBadgeOff: 'border:1px solid #ef5350;background:rgba(239,83,80,.1);color:#ef5350;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600',
+    };
+  }
+  segBtn(active) { return active ? 'appearance:none;border:none;background:#1a232e;color:#e6edf3;font-size:12px;font-weight:600;padding:4px 11px;border-radius:5px;cursor:pointer;box-shadow:inset 0 0 0 1px #4f9cf9' : 'appearance:none;border:none;background:transparent;color:#8b98a9;font-size:12px;padding:4px 11px;border-radius:5px;cursor:pointer'; }
+  segBtnSm(active) { return active ? 'appearance:none;border:none;background:#131a23;color:#4f9cf9;font-size:11px;font-weight:700;padding:2px 8px;border-radius:5px;cursor:pointer' : 'appearance:none;border:none;background:transparent;color:#8b98a9;font-size:11px;padding:2px 8px;border-radius:5px;cursor:pointer'; }
+  chipBtn(active) { return active ? 'appearance:none;border:1px solid #4f9cf9;background:rgba(79,156,249,.15);color:#4f9cf9;font-size:12px;font-weight:600;padding:3px 10px;border-radius:14px;cursor:pointer' : 'appearance:none;border:1px solid #1d2530;background:#0d1117;color:#8b98a9;font-size:12px;padding:3px 10px;border-radius:14px;cursor:pointer'; }
+  tabBtn(active) { return active ? 'appearance:none;border:none;background:transparent;color:#e6edf3;font-size:13px;font-weight:600;padding:9px 16px;cursor:pointer;border-bottom:2px solid #4f9cf9' : 'appearance:none;border:none;background:transparent;color:#8b98a9;font-size:13px;font-weight:500;padding:9px 16px;cursor:pointer;border-bottom:2px solid transparent'; }
+  modBtn(active) { return active ? 'appearance:none;border:1px solid #4f9cf9;background:rgba(79,156,249,.12);color:#4f9cf9;font-size:12px;font-weight:600;padding:5px 12px;border-radius:6px;cursor:pointer' : 'appearance:none;border:1px solid #1d2530;background:#131a23;color:#8b98a9;font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer'; }
+  sevChip(sev) {
+    const c = sev === 'high' ? '#ef5350' : sev === 'med' ? '#f5a623' : '#8b98a9';
+    const bg = sev === 'high' ? 'rgba(239,83,80,.12)' : sev === 'med' ? 'rgba(245,166,35,.12)' : 'rgba(139,152,169,.12)';
+    return 'border:1px solid ' + c + ';background:' + bg + ';color:' + c + ';padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600';
+  }
+  sevLabel(sev) { return sev === 'high' ? 'высокая' : sev === 'med' ? 'средняя' : 'низкая'; }
+
+  set(patch) { this.setState(s => ({ ...s })); Object.assign(this.state, patch); this.forceUpdate(); }
+  setSettings(patch) { Object.assign(this.state.settings, patch); this.forceUpdate(); }
+
+  // ---------- render values ----------
+  renderVals() {
+    const s = this.state, st = this.st;
+    const isData = s.viewState === 'data', notData = !isData;
+    const phMap = { loading: 'Загрузка данных…', empty: 'Нет данных', error: 'Ошибка загрузки данных' };
+    const phColor = s.viewState === 'error' ? '#ef5350' : '#8b98a9';
+    const periodMap = { '1h': '1ч', '1d': '1д', '1w': '1н', '1m': '1м', '3m': '3м' };
+
+    const v = {
+      st, isData, notData,
+      phText: phMap[s.viewState] || '',
+      phBoxStyle: 'display:flex;align-items:center;justify-content:center;height:100%;min-height:180px;color:' + phColor + ';font-size:13px' + (s.viewState === 'loading' ? ';animation:pulse 1.4s ease-in-out infinite' : ''),
+      ticker: s.ticker, onTicker: e => this.set({ ticker: e.target.value }),
+      periodLabel: 'за ' + (periodMap[s.period] || s.period),
+      statusLine: this.data.tickers.length + ' инструментов · ' + s.ticker + ' · мок-режим',
+    };
+
+    // header state control
+    const states = [['data', 'Данные'], ['loading', 'Загрузка'], ['empty', 'Пусто'], ['error', 'Ошибка']];
+    v.statesView = states.map(([id, label]) => ({ label, style: this.segBtnSm(s.viewState === id), onClick: () => this.set({ viewState: id }) }));
+
+    // tabs
+    const tabs = [['overview', 'Обзор'], ['algo', 'MOEX ALGO'], ['backtest', 'Бэктестер'], ['options', 'Опционы'], ['settings', 'Настройки']];
+    v.tabsView = tabs.map(([id, label]) => ({ label, style: this.tabBtn(s.tab === id), onClick: () => this.set({ tab: id }) }));
+    v.isOverview = s.tab === 'overview'; v.isAlgo = s.tab === 'algo'; v.isBacktest = s.tab === 'backtest'; v.isOptions = s.tab === 'options'; v.isSettings = s.tab === 'settings';
+
+    // ALGO toolbar
+    v.tickerOpts = this.data.tickers.map(t => ({ ticker: t.ticker, opt: t.ticker + ' · ' + t.name }));
+    const periods = [['1h', '1ч'], ['1d', '1д'], ['1w', '1н'], ['1m', '1м'], ['3m', '3м']];
+    v.periodsView = periods.map(([id, label]) => ({ label, style: this.segBtn(s.period === id), onClick: () => this.set({ period: id }) }));
+    const markets = [['eq', 'Акции'], ['fo', 'Фьючерсы'], ['fx', 'Валюта']];
+    v.marketsView = markets.map(([id, label]) => ({ label, style: this.segBtn(s.market === id), onClick: () => this.set({ market: id }) }));
+    const modules = [['keyactivity', 'Ключевая активность + ИТОГО'], ['supercandles', 'Супер-свечи'], ['futoi', 'FUTOI'], ['hi2', 'Концентрация HI2'], ['mega', 'Мега-алёрты']];
+    v.modulesView = modules.map(([id, label]) => ({ label, style: this.modBtn(s.module === id), onClick: () => this.set({ module: id }) }));
+    v.modKey = s.module === 'keyactivity'; v.modSc = s.module === 'supercandles'; v.modFutoi = s.module === 'futoi'; v.modHi2 = s.module === 'hi2'; v.modMega = s.module === 'mega';
+
+    // Key Activity table
+    const ka = this.keyActivity();
+    const ruleNames = [...new Set(ka.map(r => r.rule))];
+    v.kaRuleOpts = [{ id: 'all', label: 'Все правила' }, ...ruleNames.map(r => ({ id: r, label: r }))];
+    const tkNames = [...new Set(ka.map(r => r.ticker))].sort();
+    v.kaTickerOpts = [{ id: 'all', label: 'Все тикеры' }, ...tkNames.map(t => ({ id: t, label: t }))];
+    v.kaRule = s.kaRule; v.kaTicker = s.kaTicker;
+    v.onKaRule = e => this.set({ kaRule: e.target.value }); v.onKaTicker = e => this.set({ kaTicker: e.target.value });
+    v.kaView = ka.filter(r => (s.kaRule === 'all' || r.rule === s.kaRule) && (s.kaTicker === 'all' || r.ticker === s.kaTicker))
+      .map(r => ({ ...r, sevStyle: this.sevChip(r.severity), sevLabel: this.sevLabel(r.severity) }));
+
+    // TOTAL summary
+    v.summaryBadge = s.settings.llmModel + ' · ' + (periodMap[s.period] || s.period);
+    v.summaryTime = 'обновлено ' + s.summaryStamp;
+    v.sumData = s.summaryState === 'data'; v.sumLoading = s.summaryState === 'loading'; v.sumError = s.summaryState === 'error'; v.sumNoKey = s.summaryState === 'nokey';
+    const pstyle = 'margin:0';
+    v.summaryPars = [
+      { style: pstyle + ';font-weight:600;color:#e6edf3', text: 'Рынок за ' + (periodMap[s.period] || s.period) + ': повышенная активность в нефтегазе и финансах; совокупный оборот выше среднего.' },
+      { style: pstyle + ';color:#c9d3de', text: 'SBER и GAZP — лидеры по обороту с положительным дисбалансом покупок; аномальный объём отмечен в 4 инструментах (z > 3σ).' },
+      { style: pstyle + ';color:#c9d3de', text: 'FUTOI: физлица сокращают нетто-шорт по фьючерсу на индекс; концентрация HI2 по GMKN приближается к порогу доминирования одного участника.' },
+      { style: pstyle + ';color:#8b98a9;font-size:12px', text: 'Ключевые риски: расширение спреда в PLZL, скачок открытого интереса в ROSN. Рекомендуется контроль ликвидности на открытии вечерней сессии.' },
+    ];
+    v.fallbackPars = [
+      { style: pstyle + ';font-weight:600;color:#e6edf3', text: 'Локальный свод (без ИИ) за ' + (periodMap[s.period] || s.period) + ':' },
+      { style: pstyle + ';color:#c9d3de', text: 'Сработало правил: 26. Топ по обороту — SBER, GAZP, LKOH. Аномальный объём: 4 события. Разворотов дисбаланса: 6.' },
+      { style: pstyle + ';color:#8b98a9;font-size:12px', text: 'Свод собран из строк Key Activity локально. Для нарративного анализа добавьте ключ LLM в Настройках.' },
+    ];
+    v.skelLines = [92, 100, 84, 96, 70].map(w => ({ style: 'height:11px;border-radius:4px;background:#1a232e;width:' + w + '%;animation:pulse 1.4s ease-in-out infinite' }));
+    v.regenSummary = () => {
+      if (!s.settings.hasKey) { this.set({ summaryState: 'nokey' }); return; }
+      this.set({ summaryState: 'loading' });
+      clearTimeout(this._sumT);
+      this._sumT = setTimeout(() => { const d = new Date(); this.set({ summaryState: 'data', summaryStamp: this.hhmm(d.getHours() * 60 + d.getMinutes()) + ':' + String(d.getSeconds()).padStart(2, '0') }); }, 1100);
+    };
+
+    // Super candles metric table
+    const bars = this.candles(s.ticker);
+    v.scRows = bars.slice(-14).reverse().map(b => ({
+      time: this.hhmm(b.min), o: this.fmt(b.o), h: this.fmt(b.h), l: this.fmt(b.l), c: this.fmt(b.c),
+      vwap: this.fmt(b.vwap), vol: this.fmtInt(b.vol), val: this.mlrd(b.val).replace(' млрд ₽', ''), trades: this.fmtInt(b.trades),
+      disb: (b.disb >= 0 ? '+' : '') + this.fmt(b.disb, 2),
+      disbStyle: 'color:' + (b.disb >= 0 ? '#26a69a' : '#ef5350'),
+      rowStyle: b.anomalous ? 'background:rgba(245,166,35,.07)' : '',
+    }));
+
+    // FUTOI
+    const fmodes = [['long', 'Long'], ['short', 'Short'], ['net', 'Нетто']];
+    v.futoiModesView = fmodes.map(([id, label]) => ({ label, style: this.segBtn(s.futoiMode === id), onClick: () => this.set({ futoiMode: id }) }));
+    v.futoiRows = this.futoiTable();
+
+    // HI2 ranking
+    v.hi2Rows = this.hi2Ranking();
+
+    // Mega alerts
+    const mega = this.megaAlerts();
+    const mtypes = [{ id: 'all', label: 'Все типы' }, ...[...new Set(mega.map(a => a.type))].map(t => ({ id: t, label: t }))];
+    v.megaTypeOpts = mtypes; v.megaType = s.megaType; v.onMegaType = e => this.set({ megaType: e.target.value });
+    v.megaView = mega.filter(a => s.megaType === 'all' || a.type === s.megaType).map(a => ({
+      ...a, sevColor: a.severity === 'high' ? '#ef5350' : a.severity === 'med' ? '#f5a623' : '#8b98a9',
+      sevStyle: this.sevChip(a.severity), sevLabel: this.sevLabel(a.severity),
+      valStyle: 'color:' + (a.up ? '#26a69a' : '#ef5350'),
+    }));
+
+    // Overview
+    v.moversView = [...this.data.tickers].sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, s.settings.movers).map(t => ({
+      ticker: t.ticker, sector: t.sector, price: this.fmt(t.base), change: (t.change >= 0 ? '+' : '') + this.fmt(t.change * 100) + '%',
+      chStyle: st.tdn + ';color:' + (t.change >= 0 ? '#26a69a' : '#ef5350'),
+    }));
+
+    Object.assign(v, this.backtestVals(), this.optionsVals(), this.settingsVals());
+    return v;
+  }
+
+  futoiTable() {
+    const rnd = this.rng(this.hash(this.state.ticker) + 55); const rows = [];
+    for (let h = 0; h < 8; h++) {
+      ['FIZ', 'YUR'].forEach(g => {
+        const long = Math.round((g === 'FIZ' ? 120 : 180) + rnd() * 40) * 1000;
+        const short = Math.round((g === 'FIZ' ? 150 : 140) + rnd() * 40) * 1000;
+        const net = long - short; const share = long / (long + short) * 100;
+        const doi = Math.round((rnd() - 0.5) * 40) * 1000;
+        rows.push({
+          time: this.hhmm((10 + h) * 60), group: g === 'FIZ' ? 'Физлица' : 'Юрлица', color: g === 'FIZ' ? '#4f9cf9' : '#f5a623',
+          long: this.fmtInt(long), short: this.fmtInt(short),
+          net: (net >= 0 ? '+' : '−') + this.fmtInt(Math.abs(net)), netStyle: 'color:' + (net >= 0 ? '#26a69a' : '#ef5350'),
+          share: this.fmt(share, 1) + '%', doi: (doi >= 0 ? '+' : '−') + this.fmtInt(Math.abs(doi)), oiStyle: 'color:' + (doi >= 0 ? '#26a69a' : '#ef5350'),
+        });
+      });
+    }
+    return rows.reverse();
+  }
+  hi2Ranking() {
+    const rnd = this.rng(77);
+    return this.data.tickers.map(t => { const hi2 = rnd() * 0.35 + 0.12; return { t, hi2 }; }).sort((a, b) => b.hi2 - a.hi2).slice(0, 10).map(({ t, hi2 }) => {
+      const level = hi2 > 0.3 ? 'доминирование' : hi2 > 0.18 ? 'умеренная' : 'распределённая';
+      const color = hi2 > 0.3 ? '#ef5350' : hi2 > 0.18 ? '#f5a623' : '#26a69a';
+      return { ticker: t.ticker, hi2: this.fmt(hi2, 3), level, color, spike: hi2 > 0.3 ? '⚠' : '' };
+    });
+  }
+
+  backtestVals() {
+    const s = this.state, st = this.st, f = s.loadForm, v = {};
+    const srcs = [['finam', 'Finam Trade API'], ['moex', 'MOEX ALGO']];
+    v.sourceView = srcs.map(([id, label]) => ({ label, style: this.segBtn(f.source === id), onClick: () => { f.source = id; this.forceUpdate(); } }));
+    v.tickerChips = this.data.tickers.slice(0, 10).map(t => ({ ticker: t.ticker, style: this.chipBtn(f.tickers.includes(t.ticker)), onClick: () => { const i = f.tickers.indexOf(t.ticker); if (i < 0) f.tickers.push(t.ticker); else f.tickers.splice(i, 1); this.forceUpdate(); } }));
+    const tfs = [['M1', 'M1'], ['M5', 'M5'], ['M15', 'M15'], ['H1', 'H1'], ['D1', 'D1']];
+    v.tfChips = tfs.map(([id, label]) => ({ label, style: this.chipBtn(f.tfs.includes(id)), onClick: () => { const i = f.tfs.indexOf(id); if (i < 0) f.tfs.push(id); else f.tfs.splice(i, 1); this.forceUpdate(); } }));
+    v.loadFrom = f.from; v.loadTill = f.till; v.onLoadFrom = e => { f.from = e.target.value; this.forceUpdate(); }; v.onLoadTill = e => { f.till = e.target.value; this.forceUpdate(); };
+    v.hasProgress = s.progress.length > 0;
+    v.progressView = s.progress.map(p => ({ label: p.label, pctLabel: p.pct >= 100 ? 'готово' : p.pct + '%', width: p.pct + '%', color: p.pct >= 100 ? '#26a69a' : '#4f9cf9' }));
+    v.startLoad = () => this.runLoad();
+    v.cancelLoad = () => { clearInterval(this._loadT); this.set({ progress: [] }); };
+    const ds = this.datasets();
+    v.datasetView = ds.map((d, i) => ({
+      source: d.source, ticker: d.ticker, tf: d.tf, range: d.from + ' — ' + d.to, bars: this.fmtInt(d.bars), size: d.size, updated: d.updated,
+      rowStyle: 'cursor:pointer' + (i === s.selDataset ? ';background:rgba(79,156,249,.1)' : ''),
+      onSelect: () => this.set({ selDataset: i }),
+      onRefresh: e => { e.stopPropagation(); this.set({ selDataset: i }); this.runLoad(d.ticker + ' ' + d.tf); },
+      onDelete: e => { e.stopPropagation(); },
+    }));
+    const sel = ds[s.selDataset] || ds[0];
+    v.previewLabel = sel ? sel.ticker + ' · ' + sel.tf + ' · ' + sel.from + '—' + sel.to : '';
+    return v;
+  }
+  runLoad(single) {
+    clearInterval(this._loadT);
+    const f = this.state.loadForm;
+    let items;
+    if (single) items = [single];
+    else { items = []; f.tickers.forEach(t => f.tfs.forEach(tf => items.push(t + ' ' + tf))); }
+    if (items.length === 0) return;
+    const prog = items.slice(0, 8).map(label => ({ label, pct: 0 }));
+    this.set({ progress: prog });
+    this._loadT = setInterval(() => {
+      let done = true;
+      prog.forEach(p => { if (p.pct < 100) { p.pct = Math.min(100, p.pct + Math.round(6 + Math.random() * 16)); done = false; } });
+      this.forceUpdate();
+      if (done) clearInterval(this._loadT);
+    }, 260);
+  }
+
+  optionsVals() {
+    const s = this.state, st = this.st, c = s.calc, v = {};
+    const optabs = [['calc', 'Калькулятор'], ['smile', 'Улыбка волатильности'], ['strategy', 'Конструктор стратегий']];
+    v.optabsView = optabs.map(([id, label]) => ({ label, style: this.tabBtn(s.optab === id), onClick: () => this.set({ optab: id }) }));
+    v.optCalc = s.optab === 'calc'; v.optSmile = s.optab === 'smile'; v.optStrat = s.optab === 'strategy';
+
+    // calculator
+    v.calcF = c.F; v.calcK = c.K; v.calcDays = c.days; v.calcVol = c.vol; v.calcR = c.r; v.calcMkt = c.mkt;
+    const upd = (k) => e => { const val = parseFloat(e.target.value); c[k] = isNaN(val) ? 0 : val; this.forceUpdate(); };
+    v.onCalcF = upd('F'); v.onCalcK = upd('K'); v.onCalcDays = upd('days'); v.onCalcVol = upd('vol'); v.onCalcR = upd('r'); v.onCalcMkt = upd('mkt');
+    v.calcTypeView = [['call', 'Call'], ['put', 'Put']].map(([id, label]) => ({ label, style: this.segBtn(c.type === id), onClick: () => { c.type = id; this.forceUpdate(); } }));
+    v.calcModelView = [['black76', 'Black-76'], ['bachelier', 'Bachelier']].map(([id, label]) => ({ label, style: this.segBtn(c.model === id), onClick: () => { c.model = id; this.forceUpdate(); } }));
+    const T = Math.max(c.days, 0) / 365, sig = c.vol / 100, r = c.r / 100;
+    const g = this.priceModel(c.F, c.K, T, sig, r, c.type, c.model);
+    const iv = this.impliedVol(c.mkt, c.F, c.K, T, r, c.type, c.model);
+    v.calcPrice = this.fmt(g.price); v.calcIV = this.fmt(iv * 100, 1) + '%';
+    v.calcModelLabel = c.model === 'bachelier' ? 'Bachelier' : 'Black-76';
+    v.greeksView = [
+      { name: 'Delta (Δ)', value: this.fmt(g.delta, 4), unit: 'на 1 ед. базы' },
+      { name: 'Gamma (Γ)', value: this.fmt(g.gamma, 5), unit: 'Δ на 1 ед.' },
+      { name: 'Vega (ν)', value: this.fmt(g.vega, 4), unit: 'на 1% σ' },
+      { name: 'Theta (Θ)', value: this.fmt(g.theta, 4), unit: 'в день' },
+      { name: 'Rho (ρ)', value: this.fmt(g.rho, 4), unit: 'на 1% r' },
+    ];
+
+    // smile
+    const toggles = [['moex', 'MOEX'], ['sabr', 'SABR'], ['svi', 'SVI'], ['kalen', 'Каленкович']];
+    v.smileToggles = toggles.map(([id, label]) => ({ label, style: this.chipBtn(s.smile[id]), onClick: () => { s.smile[id] = !s.smile[id]; this.forceUpdate(); } }));
+    v.smileFitsView = this.smileFits().map(f => ({
+      name: f.name, color: f.color, rmse: f.rmse, params: f.params.map(([k, val]) => ({ k, v: val })),
+      dim: s.smile[f.id] ? '' : 'opacity:.45',
+      activeStyle: this.segBtnSm(s.smileActive === f.id) + ';border:1px solid ' + (s.smileActive === f.id ? '#4f9cf9' : '#1d2530'),
+      activeLabel: s.smileActive === f.id ? 'активна' : 'выбрать',
+      onActive: () => this.set({ smileActive: f.id }),
+    }));
+
+    // strategy
+    const presets = [['vertical', 'Вертикаль'], ['straddle', 'Стрэддл'], ['strangle', 'Стрэнгл'], ['butterfly', 'Бабочка'], ['condor', 'Кондор'], ['covered', 'Покрытый колл']];
+    v.presetView = presets.map(([id, label]) => ({ label, style: this.chipBtn(false), onClick: () => this.set({ legs: this.presetLegs(id) }) }));
+    v.legsView = s.legs.map((l, i) => ({
+      type: l.type, strike: l.strike, qty: l.qty, entry: this.fmt(l.entry),
+      sideLabel: l.side === 'long' ? 'Long' : 'Short',
+      sideStyle: (l.side === 'long' ? 'border:1px solid #26a69a;background:rgba(38,166,154,.12);color:#26a69a' : 'border:1px solid #ef5350;background:rgba(239,83,80,.12);color:#ef5350') + ';font-size:11px;font-weight:600;padding:3px 10px;border-radius:5px;cursor:pointer;appearance:none',
+      onType: e => { l.type = e.target.value; this.recalcEntry(l); this.forceUpdate(); },
+      onSide: () => { l.side = l.side === 'long' ? 'short' : 'long'; this.forceUpdate(); },
+      onStrike: e => { l.strike = parseFloat(e.target.value) || 0; this.recalcEntry(l); this.forceUpdate(); },
+      onQty: e => { l.qty = parseFloat(e.target.value) || 0; this.forceUpdate(); },
+      onRemove: () => { s.legs.splice(i, 1); this.forceUpdate(); },
+    }));
+    v.addLeg = () => { s.legs.push({ type: 'call', side: 'long', strike: 300, qty: 1, entry: this.black76(300, 300, 15 / 365, 0.32, 0, 'call').price }); this.forceUpdate(); };
+    const res = this.strategyResult();
+    v.maxProfit = (res.maxProfit >= 0 ? '+' : '') + this.fmt(res.maxProfit);
+    v.maxLoss = this.fmt(res.maxLoss);
+    v.breakevens = res.be.length ? res.be.map(b => this.fmt(b)).join(' · ') : '—';
+    v.posGreeksView = [['Delta', 'delta', 4], ['Gamma', 'gamma', 5], ['Vega', 'vega', 4], ['Theta', 'theta', 4], ['Rho', 'rho', 4]].map(([n, k, d]) => ({ name: n, value: this.fmt(res.greeks[k], d) }));
+    return v;
+  }
+  recalcEntry(l) { if (l.type === 'ubl') l.entry = l.strike; else l.entry = this.black76(300, l.strike, 30 / 365, 0.32, 0, l.type).price; }
+
+  settingsVals() {
+    const s = this.state, S = s.settings, st = this.st, v = {};
+    v.setDom = S.dom; v.setTape = S.tape; v.setMovers = S.movers;
+    v.onSetDom = e => this.setSettings({ dom: +e.target.value }); v.onSetTape = e => this.setSettings({ tape: +e.target.value }); v.onSetMovers = e => this.setSettings({ movers: +e.target.value });
+    const mk = [['eq', 'Акции'], ['fo', 'Фьючерсы'], ['fx', 'Валюта']];
+    v.setMarketsView = mk.map(([id, label]) => ({ label, style: this.chipBtn(S.markets[id]), onClick: () => { S.markets[id] = !S.markets[id]; this.forceUpdate(); } }));
+    v.watchlistView = this.data.tickers.slice(0, 8).map(t => ({ ticker: t.ticker, style: this.chipBtn(!!S.watchlist[t.ticker]), onClick: () => { S.watchlist[t.ticker] = !S.watchlist[t.ticker]; this.forceUpdate(); } }));
+
+    // Rule builder
+    const metricOpts = [['volume', 'Объём'], ['disb', 'Дисбаланс (disb)'], ['oi', 'Открытый интерес (OI)'], ['hi2', 'Концентрация HI2'], ['spread', 'Спред'], ['price', 'Изменение цены'], ['turnover', 'Оборот']];
+    const opOpts = [['gt', '> больше'], ['lt', '< меньше'], ['ge', '≥ не меньше'], ['le', '≤ не больше'], ['cross', 'пересечение'], ['zscore', 'z-score > k']];
+    const scopeOpts = [['ticker', 'Тикер'], ['set', 'Набор тикеров'], ['market', 'Весь рынок'], ['class', 'Класс актива']];
+    v.metricOpts = metricOpts.map(([id, label]) => ({ id, label })); v.opOpts = opOpts.map(([id, label]) => ({ id, label })); v.scopeOpts = scopeOpts.map(([id, label]) => ({ id, label }));
+    const conns = [['AND', 'И'], ['OR', 'ИЛИ'], ['NOT', 'НЕ']];
+    v.rulesView = s.rules.map((rule, ri) => ({
+      name: rule.name, severity: rule.severity, dot: rule.severity === 'high' ? '#ef5350' : rule.severity === 'med' ? '#f5a623' : '#8b98a9',
+      onName: e => { rule.name = e.target.value; this.forceUpdate(); },
+      onSeverity: e => { rule.severity = e.target.value; this.forceUpdate(); },
+      onRemove: () => { s.rules.splice(ri, 1); this.forceUpdate(); },
+      onAddCond: () => { rule.conds.push({ conn: 'AND', metric: 'volume', op: 'gt', threshold: '', scope: 'ticker' }); this.forceUpdate(); },
+      conds: rule.conds.map((c, ci) => ({
+        showConn: ci > 0, firstRow: ci === 0, metric: c.metric, op: c.op, threshold: c.threshold, scope: c.scope,
+        connView: conns.map(([id, label]) => ({ label, style: this.segBtnSm((c.conn || 'AND') === id), onClick: () => { c.conn = id; this.forceUpdate(); } })),
+        onMetric: e => { c.metric = e.target.value; this.forceUpdate(); },
+        onOp: e => { c.op = e.target.value; this.forceUpdate(); },
+        onThreshold: e => { c.threshold = e.target.value; this.forceUpdate(); },
+        onScope: e => { c.scope = e.target.value; this.forceUpdate(); },
+        onRemove: () => { rule.conds.splice(ci, 1); if (rule.conds.length === 0) s.rules.splice(ri, 1); this.forceUpdate(); },
+      })),
+    }));
+    v.addRule = () => { s.rules.push({ id: 'r' + Date.now(), name: 'Новое правило', severity: 'med', conds: [{ metric: 'volume', op: 'gt', threshold: '', scope: 'ticker' }] }); this.forceUpdate(); };
+    v.resetRules = () => this.set({ rules: this.defaultRules(), saved: false });
+    v.saveRules = () => { this.set({ saved: true }); clearTimeout(this._saveT); this._saveT = setTimeout(() => this.set({ saved: false }), 1600); };
+    v.saveBtnLabel = s.saved ? '✓ Сохранено' : 'Сохранить';
+    v.toggleJson = () => this.set({ showJson: !s.showJson });
+    v.jsonBtnLabel = s.showJson ? 'Скрыть JSON' : 'Импорт/экспорт JSON';
+    v.showJson = s.showJson;
+    v.rulesJson = JSON.stringify(s.rules, null, 2);
+
+    // LLM
+    const provs = [['openrouter', 'OpenRouter'], ['anthropic', 'Anthropic'], ['openai', 'OpenAI']];
+    v.providerView = provs.map(([id, label]) => ({ label, style: this.segBtn(S.provider === id), onClick: () => { S.provider = id; this.forceUpdate(); } }));
+    v.llmModel = S.llmModel; v.onLlmModel = e => { S.llmModel = e.target.value; this.forceUpdate(); };
+    v.setHasKey = S.hasKey; v.keyStatusLabel = S.hasKey ? 'секрет задан: да' : 'секрет задан: нет';
+    v.toggleSetKey = () => { S.hasKey = !S.hasKey; this.forceUpdate(); };
+    v.tokenLimit = S.tokenLimit; v.onTokenLimit = e => { S.tokenLimit = +e.target.value; this.forceUpdate(); };
+    v.toggleAuto = () => { S.auto = !S.auto; this.forceUpdate(); };
+    v.autoToggleStyle = 'appearance:none;border:none;width:38px;height:21px;border-radius:11px;cursor:pointer;position:relative;background:' + (S.auto ? '#4f9cf9' : '#1d2530') + ';padding:0';
+    v.autoKnobStyle = 'position:absolute;top:2px;left:' + (S.auto ? '19px' : '2px') + ';width:17px;height:17px;border-radius:50%;background:#fff;transition:left .15s';
+    const dperiods = [['1h', '1ч'], ['1d', '1д'], ['1w', '1н'], ['1m', '1м'], ['3m', '3м']];
+    v.defPeriodView = dperiods.map(([id, label]) => ({ label, style: this.segBtn(S.defPeriod === id), onClick: () => { S.defPeriod = id; this.forceUpdate(); } }));
+
+    // data
+    const srcs = [['finam', 'Finam'], ['moex', 'MOEX ALGO']];
+    v.setSourceView = srcs.map(([id, label]) => ({ label, style: this.segBtn(S.source === id), onClick: () => { S.source = id; this.forceUpdate(); } }));
+    v.dataDir = S.dataDir; v.onDataDir = e => { S.dataDir = e.target.value; this.forceUpdate(); };
+    v.concurrency = S.concurrency; v.onConcurrency = e => { S.concurrency = +e.target.value; this.forceUpdate(); };
+
+    // options settings
+    v.setPricingView = [['black76', 'Black-76'], ['bachelier', 'Bachelier']].map(([id, label]) => ({ label, style: this.segBtn(S.pricing === id), onClick: () => { S.pricing = id; this.forceUpdate(); } }));
+    v.setRate = S.rate; v.onSetRate = e => { S.rate = +e.target.value; this.forceUpdate(); };
+    v.setSmileView = [['moex', 'MOEX'], ['sabr', 'SABR'], ['svi', 'SVI'], ['kalen', 'Каленкович']].map(([id, label]) => ({ label, style: this.segBtn(S.defSmile === id), onClick: () => { S.defSmile = id; this.forceUpdate(); } }));
+    return v;
+  }
+
+  // ---------- charts ----------
+  componentDidMount() { this._sched(); }
+  componentDidUpdate() { this._sched(); }
+  componentWillUnmount() { cancelAnimationFrame(this._raf); clearInterval(this._loadT); Object.values(this._charts).forEach(r => { try { r.dispose(); } catch (e) {} }); }
+  _sched() { clearTimeout(this._schedT); this._schedT = setTimeout(() => this.ensureCharts(), 60); }
+  ensureCharts() {
+    if (!window.echarts || !window.LightweightCharts) { clearTimeout(this._ct); this._ct = setTimeout(() => this.ensureCharts(), 80); return; }
+    for (const id in this._charts) { const r = this._charts[id]; if (!document.body.contains(r.el)) { try { r.dispose(); } catch (e) {} delete this._charts[id]; } }
+    let pending = false;
+    document.querySelectorAll('[data-chart-id]').forEach(el => {
+      const id = el.getAttribute('data-chart-id');
+      if (this._charts[id] && this._charts[id].el === el) { try { this._charts[id].update && this._charts[id].update(); } catch (e) {} return; }
+      if (this._charts[id]) { try { this._charts[id].dispose(); } catch (e) {} delete this._charts[id]; }
+      if (!el.clientWidth || !el.clientHeight) { pending = true; return; }
+      try { const rec = this.buildChart(el.getAttribute('data-chart'), el, id); if (rec) this._charts[id] = rec; } catch (e) { console.error('chart build failed', id, e); }
+    });
+    if (pending) { clearTimeout(this._ct); this._ct = setTimeout(() => this.ensureCharts(), 140); }
+  }
+  echartsBase(el) {
+    const c = window.echarts.init(el, null, { renderer: 'canvas' });
+    const ro = new ResizeObserver(() => c.resize()); ro.observe(el);
+    return { chart: c, ro };
+  }
+  buildChart(kind, el, id) {
+    const E = window.echarts, LWC = window.LightweightCharts;
+    const axis = { axisLine: { lineStyle: { color: '#1d2530' } }, axisLabel: { color: '#8b98a9', fontSize: 10 }, splitLine: { lineStyle: { color: '#161d27' } } };
+    if (kind === 'supercandles') {
+      const chart = LWC.createChart(el, { autoSize: true, layout: { background: { type: LWC.ColorType.Solid, color: 'transparent' }, textColor: '#8b98a9', fontFamily: 'Inter' }, grid: { vertLines: { color: '#161d27' }, horzLines: { color: '#161d27' } }, rightPriceScale: { borderColor: '#1d2530' }, timeScale: { borderColor: '#1d2530', timeVisible: true } });
+      const cs = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
+      const vwap = chart.addLineSeries({ color: '#f5a623', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      const vol = chart.addHistogramSeries({ priceScaleId: 'vol', priceFormat: { type: 'volume' } });
+      chart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+      const draw = () => {
+        const bars = this.candles(this.state.ticker); const base = 1717400000;
+        cs.setData(bars.map((b, i) => ({ time: base + b.min * 60, open: b.o, high: b.h, low: b.l, close: b.c })));
+        vwap.setData(bars.map(b => ({ time: base + b.min * 60, value: b.vwap })));
+        vol.setData(bars.map(b => ({ time: base + b.min * 60, value: b.vol, color: b.c >= b.o ? 'rgba(38,166,154,.5)' : 'rgba(239,83,80,.5)' })));
+        chart.timeScale().fitContent();
+      };
+      draw();
+      const ro = new ResizeObserver(() => chart.applyOptions({})); ro.observe(el);
+      return { el, chart, update: draw, dispose: () => { ro.disconnect(); chart.remove(); } };
+    }
+    if (kind === 'disb') {
+      const { chart, ro } = this.echartsBase(el);
+      const draw = () => { const bars = this.candles(this.state.ticker); chart.setOption({ backgroundColor: 'transparent', grid: { left: 44, right: 12, top: 6, bottom: 16 }, xAxis: { type: 'category', data: bars.map(b => this.hhmm(b.min)), axisLabel: { show: false }, axisLine: { lineStyle: { color: '#1d2530' } } }, yAxis: { ...axis, min: -1, max: 1, splitNumber: 2 }, series: [{ type: 'bar', data: bars.map(b => ({ value: +b.disb.toFixed(2), itemStyle: { color: b.disb >= 0 ? '#26a69a' : '#ef5350' } })) }] }); };
+      draw(); return { el, chart, update: draw, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    if (kind === 'futoi') {
+      const { chart, ro } = this.echartsBase(el);
+      const draw = () => {
+        const rnd = this.rng(this.hash(this.state.ticker) + 55); const times = []; const fizL = [], fizS = [], yurL = [], yurS = [];
+        for (let h = 0; h < 8; h++) { times.push(this.hhmm((10 + h) * 60)); fizL.push(Math.round(120 + rnd() * 40)); fizS.push(Math.round(150 + rnd() * 40)); yurL.push(Math.round(180 + rnd() * 40)); yurS.push(Math.round(140 + rnd() * 40)); }
+        const mode = this.state.futoiMode;
+        const pick = (L, S) => mode === 'long' ? L : mode === 'short' ? S.map(x => -x) : L.map((x, i) => x - S[i]);
+        chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'axis', backgroundColor: '#1a232e', borderColor: '#1d2530', textStyle: { color: '#e6edf3', fontSize: 11 } }, legend: { data: ['Физлица', 'Юрлица'], textStyle: { color: '#8b98a9', fontSize: 11 }, top: 0 }, grid: { left: 52, right: 14, top: 28, bottom: 24 }, xAxis: { type: 'category', data: times, ...axis }, yAxis: { ...axis, name: 'тыс. контрактов', nameTextStyle: { color: '#8b98a9', fontSize: 10 } }, series: [{ name: 'Физлица', type: 'line', smooth: true, data: pick(fizL, fizS), lineStyle: { color: '#4f9cf9', width: 2 }, itemStyle: { color: '#4f9cf9' }, areaStyle: { color: 'rgba(79,156,249,.08)' } }, { name: 'Юрлица', type: 'line', smooth: true, data: pick(yurL, yurS), lineStyle: { color: '#f5a623', width: 2 }, itemStyle: { color: '#f5a623' }, areaStyle: { color: 'rgba(245,166,35,.08)' } }] });
+      };
+      draw(); return { el, chart, update: draw, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    if (kind === 'hi2') {
+      const { chart, ro } = this.echartsBase(el);
+      const draw = () => {
+        const rnd = this.rng(this.hash(this.state.ticker) + 88); const times = [], vals = [];
+        let x = 0.2; for (let i = 0; i < 48; i++) { x = Math.max(0.05, Math.min(0.5, x + (rnd() - 0.5) * 0.05)); times.push(this.hhmm(10 * 60 + i * 10)); vals.push(+x.toFixed(3)); }
+        chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'axis', backgroundColor: '#1a232e', borderColor: '#1d2530', textStyle: { color: '#e6edf3', fontSize: 11 } }, grid: { left: 46, right: 14, top: 14, bottom: 24 }, xAxis: { type: 'category', data: times, ...axis, axisLabel: { color: '#8b98a9', fontSize: 10, interval: 5 } }, yAxis: { ...axis, min: 0, max: 0.5 }, series: [{ type: 'line', data: vals, smooth: true, symbol: 'none', lineStyle: { color: '#4f9cf9', width: 2 }, areaStyle: { color: 'rgba(79,156,249,.06)' }, markArea: { silent: true, data: [[{ yAxis: 0, itemStyle: { color: 'rgba(38,166,154,.05)' } }, { yAxis: 0.18 }], [{ yAxis: 0.3, itemStyle: { color: 'rgba(239,83,80,.06)' } }, { yAxis: 0.5 }]] }, markLine: { silent: true, symbol: 'none', lineStyle: { color: '#8b98a9', type: 'dashed' }, data: [{ yAxis: 0.18, label: { formatter: 'умеренная', color: '#8b98a9', fontSize: 9 } }, { yAxis: 0.3, label: { formatter: 'доминирование', color: '#ef5350', fontSize: 9 } }] } }] });
+      };
+      draw(); return { el, chart, update: draw, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    if (kind === 'smile') {
+      const { chart, ro } = this.echartsBase(el);
+      const draw = () => {
+        const mk = this.smileMarket(); const fits = this.smileFits(); const series = [];
+        series.push({ name: 'Рынок IV', type: 'scatter', data: mk.pts.map(p => [p.K, +(p.iv * 100).toFixed(2), p.oi]), symbolSize: v => Math.max(6, Math.sqrt(v[2]) / 3), itemStyle: { color: 'rgba(230,237,243,.85)', borderColor: '#0d1117' } });
+        fits.forEach(f => { if (this.state.smile[f.id]) series.push({ name: f.name, type: 'line', smooth: true, symbol: 'none', data: this.smileCurve(f.id).map(p => [p[0], +(p[1] * 100).toFixed(2)]), lineStyle: { color: f.color, width: this.state.smileActive === f.id ? 3 : 1.6 } }); });
+        chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'item', backgroundColor: '#1a232e', borderColor: '#1d2530', textStyle: { color: '#e6edf3', fontSize: 11 }, formatter: p => p.seriesType === 'scatter' ? ('Страйк ' + p.data[0] + '<br/>IV ' + p.data[1] + '%<br/>OI ' + this.fmtInt(p.data[2])) : (p.seriesName + '<br/>' + p.data[0] + ' → ' + p.data[1] + '%') }, legend: { top: 0, textStyle: { color: '#8b98a9', fontSize: 11 } }, grid: { left: 46, right: 16, top: 30, bottom: 40 }, xAxis: { type: 'value', name: 'Страйк', nameLocation: 'middle', nameGap: 24, min: 245, max: 355, ...axis }, yAxis: { type: 'value', name: 'IV, %', ...axis, scale: true }, series });
+      };
+      draw(); return { el, chart, update: draw, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    if (kind === 'payoff') {
+      const { chart, ro } = this.echartsBase(el);
+      const draw = () => {
+        const res = this.strategyResult();
+        chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'axis', backgroundColor: '#1a232e', borderColor: '#1d2530', textStyle: { color: '#e6edf3', fontSize: 11 }, formatter: ps => 'Цена ' + this.fmt(ps[0].data[0]) + '<br/>' + ps.map(p => p.seriesName + ': ' + this.fmt(p.data[1])).join('<br/>') }, legend: { data: ['На экспирацию', 'Текущий'], top: 0, textStyle: { color: '#8b98a9', fontSize: 11 } }, grid: { left: 52, right: 16, top: 28, bottom: 26 }, xAxis: { type: 'value', name: 'Цена базы', nameLocation: 'middle', nameGap: 22, min: 240, max: 360, ...axis }, yAxis: { type: 'value', name: 'P&L', ...axis }, series: [{ name: 'На экспирацию', type: 'line', smooth: false, symbol: 'none', data: res.expiry, lineStyle: { color: '#4f9cf9', width: 2.4 }, markLine: { silent: true, symbol: 'none', lineStyle: { color: '#8b98a9', type: 'dashed' }, data: [{ yAxis: 0 }] } }, { name: 'Текущий', type: 'line', smooth: true, symbol: 'none', data: res.now, lineStyle: { color: '#f5a623', width: 1.6, type: 'dashed' } }] });
+      };
+      draw(); return { el, chart, update: draw, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    if (kind === 'preview') {
+      const chart = LWC.createChart(el, { autoSize: true, layout: { background: { type: LWC.ColorType.Solid, color: 'transparent' }, textColor: '#8b98a9', fontFamily: 'Inter' }, grid: { vertLines: { color: '#161d27' }, horzLines: { color: '#161d27' } }, rightPriceScale: { borderColor: '#1d2530' }, timeScale: { borderColor: '#1d2530' } });
+      const cs = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
+      const draw = () => { const ds = this.datasets()[this.state.selDataset] || this.datasets()[0]; const bars = this.candles(ds.ticker); const base = 1717400000; cs.setData(bars.map(b => ({ time: base + b.min * 60, open: b.o, high: b.h, low: b.l, close: b.c }))); chart.timeScale().fitContent(); };
+      draw(); const ro = new ResizeObserver(() => chart.applyOptions({})); ro.observe(el);
+      return { el, chart, update: draw, dispose: () => { ro.disconnect(); chart.remove(); } };
+    }
+    if (kind === 'treemap') {
+      const { chart, ro } = this.echartsBase(el);
+      const sectors = {}; this.data.tickers.forEach(t => { sectors[t.sector] = sectors[t.sector] || { turnover: 0, ch: 0, n: 0, children: [] }; const sec = sectors[t.sector]; sec.turnover += t.turnover; sec.ch += t.change; sec.n++; sec.children.push({ name: t.ticker, value: t.turnover, ch: t.change }); });
+      const data = Object.entries(sectors).map(([name, s]) => ({ name, value: s.turnover, children: s.children.map(c => ({ name: c.name, value: c.value, itemStyle: { color: c.ch >= 0 ? 'rgba(38,166,154,' + (0.35 + Math.min(0.5, Math.abs(c.ch) * 8)) + ')' : 'rgba(239,83,80,' + (0.35 + Math.min(0.5, Math.abs(c.ch) * 8)) + ')' } })) }));
+      chart.setOption({ backgroundColor: 'transparent', tooltip: { backgroundColor: '#1a232e', borderColor: '#1d2530', textStyle: { color: '#e6edf3', fontSize: 11 }, formatter: p => p.name + '<br/>оборот ' + this.mlrd(p.value) }, series: [{ type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false }, label: { color: '#e6edf3', fontSize: 11, fontFamily: 'Inter' }, upperLabel: { show: true, height: 20, color: '#8b98a9', fontSize: 10 }, itemStyle: { borderColor: '#0d1117', borderWidth: 2, gapWidth: 2 }, levels: [{ itemStyle: { borderColor: '#0d1117', borderWidth: 3, gapWidth: 3 } }, { itemStyle: { borderColor: '#0d1117', borderWidth: 1, gapWidth: 1 } }], data }] });
+      return { el, chart, update: () => {}, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    if (kind === 'gauge') {
+      const { chart, ro } = this.echartsBase(el);
+      const total = this.data.tickers.reduce((a, t) => a + t.turnover, 0);
+      chart.setOption({ backgroundColor: 'transparent', series: [{ type: 'gauge', min: 0, max: 400, radius: '92%', center: ['50%', '58%'], progress: { show: true, width: 12, itemStyle: { color: '#4f9cf9' } }, axisLine: { lineStyle: { width: 12, color: [[1, '#1d2530']] } }, axisTick: { show: false }, splitLine: { length: 10, lineStyle: { color: '#1d2530' } }, axisLabel: { color: '#8b98a9', fontSize: 9, distance: 12 }, pointer: { itemStyle: { color: '#4f9cf9' }, width: 4 }, detail: { valueAnimation: true, formatter: '{value} млрд ₽', color: '#e6edf3', fontSize: 18, offsetCenter: [0, '32%'] }, data: [{ value: +(total / 1e9).toFixed(0) }] }] });
+      return { el, chart, update: () => {}, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    if (kind === 'breadth') {
+      const { chart, ro } = this.echartsBase(el);
+      const up = this.data.tickers.filter(t => t.change >= 0).length, down = this.data.tickers.length - up;
+      chart.setOption({ backgroundColor: 'transparent', tooltip: { trigger: 'item', backgroundColor: '#1a232e', borderColor: '#1d2530', textStyle: { color: '#e6edf3', fontSize: 11 } }, series: [{ type: 'pie', radius: ['55%', '78%'], center: ['50%', '52%'], label: { color: '#e6edf3', fontSize: 11 }, data: [{ value: up, name: 'Растущие', itemStyle: { color: '#26a69a' } }, { value: down, name: 'Падающие', itemStyle: { color: '#ef5350' } }] }] });
+      return { el, chart, update: () => {}, dispose: () => { ro.disconnect(); chart.dispose(); } };
+    }
+    return null;
+  }
+}
+</script>
+</body>
+</html>
