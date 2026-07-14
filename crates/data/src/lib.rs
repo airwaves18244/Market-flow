@@ -17,6 +17,8 @@ pub mod dotenv;
 pub mod endpoint;
 #[cfg(feature = "grpc")]
 pub mod grpc;
+#[cfg(feature = "http")]
+pub mod http;
 #[cfg(feature = "grpc")]
 pub mod market;
 pub mod orders;
@@ -31,6 +33,8 @@ pub use dotenv::{find_dotenv_secret, ENV_VAR as SECRET_ENV_VAR};
 pub use endpoint::Method;
 #[cfg(feature = "grpc")]
 pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
+#[cfg(feature = "http")]
+pub use http::{HttpClient, HttpResponse, HttpTransport, ReqwestTransport};
 #[cfg(feature = "grpc")]
 pub use market::FinamMarketData;
 #[cfg(feature = "live-trading")]

@@ -19,6 +19,18 @@ tonic = { version = "0.12", optional = true, features = ["tls", "tls-roots"] }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
 prost-types = { version = "0.13", optional = true }
 
+# HTTP-клиент (MOEX ALGOPACK, LLM-провайдеры) — за фичей `http`, выключенной
+# в кросс-платформенном CI (как `grpc`/`keyring`). TLS — rustls (без OpenSSL
+# и его сборочных зависимостей), сжатие ответов — gzip; `json` даёт удобные
+# хелперы поверх `reqwest::Response` (сам разбор ведём через `serde_json`,
+# чтобы читать тело и у не-2xx ответов).
+reqwest = { version = "0.12", optional = true, default-features = false, features = [
+    "rustls-tls",
+    "gzip",
+    "json",
+] }
+serde_json = { version = "1", optional = true }
+
 # ОС-keyring для секрета API — за фичей `keyring`, выключенной в кросс-
 # платформенном CI (как `duckdb`/`tauri`). Бэкенд выбирается под платформу:
 # Windows → Credential Manager, macOS → Keychain, Linux → ядро (keyutils).
@@ -40,6 +52,10 @@ required-features = ["grpc"]
 keyring = ["dep:keyring"]
 # Сетевой gRPC-клиент Finam (auth-обмен + рыночные данные поверх стабов).
 grpc = ["dep:tonic", "dep:tokio", "dep:prost-types", "finam-proto/grpc"]
+# Транспорт REST/JSON (MOEX ALGOPACK, LLM-провайдеры) поверх `reqwest`.
+# Async-runtime (`tokio`) переиспользуется из фичи `grpc` — здесь та же
+# зависимость подключается независимо от неё.
+http = ["dep:reqwest", "dep:tokio", "dep:serde_json"]
 # Боевой роутинг заявок в Finam (OrderService/AccountsService). Каркас: контракт
 # `OrderRouter` есть всегда (с симулятором по умолчанию), а заглушка
 # `FinamOrderRouter` компилируется только под этой фичей. Реальный транспорт
