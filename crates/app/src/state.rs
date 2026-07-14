@@ -44,11 +44,19 @@ pub struct AppState {
     /// ОС-config-директории (T3/10.5.3/S.2.2). `Mutex` — что несколько
     /// IPC-команд не гонялись за одним временным файлом при атомарной записи.
     settings: Mutex<SettingsStore>,
+    /// Сессионный кэш готовых ИИ-резюме Key Activity (фаза 10.4, фича `llm`):
+    /// повторный вызов с тем же входом/моделью/провайдером не дёргает
+    /// провайдера повторно. Не персистится — живёт, пока живёт процесс.
+    /// В headless-сборке (фича `llm` без `tauri`) поле не читается вне тестов.
+    #[cfg(feature = "llm")]
+    #[allow(dead_code)]
+    llm_cache: crate::llm::SummaryCache,
 }
 
-// В headless-live режиме IPC-read-методы (обработчики команд) не вызываются —
-// их потребляет Tauri-UI и тесты. Глушим dead_code только для этой комбинации.
-#[cfg_attr(feature = "live", allow(dead_code))]
+// В headless-live режиме (а также при сборке одной фичи `llm` без `tauri`)
+// IPC-read-методы (обработчики команд) не вызываются — их потребляет
+// Tauri-UI и тесты. Глушим dead_code только для этих комбинаций.
+#[cfg_attr(any(feature = "live", feature = "llm"), allow(dead_code))]
 impl AppState {
     /// Создать состояние поверх произвольного бэкенда хранилища. Настройки
     /// резолвятся в стандартную ОС-директорию (см. [`SettingsStore::from_env`]);
@@ -59,6 +67,8 @@ impl AppState {
             trade: TradeSession::new(),
             history: Mutex::new(Catalog::new()),
             settings: Mutex::new(SettingsStore::from_env()),
+            #[cfg(feature = "llm")]
+            llm_cache: crate::llm::SummaryCache::new(),
         }
     }
 
@@ -73,6 +83,8 @@ impl AppState {
             trade: TradeSession::new(),
             history: Mutex::new(Catalog::new()),
             settings: Mutex::new(SettingsStore::new(settings_dir)),
+            #[cfg(feature = "llm")]
+            llm_cache: crate::llm::SummaryCache::new(),
         }
     }
 
@@ -350,6 +362,22 @@ impl AppState {
         period: Option<&str>,
     ) -> KeyActivitySummaryDto {
         api::key_activity_summary(samples, period)
+    }
+
+    /// Живой ИИ-свод «ИТОГО» по ключевой активности (фаза 10.4, фича `llm`):
+    /// провайдер/модель/лимит токенов — из персистентных настроек; при
+    /// отсутствии ключа/ошибке провайдера — грациозная деградация в тот же
+    /// локальный свод, что и [`AppState::key_activity_summary`]. Сессионный
+    /// кэш (см. [`crate::llm::SummaryCache`]) живёт на `self`, поэтому
+    /// повторный вызов с тем же входом не дёргает провайдера.
+    #[cfg(feature = "llm")]
+    pub async fn key_activity_summary_live(
+        &self,
+        samples: &[KeyActivitySampleInput],
+        period: Option<&str>,
+    ) -> KeyActivitySummaryDto {
+        let settings = self.settings_get();
+        api::key_activity_summary_live(&self.llm_cache, &settings, samples, period).await
     }
 
     /// Встроенные правила Key Activity (для настроек/справки).

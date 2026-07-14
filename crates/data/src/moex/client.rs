@@ -376,6 +376,15 @@ mod tests {
                 body: body.as_bytes().to_vec(),
             })
         }
+
+        async fn post(
+            &self,
+            _url: &str,
+            _headers: &[(String, String)],
+            _body: Vec<u8>,
+        ) -> Result<HttpResponse, DataError> {
+            unreachable!("клиент ALGOPACK использует только GET")
+        }
     }
 
     fn client(transport: FakeTransport) -> MoexAlgo<FakeTransport> {

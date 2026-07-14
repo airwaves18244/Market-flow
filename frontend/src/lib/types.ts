@@ -450,7 +450,10 @@ export interface KeyActivitySummaryDto {
   text: string;
   period: string;
   rowCount: number;
+  /** Локальный свод (true) vs. ответ LLM (false). Эквивалент source !== "llm". */
   fallback: boolean;
+  /** Источник текста: "llm" — живой ответ провайдера, "local" — локальный свод. */
+  source: "llm" | "local";
 }
 
 export interface KeyActivityRuleDto {

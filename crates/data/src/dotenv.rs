@@ -60,11 +60,13 @@ fn unquote(value: &str) -> String {
     }
 }
 
-/// Достать секрет Finam из уже распарсенных пар (по [`SECRET_KEYS`],
-/// регистронезависимо). Первое непустое совпадение выигрывает.
-pub fn secret_from_pairs(pairs: &[(String, String)]) -> Option<String> {
+/// Достать значение первого совпавшего ключа из уже распарсенных пар
+/// (`keys` — варианты имени, сравнение без учёта регистра). Первое непустое
+/// совпадение выигрывает. Обобщение [`secret_from_pairs`] для произвольных
+/// ключей (например, ключей LLM-провайдеров `OPENROUTER_API_KEY` и т.п.).
+pub fn value_from_pairs(pairs: &[(String, String)], keys: &[&str]) -> Option<String> {
     for (key, value) in pairs {
-        if SECRET_KEYS.iter().any(|k| k.eq_ignore_ascii_case(key)) {
+        if keys.iter().any(|k| k.eq_ignore_ascii_case(key)) {
             let v = value.trim();
             if !v.is_empty() {
                 return Some(v.to_owned());
@@ -74,26 +76,46 @@ pub fn secret_from_pairs(pairs: &[(String, String)]) -> Option<String> {
     None
 }
 
+/// Достать секрет Finam из уже распарсенных пар (по [`SECRET_KEYS`],
+/// регистронезависимо). Первое непустое совпадение выигрывает.
+pub fn secret_from_pairs(pairs: &[(String, String)]) -> Option<String> {
+    value_from_pairs(pairs, SECRET_KEYS)
+}
+
+/// Прочитать `.env` по пути и вернуть значение первого совпавшего ключа
+/// (`keys`), если оно там есть. Отсутствие файла — не ошибка (вернёт `None`).
+pub fn value_from_dotenv_file(path: &Path, keys: &[&str]) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    value_from_pairs(&parse(&contents), keys)
+}
+
 /// Прочитать `.env` по пути и вернуть секрет Finam, если он там есть.
 /// Отсутствие файла — не ошибка (вернёт `None`).
 pub fn secret_from_dotenv_file(path: &Path) -> Option<String> {
-    let contents = std::fs::read_to_string(path).ok()?;
-    secret_from_pairs(&parse(&contents))
+    value_from_dotenv_file(path, SECRET_KEYS)
+}
+
+/// Найти `.env` начиная с `start` и поднимаясь вверх по дереву каталогов,
+/// вернуть первое найденное значение одного из `keys`. Поиск ограничен
+/// `max_depth` уровнями. Обобщение [`find_dotenv_secret`] для произвольных
+/// ключей.
+pub fn find_dotenv_value(start: &Path, max_depth: usize, keys: &[&str]) -> Option<String> {
+    let mut dir: Option<PathBuf> = Some(start.to_path_buf());
+    for _ in 0..=max_depth {
+        let Some(current) = dir else { break };
+        let candidate = current.join(".env");
+        if let Some(value) = value_from_dotenv_file(&candidate, keys) {
+            return Some(value);
+        }
+        dir = current.parent().map(Path::to_path_buf);
+    }
+    None
 }
 
 /// Найти `.env` начиная с `start` и поднимаясь вверх по дереву каталогов,
 /// вернуть первый найденный секрет Finam. Поиск ограничен `max_depth` уровнями.
 pub fn find_dotenv_secret(start: &Path, max_depth: usize) -> Option<String> {
-    let mut dir: Option<PathBuf> = Some(start.to_path_buf());
-    for _ in 0..=max_depth {
-        let Some(current) = dir else { break };
-        let candidate = current.join(".env");
-        if let Some(secret) = secret_from_dotenv_file(&candidate) {
-            return Some(secret);
-        }
-        dir = current.parent().map(Path::to_path_buf);
-    }
-    None
+    find_dotenv_value(start, max_depth, SECRET_KEYS)
 }
 
 #[cfg(test)]
@@ -169,6 +191,33 @@ mod tests {
         );
         // Несуществующий путь — None, не паника.
         assert_eq!(secret_from_dotenv_file(&base.join("missing.env")), None);
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn value_from_pairs_matches_arbitrary_keys_case_insensitively() {
+        let pairs = parse("OPENROUTER_API_KEY=sk-or-abc\n");
+        assert_eq!(
+            value_from_pairs(&pairs, &["openrouter_api_key"]).as_deref(),
+            Some("sk-or-abc")
+        );
+        // Ключ не из списка — не совпадает.
+        assert_eq!(value_from_pairs(&pairs, &["OPENAI_API_KEY"]), None);
+    }
+
+    #[test]
+    fn find_dotenv_value_walks_up_for_arbitrary_key() {
+        let base = std::env::temp_dir().join(format!("mf-dotenv-generic-{}", std::process::id()));
+        let nested = base.join("x");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(base.join(".env"), "ANTHROPIC_API_KEY=sk-ant-xyz\n").unwrap();
+
+        assert_eq!(
+            find_dotenv_value(&nested, 4, &["ANTHROPIC_API_KEY"]).as_deref(),
+            Some("sk-ant-xyz")
+        );
+        assert_eq!(find_dotenv_value(&nested, 4, &["OPENAI_API_KEY"]), None);
 
         std::fs::remove_dir_all(&base).ok();
     }

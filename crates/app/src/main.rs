@@ -33,6 +33,15 @@ mod ingest;
 #[cfg(feature = "live")]
 mod live;
 
+// Живой ИИ-провайдер для резюме Key Activity (фаза 10.4). Вызывается из
+// `api::key_activity_summary_live`/`state::AppState::key_activity_summary_live`,
+// которые сами потребляются только Tauri-командами (фича `tauri`) — в
+// headless-сборке (без `tauri`) часть API не вызывается, поэтому глушим
+// dead_code на уровне модуля, как `ingest`/`replay`.
+#[cfg(feature = "llm")]
+#[allow(dead_code)]
+mod llm;
+
 // Replay-источник (offline-режим): реализует `MarketData` из сохранённых баров.
 // В бинаре напрямую не вызывается — потребляется тестами и replay-сценариями.
 #[cfg(feature = "ingest")]

@@ -97,6 +97,7 @@ describe("key activity ipc (mock mode)", () => {
       "1d",
     );
     expect(s.fallback).toBe(true);
+    expect(s.source).toBe("local");
     expect(s.period).toBe("1d");
     expect(s.text.length).toBeGreaterThan(0);
   });

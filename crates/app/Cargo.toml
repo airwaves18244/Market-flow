@@ -44,10 +44,13 @@ tauri = ["dep:tauri", "dep:tauri-build"]
 duckdb = ["storage/duckdb"]
 # Асинхронный планировщик ингеста (poll рыночных данных в хранилище).
 ingest = ["dep:tokio"]
-# Хранение API-секрета в ОС-keyring (для live-режима).
+# Хранение API-секрета в ОС-keyring (для live-режима и ключей LLM-провайдеров).
 keyring = ["data/keyring"]
 # Боевой режим: live-подключение к Finam (gRPC) + ингест в хранилище.
 live = ["ingest", "data/grpc"]
+# Живой LLM-провайдер для ИИ-резюме Key Activity (фаза 10.4). Async-runtime
+# переиспользуется из фичи `ingest` (`dep:tokio` — та же опциональная зависимость).
+llm = ["data/llm", "dep:tokio"]
 # Боевой роутинг заявок (каркас): включает заглушку `data::FinamOrderRouter`.
 # По умолчанию торговля идёт через симулятор (`SimOrderRouter`).
 live-trading = ["data/live-trading"]

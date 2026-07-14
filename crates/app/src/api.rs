@@ -937,7 +937,8 @@ pub fn key_activity(
 
 /// Локальный (без LLM) свод по ключевой активности за период — панель «ИТОГО».
 /// Живой LLM-провайдер (OpenRouter/Anthropic/OpenAI) подключается за фичей `llm`
-/// (10.4); в его отсутствие панель показывает этот текстовый fallback.
+/// (10.4, [`key_activity_summary_live`]); без фичи (или без ключа/при ошибке
+/// провайдера) панель показывает этот текстовый fallback.
 pub fn key_activity_summary(
     samples: &[KeyActivitySampleInput],
     period: Option<&str>,
@@ -951,6 +952,50 @@ pub fn key_activity_summary(
         period: p.label().to_string(),
         row_count: rows.len(),
         fallback: true,
+        source: "local".to_string(),
+    }
+}
+
+/// Живой ИИ-свод по ключевой активности за период (фаза 10.4, фича `llm`).
+///
+/// Если провайдер, выбранный в `settings` (`llmProvider`/`llmModel`/
+/// `llmTokenLimit`), доступен и его ключ найден (env → `.env` → ОС-keyring —
+/// см. `crate::llm::resolve_key`) — возвращает его ответ (`source: "llm"`,
+/// `fallback: false`). При отсутствии ключа, неизвестном коде провайдера,
+/// сетевой ошибке или тайм-ауте — грациозная деградация в тот же локальный
+/// свод, что и [`key_activity_summary`] (`source: "local"`, `fallback: true`).
+/// `cache` — сессионный кэш готовых резюме (см. [`crate::llm::SummaryCache`]):
+/// повторный вызов с тем же входом/моделью/провайдером не дёргает провайдера.
+#[cfg(feature = "llm")]
+#[allow(dead_code)]
+pub async fn key_activity_summary_live(
+    cache: &crate::llm::SummaryCache,
+    settings: &SettingsDto,
+    samples: &[KeyActivitySampleInput],
+    period: Option<&str>,
+) -> KeyActivitySummaryDto {
+    let p = parse_period(period);
+    let domain_samples: Vec<Sample> = samples.iter().map(Sample::from).collect();
+    let rows = ka_evaluate(&default_rules(), &domain_samples);
+
+    match crate::llm::summarize_key_activity(cache, settings, &rows, p).await {
+        Some(text) => KeyActivitySummaryDto {
+            text,
+            period: p.label().to_string(),
+            row_count: rows.len(),
+            fallback: false,
+            source: "llm".to_string(),
+        },
+        None => {
+            let text = prompt::fallback_summary(&rows, p, 12);
+            KeyActivitySummaryDto {
+                text,
+                period: p.label().to_string(),
+                row_count: rows.len(),
+                fallback: true,
+                source: "local".to_string(),
+            }
+        }
     }
 }
 
