@@ -6,7 +6,7 @@
 terminal for the Moscow Exchange).
 
 This is a **front-end prototype brief**: layouts, components, states, and data
-shapes. It is not a backend spec — see `ROADMAP_PHASE_10-12.md` for engineering
+shapes. It is not a backend spec — see `SPEC_0-12.md` for engineering
 detail. Task IDs in brackets (e.g. `[10.7.2]`) cross-reference that roadmap.
 
 ---
