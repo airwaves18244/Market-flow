@@ -910,7 +910,7 @@ pub fn strategy_eval(input: &StrategyEvalInput) -> Result<StrategyEvalDto, Strin
 
 // ── Фаза 10 — MOEX ALGO: Key Activity (чистый движок правил) ─────────────────
 
-use domain::keyactivity::{default_rules, evaluate as ka_evaluate, prompt, Period, Sample};
+use domain::keyactivity::{default_rules, evaluate as ka_evaluate, prompt, Period, Rule, Sample};
 
 use crate::dto::{
     KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput, KeyActivitySummaryDto,
@@ -958,12 +958,78 @@ pub fn key_activity_summary(
 pub fn key_activity_rules() -> Vec<KeyActivityRuleDto> {
     default_rules()
         .iter()
-        .map(|r| KeyActivityRuleDto {
-            id: r.id.clone(),
-            name: r.name.clone(),
-            weight: r.weight,
-        })
+        .map(KeyActivityRuleDto::from)
         .collect()
+}
+
+// ── T3 — Персист настроек и правил Key Activity в ядро ───────────────────────
+// (10.5.3 / S.2.2 / 10.8.* / 11.6.1 / 12.8.1)
+
+use crate::dto::SettingsDto;
+use crate::settings::SettingsStore;
+
+/// Текущие пользовательские настройки терминала (дефолты, если ещё не сохранялись).
+pub fn settings_get(store: &SettingsStore) -> SettingsDto {
+    store.get_settings()
+}
+
+/// Сохранить настройки: валидация полей + атомарная запись. Секция правил
+/// Key Activity в файле не затрагивается.
+pub fn settings_set(store: &SettingsStore, doc: SettingsDto) -> Result<(), String> {
+    doc.validate()?;
+    store.set_settings(doc)
+}
+
+/// Пользовательские правила Key Activity, сохранённые ранее (пусто, если
+/// пользователь ещё не сохранял свой набор — тогда UI показывает встроенные
+/// дефолты, см. [`key_activity_rules`]).
+pub fn key_activity_rules_get(store: &SettingsStore) -> Vec<KeyActivityRuleDto> {
+    store
+        .get_key_activity_rules()
+        .iter()
+        .map(KeyActivityRuleDto::from)
+        .collect()
+}
+
+/// Сохранить пользовательские правила Key Activity.
+///
+/// `rules_json` — JSON-массив в формате доменной модели `domain::keyactivity::Rule`
+/// (та же модель уже сериализуется для встроенных правил, см. 10.3.2).
+/// Валидация — сама десериализация: синтаксически некорректный JSON или JSON,
+/// не описывающий валидное правило (неизвестная метрика/оператор/область),
+/// отклоняется с понятной причиной ещё до записи на диск. Дополнительно
+/// проверяются базовые инварианты (непустые id/имя, конечный неотрицательный
+/// вес, уникальность id) — см. [`validate_key_activity_rules`].
+pub fn key_activity_rules_set(
+    store: &SettingsStore,
+    rules_json: &str,
+) -> Result<Vec<KeyActivityRuleDto>, String> {
+    let rules: Vec<Rule> = serde_json::from_str(rules_json)
+        .map_err(|e| format!("невалидные правила Key Activity: {e}"))?;
+    validate_key_activity_rules(&rules)?;
+    store.set_key_activity_rules(rules.clone())?;
+    Ok(rules.iter().map(KeyActivityRuleDto::from).collect())
+}
+
+/// Семантическая проверка правил сверх типовой десериализации: непустые
+/// id/имя, конечный неотрицательный вес, уникальность id в наборе.
+fn validate_key_activity_rules(rules: &[Rule]) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    for r in rules {
+        if r.id.trim().is_empty() {
+            return Err("правило Key Activity с пустым id".into());
+        }
+        if r.name.trim().is_empty() {
+            return Err(format!("правило '{}': пустое имя", r.id));
+        }
+        if !r.weight.is_finite() || r.weight < 0.0 {
+            return Err(format!("правило '{}': некорректный вес {}", r.id, r.weight));
+        }
+        if !seen.insert(r.id.as_str()) {
+            return Err(format!("повторяющийся id правила: '{}'", r.id));
+        }
+    }
+    Ok(())
 }
 
 // ── Фаза 11 — Историзация: планирование дозагрузки (чистая функция) ──────────
@@ -1645,6 +1711,131 @@ mod tests {
         assert_eq!(plan.len(), 2);
         assert_eq!((plan[0].from, plan[0].till), (40, 60));
         assert_eq!((plan[1].from, plan[1].till), (80, 100));
+    }
+
+    // ── T3 — Настройки и правила Key Activity ──────────────────────────────────
+
+    /// Изолированная временная директория для теста (не трогает реальный
+    /// пользовательский config-каталог). Удаляется при drop.
+    struct TempDir(std::path::PathBuf);
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "market-terminal-api-test-{tag}-{}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn settings_roundtrip_through_api() {
+        let tmp = TempDir::new("settings");
+        let store = crate::settings::SettingsStore::new(tmp.0.clone());
+
+        assert_eq!(settings_get(&store), crate::dto::SettingsDto::default());
+
+        let custom = crate::dto::SettingsDto {
+            tape_limit: 77,
+            ..crate::dto::SettingsDto::default()
+        };
+        settings_set(&store, custom.clone()).unwrap();
+        assert_eq!(settings_get(&store), custom);
+    }
+
+    #[test]
+    fn settings_set_rejects_invalid_doc() {
+        let tmp = TempDir::new("settings-invalid");
+        let store = crate::settings::SettingsStore::new(tmp.0.clone());
+
+        let bad = crate::dto::SettingsDto {
+            concurrency: 0,
+            ..crate::dto::SettingsDto::default()
+        };
+        assert!(settings_set(&store, bad).is_err());
+        // Ничего не записалось — по-прежнему дефолты.
+        assert_eq!(settings_get(&store), crate::dto::SettingsDto::default());
+    }
+
+    #[test]
+    fn key_activity_rules_set_accepts_valid_domain_json() {
+        let tmp = TempDir::new("ka-valid");
+        let store = crate::settings::SettingsStore::new(tmp.0.clone());
+
+        let json = r#"[
+            {
+                "id": "custom_1",
+                "name": "Моё правило",
+                "scope": {"kind": "market"},
+                "expr": {"Cond": {"metric": "volume_z_score", "cmp": "ge", "threshold": 3.0}},
+                "weight": 1.5
+            }
+        ]"#;
+        let saved = key_activity_rules_set(&store, json).unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].id, "custom_1");
+        assert_eq!(key_activity_rules_get(&store).len(), 1);
+    }
+
+    #[test]
+    fn key_activity_rules_set_rejects_malformed_json() {
+        let tmp = TempDir::new("ka-malformed");
+        let store = crate::settings::SettingsStore::new(tmp.0.clone());
+
+        let err = key_activity_rules_set(&store, "{not json").unwrap_err();
+        assert!(!err.is_empty());
+        assert!(key_activity_rules_get(&store).is_empty());
+    }
+
+    #[test]
+    fn key_activity_rules_set_rejects_json_not_matching_domain_shape() {
+        let tmp = TempDir::new("ka-wrong-shape");
+        let store = crate::settings::SettingsStore::new(tmp.0.clone());
+
+        // Валидный JSON, но не описывает `domain::keyactivity::Rule` (нет
+        // обязательных полей scope/expr) — должен быть отклонён при
+        // десериализации, а не молча принят.
+        let json = r#"[{"id": "x", "name": "y", "conds": []}]"#;
+        assert!(key_activity_rules_set(&store, json).is_err());
+    }
+
+    #[test]
+    fn key_activity_rules_set_rejects_semantically_invalid_rules() {
+        let tmp = TempDir::new("ka-semantic");
+        let store = crate::settings::SettingsStore::new(tmp.0.clone());
+
+        // Отрицательный вес — структурно валидный JSON, но семантически
+        // некорректный, должен быть отклонён.
+        let json = r#"[
+            {
+                "id": "bad",
+                "name": "Плохое",
+                "scope": {"kind": "market"},
+                "expr": {"Cond": {"metric": "volume", "cmp": "ge", "threshold": 1.0}},
+                "weight": -1.0
+            }
+        ]"#;
+        assert!(key_activity_rules_set(&store, json).is_err());
+        assert!(key_activity_rules_get(&store).is_empty());
+    }
+
+    #[test]
+    fn key_activity_rules_get_empty_until_saved_and_builtin_defaults_unaffected() {
+        let tmp = TempDir::new("ka-seed");
+        let store = crate::settings::SettingsStore::new(tmp.0.clone());
+        assert!(key_activity_rules_get(&store).is_empty());
+        // Встроенные дефолты (для засева UI) не зависят от файла настроек.
+        assert!(!key_activity_rules().is_empty());
     }
 
     #[test]

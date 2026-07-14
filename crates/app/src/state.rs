@@ -4,6 +4,7 @@
 //! планировщик ингеста) безопасно обращались к хранилищу из разных потоков.
 //! Бэкенд абстрактный: в тестах — `MemStore`, в продакшене — `DuckStore`.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use domain::history::{Catalog, DataSource, DatasetMeta};
@@ -23,11 +24,12 @@ use crate::dto::{
     FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
     InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
     KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderDto, OrderInput, PositionDto,
-    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SmileFitDto,
-    SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput,
-    SubmitResultDto, TimeRangeDto, TopMoverDto, TurnoverByClassPoint, TurnoverPoint,
-    YieldCurvePoint,
+    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SettingsDto,
+    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
+    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
 };
+use crate::settings::SettingsStore;
 use crate::trade::TradeSession;
 
 /// Разделяемое состояние терминала.
@@ -38,18 +40,39 @@ pub struct AppState {
     /// Каталог локальных датасетов истории (фаза 11). Пока в памяти; боевой
     /// загрузчик/DuckDB-хранилище наполняют его по мере загрузки.
     history: Mutex<Catalog>,
+    /// Персист пользовательских настроек и правил Key Activity в JSON-файл
+    /// ОС-config-директории (T3/10.5.3/S.2.2). `Mutex` — что несколько
+    /// IPC-команд не гонялись за одним временным файлом при атомарной записи.
+    settings: Mutex<SettingsStore>,
 }
 
 // В headless-live режиме IPC-read-методы (обработчики команд) не вызываются —
 // их потребляет Tauri-UI и тесты. Глушим dead_code только для этой комбинации.
 #[cfg_attr(feature = "live", allow(dead_code))]
 impl AppState {
-    /// Создать состояние поверх произвольного бэкенда хранилища.
+    /// Создать состояние поверх произвольного бэкенда хранилища. Настройки
+    /// резолвятся в стандартную ОС-директорию (см. [`SettingsStore::from_env`]);
+    /// для тестов/портейбл-режима используйте [`AppState::with_settings_dir`].
     pub fn new(store: impl Store + Send + 'static) -> Self {
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
             history: Mutex::new(Catalog::new()),
+            settings: Mutex::new(SettingsStore::from_env()),
+        }
+    }
+
+    /// Создать состояние с явно заданной директорией конфигурации (тесты,
+    /// портейбл-режим — чтобы не читать/писать в реальный config-каталог ОС).
+    /// В обычной сборке (без `tauri`/`live`, вне тестов) не вызывается —
+    /// консольный smoke использует [`AppState::new`], поэтому глушим dead_code.
+    #[allow(dead_code)]
+    pub fn with_settings_dir(store: impl Store + Send + 'static, settings_dir: PathBuf) -> Self {
+        Self {
+            store: Mutex::new(Box::new(store)),
+            trade: TradeSession::new(),
+            history: Mutex::new(Catalog::new()),
+            settings: Mutex::new(SettingsStore::new(settings_dir)),
         }
     }
 
@@ -369,6 +392,50 @@ impl AppState {
     pub fn history_plan(&self, input: &HistoryPlanInput) -> Vec<TimeRangeDto> {
         api::history_plan(input)
     }
+
+    // ── T3 — Персист настроек и правил Key Activity ────────────────────────────
+    // (10.5.3 / S.2.2 / 10.8.* / 11.6.1 / 12.8.1)
+
+    /// Текущие пользовательские настройки (дефолты, если ещё не сохранялись).
+    /// Отравленный мьютекс трактуется как «файла ещё нет» — дефолты, а не паника.
+    pub fn settings_get(&self) -> SettingsDto {
+        match self.settings.lock() {
+            Ok(guard) => api::settings_get(&guard),
+            Err(_) => SettingsDto::default(),
+        }
+    }
+
+    /// Сохранить настройки: валидация + атомарная запись.
+    pub fn settings_set(&self, doc: SettingsDto) -> Result<(), String> {
+        let guard = self
+            .settings
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        api::settings_set(&guard, doc)
+    }
+
+    /// Пользовательские правила Key Activity, сохранённые ранее (пусто — ещё
+    /// не сохранялись).
+    pub fn key_activity_rules_get(&self) -> Vec<KeyActivityRuleDto> {
+        match self.settings.lock() {
+            Ok(guard) => api::key_activity_rules_get(&guard),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Сохранить пользовательские правила Key Activity (`rules_json` — JSON
+    /// доменной модели `domain::keyactivity::Rule`; валидация — сама
+    /// десериализация, см. [`api::key_activity_rules_set`]).
+    pub fn key_activity_rules_set(
+        &self,
+        rules_json: &str,
+    ) -> Result<Vec<KeyActivityRuleDto>, String> {
+        let guard = self
+            .settings
+            .lock()
+            .map_err(|_| "settings lock poisoned".to_string())?;
+        api::key_activity_rules_set(&guard, rules_json)
+    }
 }
 
 #[cfg(test)]
@@ -416,5 +483,59 @@ mod tests {
             .unwrap();
         assert!(removed);
         assert!(state.history_datasets().is_empty());
+    }
+
+    /// Изолированная временная директория для теста (не трогает реальный
+    /// пользовательский config-каталог). Удаляется при drop.
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "market-terminal-state-test-{tag}-{}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn state_settings_and_key_activity_rules_roundtrip() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        let tmp = TempDir::new("state-settings");
+        let state = AppState::with_settings_dir(store, tmp.0.clone());
+
+        assert_eq!(state.settings_get(), SettingsDto::default());
+        let custom = SettingsDto {
+            dom_depth: 15,
+            ..SettingsDto::default()
+        };
+        state.settings_set(custom.clone()).unwrap();
+        assert_eq!(state.settings_get(), custom);
+
+        assert!(state.key_activity_rules_get().is_empty());
+        let json = r#"[{
+            "id": "r1", "name": "Правило",
+            "scope": {"kind": "market"},
+            "expr": {"Cond": {"metric": "volume", "cmp": "ge", "threshold": 100.0}},
+            "weight": 1.0
+        }]"#;
+        let saved = state.key_activity_rules_set(json).unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(state.key_activity_rules_get().len(), 1);
+
+        // Невалидный JSON отклоняется и не портит уже сохранённое.
+        assert!(state.key_activity_rules_set("{not json").is_err());
+        assert_eq!(state.key_activity_rules_get().len(), 1);
     }
 }

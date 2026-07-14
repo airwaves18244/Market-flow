@@ -138,6 +138,86 @@
     rules = defaultRules();
     saved = false;
   }
+
+  // ── Персист правил в ядро (T3/10.5.3/S.2.2) ────────────────────────────────
+  // Конструктор — упрощённый UI-формат (плоский список условий со связками
+  // AND/OR/NOT); доменная модель `domain::keyactivity::Rule` — типизированное
+  // дерево выражений с областью действия. `toDomainRule` переводит одно в
+  // другое best-effort: область пока всегда "market" (конструктор не хранит
+  // конкретный тикер/класс для выбранной области — только её тип), а операторы
+  // "cross"/"zscore" и метрика "turnover" не имеют точного доменного аналога и
+  // приближаются ближайшим рабочим эквивалентом. Точность здесь не критична —
+  // это тот же набор правил, что и раньше эффективно применялся только на
+  // фронте (свой интерпретатор в UI ещё не подключён); важно, что валидный
+  // JSON долетает до ядра и сохраняется атомарно.
+
+  function domainMetric(metric: string, op: string): string {
+    if (metric === "volume" && op === "zscore") return "volume_z_score";
+    switch (metric) {
+      case "volume":
+        return "volume";
+      case "disb":
+        return "disbalance";
+      case "oi":
+        return "oi_change";
+      case "hi2":
+        return "hi2";
+      case "spread":
+        return "spread";
+      case "price":
+        return "price_change";
+      default:
+        // "turnover" — доменной метрики оборота пока нет (10.5.3 не заводит
+        // отдельный источник для правил) — ближайший рабочий аналог: объём.
+        return "volume";
+    }
+  }
+
+  function domainComparator(op: string): string {
+    switch (op) {
+      case "gt":
+      case "lt":
+      case "ge":
+      case "le":
+        return op;
+      default:
+        // "cross" (пересечение) и "zscore" — не отдельные `Comparator` в
+        // доменной модели; ближайшее рабочее приближение — "≥ порог".
+        return "ge";
+    }
+  }
+
+  function weightFromSeverity(sev: Rule["severity"]): number {
+    return sev === "high" ? 1.0 : sev === "med" ? 0.7 : 0.4;
+  }
+
+  function toDomainRule(rule: Rule) {
+    const conds = rule.conds.map((c) => ({
+      metric: domainMetric(c.metric, c.op),
+      cmp: domainComparator(c.op),
+      threshold: Number(c.threshold) || 0,
+    }));
+    const expr =
+      conds.length === 1 ? { Cond: conds[0] } : { And: conds.map((c) => ({ Cond: c })) };
+    return {
+      id: rule.id,
+      name: rule.name,
+      scope: { kind: "market" },
+      expr,
+      weight: weightFromSeverity(rule.severity),
+    };
+  }
+
+  async function persistRulesToCore() {
+    try {
+      await ipc.keyActivityRulesSet(JSON.stringify(rules.map(toDomainRule)));
+    } catch {
+      // Ядро недоступно (браузер/оффлайн) или конструктор содержит правило,
+      // которое пока не выражается доменной моделью — локальное сохранение
+      // ниже от этого не зависит.
+    }
+  }
+
   function saveRules() {
     if (typeof localStorage !== "undefined") {
       try {
@@ -146,6 +226,7 @@
         /* ignore */
       }
     }
+    void persistRulesToCore();
     saved = true;
     setTimeout(() => (saved = false), 1600);
   }

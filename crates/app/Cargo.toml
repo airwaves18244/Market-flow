@@ -16,6 +16,9 @@ data = { workspace = true }
 storage = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
+# JSON-документ настроек (crate::settings) — тот же формат, в котором уже
+# сериализуются правила Key Activity (domain::keyactivity), версия как у domain.
+serde_json = "1"
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

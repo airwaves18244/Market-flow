@@ -80,6 +80,7 @@ dependencies = [
  "domain",
  "finam-proto",
  "serde",
+ "serde_json",
  "storage",
  "tauri",
  "tauri-build",

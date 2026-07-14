@@ -10,6 +10,7 @@
   import HistoryTab from "./lib/components/HistoryTab.svelte";
   import SettingsTab from "./lib/components/SettingsTab.svelte";
   import { ipc } from "./lib/ipc";
+  import { syncSettingsWithCore } from "./lib/settings";
   import type { InstrumentDto } from "./lib/types";
 
   const tabs = [
@@ -31,6 +32,9 @@
   const select = (symbol: string) => (selected = symbol);
 
   onMount(async () => {
+    // Персист настроек в ядро (T3/10.5.3/S.2.2): одноразовая миграция
+    // localStorage → ядро под Tauri + подтяжка кэша. В браузере — no-op.
+    void syncSettingsWithCore();
     try {
       instruments = await ipc.instruments();
       if (instruments.length > 0) selected = instruments[0].symbol;
