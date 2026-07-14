@@ -21,6 +21,8 @@ pub mod grpc;
 pub mod http;
 #[cfg(feature = "grpc")]
 pub mod market;
+#[cfg(feature = "moex")]
+pub mod moex;
 pub mod orders;
 pub mod rate;
 pub mod secret;
@@ -37,6 +39,8 @@ pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
 pub use http::{HttpClient, HttpResponse, HttpTransport, ReqwestTransport};
 #[cfg(feature = "grpc")]
 pub use market::FinamMarketData;
+#[cfg(feature = "moex")]
+pub use moex::{AlgoSource, DateRange, Market, MoexAlgo};
 #[cfg(feature = "live-trading")]
 pub use orders::FinamOrderRouter;
 pub use orders::{OrderRouter, RouterError, SimOrderRouter};

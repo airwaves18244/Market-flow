@@ -56,6 +56,10 @@ grpc = ["dep:tonic", "dep:tokio", "dep:prost-types", "finam-proto/grpc"]
 # Async-runtime (`tokio`) переиспользуется из фичи `grpc` — здесь та же
 # зависимость подключается независимо от неё.
 http = ["dep:reqwest", "dep:tokio", "dep:serde_json"]
+# Клиент MOEX ALGOPACK (транспорт + парсер ISS JSON) поверх фичи `http`.
+# Выключена по умолчанию (как `grpc`/`keyring`/`http`) — не тянет `reqwest` в
+# кросс-платформенную сборку.
+moex = ["http"]
 # Боевой роутинг заявок в Finam (OrderService/AccountsService). Каркас: контракт
 # `OrderRouter` есть всегда (с симулятором по умолчанию), а заглушка
 # `FinamOrderRouter` компилируется только под этой фичей. Реальный транспорт
