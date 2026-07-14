@@ -908,6 +908,76 @@ pub fn strategy_eval(input: &StrategyEvalInput) -> Result<StrategyEvalDto, Strin
     })
 }
 
+// ── Фаза 12.4 — Опционная доска MOEX (фича `moex`) ────────────────────────────
+//
+// Без фичи `moex` этот раздел не компилируется вовсе — команда `option_board`
+// отсутствует в Tauri-сборке без неё (тот же приём, что у `llm`/
+// `key_activity_summary_live`, только здесь нет содержательного фолбэка без
+// сети: доска — сетевые данные по определению).
+
+#[cfg(feature = "moex")]
+use data::moex::{board_to_smile_points, MoexIss, OptionsSource};
+
+#[cfg(feature = "moex")]
+use crate::dto::{OptionBoardDto, OptionBoardInput, OptionQuoteDto, SmilePointInput};
+
+/// Загрузить опционную доску через произвольный источник ([`OptionsSource`])
+/// и построить точки улыбки для калибратора. Источник — параметр (не привязан
+/// к конкретному транспорту), поэтому функция тестируется на
+/// `data::moex::FakeOptionsSource` без сети; live-обёртка — [`option_board_live`].
+///
+/// Серия для точек улыбки — `input.expiration_ts`, либо (если не задана)
+/// ближайшая по времени экспирации серия, присутствующая на доске. Форвард —
+/// из снимка доски (цена фьючерса-андерлаинга), либо `input.forward_hint`,
+/// если доска его не определила. Без и того и другого точки улыбки не
+/// строятся (`smile_points` пуст, но котировки всё равно возвращаются).
+#[cfg(feature = "moex")]
+pub async fn option_board<S: OptionsSource>(
+    source: &S,
+    input: &OptionBoardInput,
+) -> Result<OptionBoardDto, String> {
+    let snapshot = source
+        .options_board(input.underlying.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let expiration_ts = input
+        .expiration_ts
+        .or_else(|| snapshot.quotes.iter().map(|q| q.expiration_ts).min());
+    let forward = snapshot.forward.or(input.forward_hint);
+    let rate = input.rate.unwrap_or(0.0);
+
+    let smile_points = match (expiration_ts, forward) {
+        (Some(exp), Some(fwd)) => board_to_smile_points(&snapshot.quotes, exp, fwd, input.t, rate)
+            .into_iter()
+            .map(|p| SmilePointInput {
+                strike: p.strike,
+                iv: p.iv,
+                weight: Some(p.weight),
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Ok(OptionBoardDto {
+        quotes: snapshot.quotes.iter().map(OptionQuoteDto::from).collect(),
+        forward,
+        expiration_ts,
+        smile_points,
+    })
+}
+
+/// Live-обёртка: строит `MoexIss<ReqwestTransport>` — публичный ISS
+/// (`iss.moex.com`), без авторизации, секрет не нужен — и вызывает
+/// [`option_board`]. Отдельная функция, чтобы конкретный тип транспорта не
+/// протекал в сигнатуру [`option_board`] (там нужен только дженерик-трейт).
+#[cfg(feature = "moex")]
+pub async fn option_board_live(input: &OptionBoardInput) -> Result<OptionBoardDto, String> {
+    let transport = data::ReqwestTransport::new().map_err(|e| e.to_string())?;
+    let client = MoexIss::new(transport);
+    option_board(&client, input).await
+}
+
 // ── Фаза 10 — MOEX ALGO: Key Activity (чистый движок правил) ─────────────────
 
 use domain::keyactivity::{default_rules, evaluate as ka_evaluate, prompt, Period, Rule, Sample};
@@ -1683,6 +1753,166 @@ mod tests {
         assert!((out.max_loss.unwrap() + 5.0).abs() < 1e-6);
         assert!(out.net_cost > 0.0);
         assert!(out.greeks.delta > 0.0);
+    }
+
+    // ── Фаза 12.4 — Опционная доска MOEX (фича `moex`) ────────────────────────
+
+    #[cfg(feature = "moex")]
+    fn quote(
+        secid: &str,
+        strike: f64,
+        kind: domain::options::OptionType,
+        expiration_ts: i64,
+    ) -> data::moex::OptionQuote {
+        data::moex::OptionQuote {
+            secid: secid.to_owned(),
+            underlying: "RIH5".to_owned(),
+            expiration_ts,
+            strike,
+            kind,
+            bid: None,
+            ask: None,
+            last: None,
+            iv: None,
+            oi: None,
+            theor_price: None,
+        }
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_builds_smile_points_from_fake_source() {
+        use data::moex::{FakeOptionsSource, OptionsBoardSnapshot};
+        use domain::options::OptionType;
+
+        let mut itm = quote("A", 100.0, OptionType::Call, 1_000);
+        itm.bid = Some(4.0);
+        itm.ask = Some(5.0);
+        itm.iv = Some(0.3);
+        itm.oi = Some(50.0);
+
+        let mut illiquid = quote("B", 110.0, OptionType::Call, 1_000);
+        illiquid.iv = None; // ни bid/ask, ни oi — неликвид, должен отсеяться.
+
+        let fake = FakeOptionsSource {
+            options_board: Ok(OptionsBoardSnapshot {
+                quotes: vec![itm, illiquid],
+                forward: Some(100.0),
+            }),
+        };
+
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: None,
+                forward_hint: None,
+                t: 0.1,
+                rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.quotes.len(), 2);
+        assert_eq!(out.forward, Some(100.0));
+        assert_eq!(out.expiration_ts, Some(1_000));
+        // Неликвидная котировка отфильтрована маппингом в точки улыбки.
+        assert_eq!(out.smile_points.len(), 1);
+        assert!((out.smile_points[0].iv - 0.3).abs() < 1e-12);
+        assert_eq!(out.smile_points[0].weight, Some(50.0));
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_falls_back_to_forward_hint_without_board_forward() {
+        use data::moex::{FakeOptionsSource, OptionsBoardSnapshot};
+        use domain::options::OptionType;
+
+        let mut q = quote("A", 100.0, OptionType::Put, 2_000);
+        q.bid = Some(3.0);
+        q.ask = Some(3.5);
+        q.iv = Some(0.28);
+
+        let fake = FakeOptionsSource {
+            options_board: Ok(OptionsBoardSnapshot {
+                quotes: vec![q],
+                forward: None, // доска не смогла определить форвард.
+            }),
+        };
+
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: Some(2_000),
+                forward_hint: Some(99.0),
+                t: 0.2,
+                rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.forward, Some(99.0));
+        assert_eq!(out.smile_points.len(), 1);
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_without_forward_returns_quotes_but_no_smile_points() {
+        use data::moex::{FakeOptionsSource, OptionsBoardSnapshot};
+        use domain::options::OptionType;
+
+        let mut q = quote("A", 100.0, OptionType::Call, 3_000);
+        q.bid = Some(4.0);
+        q.ask = Some(5.0);
+        q.iv = Some(0.3);
+
+        let fake = FakeOptionsSource {
+            options_board: Ok(OptionsBoardSnapshot {
+                quotes: vec![q],
+                forward: None,
+            }),
+        };
+
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: None,
+                forward_hint: None,
+                t: 0.2,
+                rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.quotes.len(), 1);
+        assert!(out.smile_points.is_empty());
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_propagates_source_error() {
+        use data::moex::FakeOptionsSource;
+
+        let fake = FakeOptionsSource {
+            options_board: Err(data::DataError::Transport("недоступен".into())),
+        };
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: None,
+                forward_hint: None,
+                t: 0.1,
+                rate: None,
+            },
+        )
+        .await;
+        assert!(out.is_err());
     }
 
     // ── Фаза 10 — MOEX ALGO: Key Activity ─────────────────────────────────────

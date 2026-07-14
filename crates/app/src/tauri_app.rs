@@ -238,6 +238,20 @@ fn strategy_eval(state: State<AppState>, input: StrategyEvalInput) -> CmdResult<
     state.strategy_eval(&input)
 }
 
+/// Опционная доска MOEX через публичный ISS (фаза 12.4). Существует только
+/// со включённой фичей `moex` (как `key_activity_summary` в live-варианте с
+/// `llm`, но без локального фолбэка: доска — сетевые данные по определению,
+/// без фичи команда отсутствует и фронт работает на мок-доске). Команда
+/// асинхронная, чтобы сетевой вызов не блокировал IPC-поток.
+#[cfg(feature = "moex")]
+#[tauri::command]
+async fn option_board(
+    state: State<'_, AppState>,
+    input: crate::dto::OptionBoardInput,
+) -> CmdResult<crate::dto::OptionBoardDto> {
+    state.option_board(&input).await
+}
+
 // ── Фаза 10 — MOEX ALGO: Key Activity ────────────────────────────────────────
 
 #[tauri::command]
@@ -449,6 +463,8 @@ pub fn run() {
             option_implied_vol,
             smile_fit,
             strategy_eval,
+            #[cfg(feature = "moex")]
+            option_board,
             key_activity,
             key_activity_summary,
             key_activity_rules,

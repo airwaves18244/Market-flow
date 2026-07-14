@@ -1,0 +1,23 @@
+{
+  "securities": {
+    "columns": ["secid", "assetcode", "strike", "optiontype", "lasttradedate"],
+    "data": [
+      ["RI50000BC5A", "RIH5", 50000, "C", "2025-01-16"],
+      ["RI50000BP5A", "RIH5", 50000, "P", "2025-01-16"],
+      ["RI55000BC5A", "RIH5", 55000, "C", "2025-01-16"],
+      ["RI45000BC5A", "RIH5", 45000, "C", "2025-01-16"],
+      ["SI75000BC5A", "SiH5", 75000, "C", "2025-01-16"],
+      ["RI99999XXXXX", "RIH5", null, "C", "2025-01-16"]
+    ]
+  },
+  "marketdata": {
+    "columns": ["secid", "bid", "offer", "last", "iv", "openposition", "theorprice"],
+    "data": [
+      ["RI50000BC5A", 2500, 2600, 2550, 0.32, 1200, 2555],
+      ["RI50000BP5A", null, null, null, null, 0, null],
+      ["RI55000BC5A", 500, 650, null, null, 300, 560],
+      ["RI45000BC5A", 4000, 4200, 4100, 0.35, 900, 4090],
+      ["SI75000BC5A", 1000, 1100, 1050, 0.28, 500, 1060]
+    ]
+  }
+}

@@ -74,6 +74,55 @@ describe("options ipc (mock mode)", () => {
   });
 });
 
+describe("option board ipc (mock mode)", () => {
+  it("returns a deterministic board with smile points around the forward", async () => {
+    const board = await ipc.optionBoard({ underlying: "RIH5", t: 30 / 365 });
+    expect(board.forward).not.toBeNull();
+    expect(board.expirationTs).not.toBeNull();
+    expect(board.quotes.length).toBeGreaterThan(3);
+    expect(board.smilePoints.length).toBeGreaterThan(3);
+    // Детерминизм: повторный вызов даёт тот же результат.
+    const again = await ipc.optionBoard({ underlying: "RIH5", t: 30 / 365 });
+    expect(again).toEqual(board);
+    // Страйки точек улыбки — вокруг форварда (в пределах ±20%).
+    const f = board.forward as number;
+    for (const p of board.smilePoints) {
+      expect(p.strike).toBeGreaterThan(f * 0.8);
+      expect(p.strike).toBeLessThan(f * 1.2);
+      expect(p.iv).toBeGreaterThan(0);
+      expect(p.weight ?? 0).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps the illiquid quote on the board but not among smile points", async () => {
+    const board = await ipc.optionBoard({ underlying: "RIH5", t: 0.1 });
+    const illiquid = board.quotes.filter((q) => q.bid === null && q.ask === null && q.oi === null);
+    expect(illiquid.length).toBeGreaterThan(0);
+    // Точек улыбки меньше, чем котировок — неликвид отфильтрован.
+    expect(board.smilePoints.length).toBeLessThan(board.quotes.length);
+    const strikes = new Set(board.smilePoints.map((p) => p.strike));
+    for (const q of illiquid) expect(strikes.has(q.strike)).toBe(false);
+  });
+
+  it("respects the forward hint", async () => {
+    const board = await ipc.optionBoard({ underlying: "RIH5", t: 0.1, forwardHint: 90000 });
+    expect(board.forward).toBe(90000);
+    expect(board.smilePoints.some((p) => Math.abs(p.strike - 90000) < 1)).toBe(true);
+  });
+
+  it("feeds board smile points into smile_fit", async () => {
+    const board = await ipc.optionBoard({ underlying: "SBER", t: 0.25 });
+    const fit = await ipc.smileFit({
+      model: "moex",
+      points: board.smilePoints,
+      forward: board.forward as number,
+      t: 0.25,
+    });
+    expect(fit.curve.length).toBeGreaterThan(2);
+    expect(fit.rmse).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe("key activity ipc (mock mode)", () => {
   it("flags anomalous volume and imbalance samples", async () => {
     const rows = await ipc.keyActivity(

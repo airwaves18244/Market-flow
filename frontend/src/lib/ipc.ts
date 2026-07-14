@@ -29,6 +29,8 @@ import type {
   KeyActivityRuleDto,
   KeyActivitySampleInput,
   KeyActivitySummaryDto,
+  OptionBoardDto,
+  OptionBoardInput,
   OptionPriceDto,
   OptionPriceInput,
   OrderBookDto,
@@ -178,6 +180,10 @@ export const ipc = {
     invoke<ImpliedVolDto>("option_implied_vol", { input }),
   smileFit: (input: SmileFitInput) => invoke<SmileFitDto>("smile_fit", { input }),
   strategyEval: (input: StrategyEvalInput) => invoke<StrategyEvalDto>("strategy_eval", { input }),
+  // Опционная доска MOEX (фаза 12.4). В Tauri-сборке без фичи `moex` команда
+  // отсутствует и вызов отклоняется — вызывающая сторона обязана иметь фолбэк
+  // (SmileView возвращается к демо-точкам).
+  optionBoard: (input: OptionBoardInput) => invoke<OptionBoardDto>("option_board", { input }),
 
   // ── Фаза 10 / MOEX ALGO: Key Activity ───────────────────────────────────────
   keyActivity: (samples: KeyActivitySampleInput[], period?: KeyActivityPeriod) =>

@@ -12,15 +12,18 @@
 
   let forward = $state(300);
   let days = $state(30);
+  let underlying = $state("RIH5");
   let models = $state<SmileModelDto[]>([]);
   let visible = $state<Record<string, boolean>>({});
   let activeModel = $state<string>(settings.defaultSmile);
   let fits = $state<Record<string, SmileFitDto>>({});
   let error = $state<string | null>(null);
+  let boardNote = $state<string | null>(null);
+  let loadingBoard = $state(false);
 
-  // Демо-доска: рыночные IV-точки (страйк/IV/OI-вес). В боевом режиме приходят
-  // из опционной доски ALGOPACK.
-  const points: SmilePointInput[] = [
+  // Демо-точки: ручной фолбэк, когда доска недоступна (нет фичи `moex` в
+  // сборке ядра, сеть/пустая доска) — прежнее поведение вкладки сохранено.
+  const DEMO_POINTS: SmilePointInput[] = [
     { strike: 260, iv: 0.42, weight: 0.4 },
     { strike: 275, iv: 0.36, weight: 0.7 },
     { strike: 290, iv: 0.32, weight: 1 },
@@ -29,6 +32,10 @@
     { strike: 325, iv: 0.35, weight: 0.6 },
     { strike: 340, iv: 0.4, weight: 0.35 },
   ];
+
+  // Рыночные точки: демо-набор до первой загрузки доски (фаза 12.4 — в Tauri
+  // это живой ISS, в браузерном мок-режиме — детерминированная мок-доска).
+  let points = $state<SmilePointInput[]>(DEMO_POINTS);
 
   const PALETTE = ["#4f9cf9", "#26a69a", "#f5a623", "#a371f7", "#ef5350"];
   const colorOf = (id: string) =>
@@ -61,6 +68,32 @@
     }
   }
 
+  // Загрузить опционную доску базового актива и прогнать калибровку по её
+  // точкам. При любой неудаче (нет команды/сети, пустая доска) — фолбэк на
+  // демо-точки, вкладка остаётся рабочей.
+  async function loadBoard() {
+    error = null;
+    boardNote = null;
+    loadingBoard = true;
+    try {
+      const board = await ipc.optionBoard({ underlying, t, forwardHint: forward });
+      if (board.forward != null) forward = board.forward;
+      if (board.smilePoints.length > 0) {
+        points = board.smilePoints;
+        boardNote = `Доска ${underlying}: котировок ${board.quotes.length}, точек улыбки ${board.smilePoints.length}`;
+      } else {
+        points = DEMO_POINTS;
+        boardNote = `Доска ${underlying} пуста — используются демо-точки`;
+      }
+    } catch (e) {
+      points = DEMO_POINTS;
+      boardNote = `Доска недоступна (${String(e)}) — используются демо-точки`;
+    } finally {
+      loadingBoard = false;
+    }
+    await calibrate();
+  }
+
   onMount(async () => {
     try {
       models = await ipc.listSmileModels();
@@ -90,10 +123,22 @@
     </header>
     <div class="panel-body chart-body">
       <div class="controls">
+        <label
+          >Базовый актив<input
+            class="ctl-sm"
+            type="text"
+            bind:value={underlying}
+            placeholder="RIH5"
+          /></label
+        >
         <label>Форвард F<input class="ctl-sm" type="number" bind:value={forward} step="1" /></label>
         <label>Дней до эксп.<input class="ctl-sm" type="number" bind:value={days} step="1" /></label>
+        <button class="btn-primary" onclick={loadBoard} disabled={loadingBoard}>
+          {loadingBoard ? "Загрузка…" : "Загрузить доску"}
+        </button>
         <button class="btn-primary" onclick={calibrate}>Калибровать</button>
       </div>
+      {#if boardNote}<div class="board-note">{boardNote}</div>{/if}
       {#if error}<div class="ph-box error">{error}</div>{/if}
       <div class="chart"><SmileChart {points} fits={curveLines} /></div>
     </div>
@@ -171,6 +216,10 @@
     font-size: 11px;
     color: var(--text-dim);
     gap: 3px;
+  }
+  .board-note {
+    font-size: 11px;
+    color: var(--text-dim);
   }
   .chart {
     flex: 1;

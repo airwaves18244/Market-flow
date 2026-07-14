@@ -46,7 +46,10 @@ pub use llm::{
 #[cfg(feature = "grpc")]
 pub use market::FinamMarketData;
 #[cfg(feature = "moex")]
-pub use moex::{AlgoSource, DateRange, Market, MoexAlgo};
+pub use moex::{
+    AlgoSource, DateRange, FakeOptionsSource, Market, MoexAlgo, MoexIss, OptionQuote,
+    OptionsBoardSnapshot, OptionsSource,
+};
 #[cfg(feature = "live-trading")]
 pub use orders::FinamOrderRouter;
 pub use orders::{OrderRouter, RouterError, SimOrderRouter};

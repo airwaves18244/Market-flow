@@ -33,7 +33,11 @@ pub enum Method {
     MoexOrderstats,
     /// MOEX ALGOPACK свечи — REST поверх `data::http`.
     MoexCandles,
-    /// MOEX ALGOPACK опционная доска — REST поверх `data::http`.
+    /// MOEX опционная доска (фаза 12.4) — REST поверх `data::http`, но, в
+    /// отличие от прочих `Moex*`-методов, ходит не в ALGOPACK
+    /// (`apim.moex.com`, Bearer-токен), а в **публичный** ISS
+    /// (`iss.moex.com/iss/engines/futures/markets/options`, без авторизации) —
+    /// см. `data::moex::options`.
     MoexOptions,
     /// LLM-провайдер (сводки/аннотации) — REST поверх `data::http`.
     Llm,
