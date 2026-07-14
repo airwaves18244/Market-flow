@@ -10,10 +10,11 @@
 //! Сам асинхронный цикл опроса (с tokio и реальным gRPC-клиентом) собирается в
 //! `app`; здесь — синхронные, кросс-платформенно тестируемые кирпичики.
 
+use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
 use domain::metrics::turnover::{directional_turnover, total_turnover};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 
-use crate::store::{SectorEntry, Store, TurnoverSnapshot};
+use crate::store::{AlgoObstatsRecord, AlgoOrderstatsRecord, SectorEntry, Store, TurnoverSnapshot};
 use crate::StorageError;
 
 /// Построить снимок оборота из серии баров за период (напр. за торговый день).
@@ -127,6 +128,48 @@ impl<'a, S: Store> Writer<'a, S> {
     {
         let entries = sector_entries(pairs);
         self.store.upsert_sector_map(&entries)
+    }
+
+    /// Записать свечи Super Candles (датасет ALGOPACK `tradestats`) для
+    /// рынка `market`. Идемпотентно по ключу (secid, ts, market) — повторный
+    /// ингест той же свечи не плодит дублей.
+    pub fn algo_tradestats(
+        &mut self,
+        market: &str,
+        candles: &[SuperCandle],
+    ) -> Result<usize, StorageError> {
+        self.store.insert_algo_tradestats(market, candles)
+    }
+
+    /// Записать точки FUTOI (датасет ALGOPACK `futoi`, рынок `fo`).
+    /// Идемпотентно по ключу (secid, ts, market, clgroup).
+    pub fn algo_futoi(
+        &mut self,
+        market: &str,
+        points: &[FutoiPoint],
+    ) -> Result<usize, StorageError> {
+        self.store.insert_algo_futoi(market, points)
+    }
+
+    /// Записать точки HI2 (датасет ALGOPACK `hi2`). Идемпотентно по ключу
+    /// (secid, ts, market).
+    pub fn algo_hi2(&mut self, market: &str, points: &[Hi2Point]) -> Result<usize, StorageError> {
+        self.store.insert_algo_hi2(market, points)
+    }
+
+    /// Записать статистику стакана заявок (датасет ALGOPACK `obstats`).
+    /// Идемпотентно по ключу (secid, ts, market).
+    pub fn algo_obstats(&mut self, records: &[AlgoObstatsRecord]) -> Result<usize, StorageError> {
+        self.store.insert_algo_obstats(records)
+    }
+
+    /// Записать статистику заявок (датасет ALGOPACK `orderstats`).
+    /// Идемпотентно по ключу (secid, ts, market).
+    pub fn algo_orderstats(
+        &mut self,
+        records: &[AlgoOrderstatsRecord],
+    ) -> Result<usize, StorageError> {
+        self.store.insert_algo_orderstats(records)
     }
 }
 
@@ -242,6 +285,44 @@ mod tests {
         let isin = entries.iter().find(|e| e.is_isin).unwrap();
         assert_eq!(ticker.key, "SBER");
         assert_eq!(isin.key, "RU0009029540");
+    }
+
+    #[test]
+    fn writer_algo_tradestats_dedups_by_key() {
+        let mut store = MemStore::new();
+        let candle = |ts: i64, close: f64| SuperCandle {
+            secid: "RIH5".into(),
+            ts,
+            pr_open: close,
+            pr_high: close,
+            pr_low: close,
+            pr_close: close,
+            pr_std: 0.1,
+            vol: 10.0,
+            val: close * 10.0,
+            trades: 1.0,
+            pr_vwap: close,
+            pr_change: 0.0,
+            vol_b: 6.0,
+            vol_s: 4.0,
+            val_b: close * 6.0,
+            val_s: close * 4.0,
+            trades_b: 1.0,
+            trades_s: 0.0,
+            disb: 0.2,
+            pr_vwap_b: close,
+            pr_vwap_s: close,
+        };
+        {
+            let mut w = Writer::new(&mut store);
+            w.algo_tradestats("fo", &[candle(1, 10.0), candle(2, 20.0)])
+                .unwrap();
+            // повторный ингест с той же ts — перезаписывает, не дублирует
+            w.algo_tradestats("fo", &[candle(1, 99.0)]).unwrap();
+        }
+        let got = store.algo_tradestats("fo", "RIH5", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        assert!((got[0].pr_close - 99.0).abs() < 1e-12);
     }
 
     #[test]

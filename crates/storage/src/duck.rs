@@ -10,11 +10,12 @@
 
 use duckdb::{params, Connection};
 
+use domain::algo::{ClientGroup, FutoiPoint, Hi2Point, SuperCandle};
 use domain::{AssetClass, Bar, Instrument, TimeFrame, Trade};
 
 use crate::migrate;
 use crate::schema::SCHEMA_VERSION;
-use crate::store::{SectorEntry, Store, TurnoverSnapshot};
+use crate::store::{AlgoObstatsRecord, AlgoOrderstatsRecord, SectorEntry, Store, TurnoverSnapshot};
 use crate::StorageError;
 
 /// Хранилище поверх DuckDB.
@@ -317,6 +318,373 @@ impl Store for DuckStore {
             .map_err(db)?;
         rows.collect::<Result<_, _>>().map_err(db)
     }
+
+    fn insert_algo_tradestats(
+        &mut self,
+        market: &str,
+        candles: &[SuperCandle],
+    ) -> Result<usize, StorageError> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO algo_tradestats \
+                     (secid, ts, market, pr_open, pr_high, pr_low, pr_close, pr_std, \
+                      vol, val, trades, pr_vwap, pr_change, vol_b, vol_s, val_b, val_s, \
+                      trades_b, trades_s, disb, pr_vwap_b, pr_vwap_s) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .map_err(db)?;
+            for c in candles {
+                stmt.execute(params![
+                    c.secid,
+                    c.ts,
+                    market,
+                    c.pr_open,
+                    c.pr_high,
+                    c.pr_low,
+                    c.pr_close,
+                    c.pr_std,
+                    c.vol,
+                    c.val,
+                    c.trades,
+                    c.pr_vwap,
+                    c.pr_change,
+                    c.vol_b,
+                    c.vol_s,
+                    c.val_b,
+                    c.val_s,
+                    c.trades_b,
+                    c.trades_s,
+                    c.disb,
+                    c.pr_vwap_b,
+                    c.pr_vwap_s,
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(candles.len())
+    }
+
+    fn algo_tradestats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<SuperCandle>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT secid, ts, pr_open, pr_high, pr_low, pr_close, pr_std, vol, val, \
+                 trades, pr_vwap, pr_change, vol_b, vol_s, val_b, val_s, trades_b, trades_s, \
+                 disb, pr_vwap_b, pr_vwap_s \
+                 FROM algo_tradestats \
+                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![market, secid, from_ts, to_ts], |row| {
+                Ok(SuperCandle {
+                    secid: row.get(0)?,
+                    ts: row.get(1)?,
+                    pr_open: row.get(2)?,
+                    pr_high: row.get(3)?,
+                    pr_low: row.get(4)?,
+                    pr_close: row.get(5)?,
+                    pr_std: row.get(6)?,
+                    vol: row.get(7)?,
+                    val: row.get(8)?,
+                    trades: row.get(9)?,
+                    pr_vwap: row.get(10)?,
+                    pr_change: row.get(11)?,
+                    vol_b: row.get(12)?,
+                    vol_s: row.get(13)?,
+                    val_b: row.get(14)?,
+                    val_s: row.get(15)?,
+                    trades_b: row.get(16)?,
+                    trades_s: row.get(17)?,
+                    disb: row.get(18)?,
+                    pr_vwap_b: row.get(19)?,
+                    pr_vwap_s: row.get(20)?,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
+    fn insert_algo_futoi(
+        &mut self,
+        market: &str,
+        points: &[FutoiPoint],
+    ) -> Result<usize, StorageError> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO algo_futoi \
+                     (secid, ts, market, clgroup, pos, pos_long, pos_short, \
+                      pos_long_num, pos_short_num) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .map_err(db)?;
+            for p in points {
+                stmt.execute(params![
+                    p.secid,
+                    p.ts,
+                    market,
+                    p.clgroup.code(),
+                    p.pos,
+                    p.pos_long,
+                    p.pos_short,
+                    p.pos_long_num,
+                    p.pos_short_num,
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(points.len())
+    }
+
+    fn algo_futoi(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<FutoiPoint>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT secid, ts, clgroup, pos, pos_long, pos_short, \
+                 pos_long_num, pos_short_num \
+                 FROM algo_futoi \
+                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![market, secid, from_ts, to_ts], |row| {
+                let clgroup: String = row.get(2)?;
+                Ok(FutoiPoint {
+                    secid: row.get(0)?,
+                    ts: row.get(1)?,
+                    clgroup: ClientGroup::from_code(&clgroup).unwrap_or(ClientGroup::Fiz),
+                    pos: row.get(3)?,
+                    pos_long: row.get(4)?,
+                    pos_short: row.get(5)?,
+                    pos_long_num: row.get(6)?,
+                    pos_short_num: row.get(7)?,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
+    fn insert_algo_hi2(
+        &mut self,
+        market: &str,
+        points: &[Hi2Point],
+    ) -> Result<usize, StorageError> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO algo_hi2 (secid, ts, market, concentration) \
+                     VALUES (?, ?, ?, ?)",
+                )
+                .map_err(db)?;
+            for p in points {
+                stmt.execute(params![p.secid, p.ts, market, p.concentration])
+                    .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(points.len())
+    }
+
+    fn algo_hi2(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<Hi2Point>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT secid, ts, concentration FROM algo_hi2 \
+                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![market, secid, from_ts, to_ts], |row| {
+                Ok(Hi2Point {
+                    secid: row.get(0)?,
+                    ts: row.get(1)?,
+                    concentration: row.get(2)?,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
+    fn insert_algo_obstats(
+        &mut self,
+        records: &[AlgoObstatsRecord],
+    ) -> Result<usize, StorageError> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO algo_obstats \
+                     (secid, ts, market, spread_bbo, spread_lv10, levels_b, levels_s, \
+                      vol_b, vol_s, val_b, val_s, imbalance_vol_bbo, imbalance_val_bbo) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .map_err(db)?;
+            for r in records {
+                stmt.execute(params![
+                    r.secid,
+                    r.ts,
+                    r.market,
+                    r.spread_bbo,
+                    r.spread_lv10,
+                    r.levels_b,
+                    r.levels_s,
+                    r.vol_b,
+                    r.vol_s,
+                    r.val_b,
+                    r.val_s,
+                    r.imbalance_vol_bbo,
+                    r.imbalance_val_bbo,
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(records.len())
+    }
+
+    fn algo_obstats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<AlgoObstatsRecord>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT secid, ts, market, spread_bbo, spread_lv10, levels_b, levels_s, \
+                 vol_b, vol_s, val_b, val_s, imbalance_vol_bbo, imbalance_val_bbo \
+                 FROM algo_obstats \
+                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![market, secid, from_ts, to_ts], |row| {
+                Ok(AlgoObstatsRecord {
+                    secid: row.get(0)?,
+                    ts: row.get(1)?,
+                    market: row.get(2)?,
+                    spread_bbo: row.get(3)?,
+                    spread_lv10: row.get(4)?,
+                    levels_b: row.get(5)?,
+                    levels_s: row.get(6)?,
+                    vol_b: row.get(7)?,
+                    vol_s: row.get(8)?,
+                    val_b: row.get(9)?,
+                    val_s: row.get(10)?,
+                    imbalance_vol_bbo: row.get(11)?,
+                    imbalance_val_bbo: row.get(12)?,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
+    fn insert_algo_orderstats(
+        &mut self,
+        records: &[AlgoOrderstatsRecord],
+    ) -> Result<usize, StorageError> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO algo_orderstats \
+                     (secid, ts, market, put_orders_b, put_orders_s, put_val_b, put_val_s, \
+                      put_vol_b, put_vol_s, cancel_orders_b, cancel_orders_s, \
+                      cancel_val_b, cancel_val_s, cancel_vol_b, cancel_vol_s) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .map_err(db)?;
+            for r in records {
+                stmt.execute(params![
+                    r.secid,
+                    r.ts,
+                    r.market,
+                    r.put_orders_b,
+                    r.put_orders_s,
+                    r.put_val_b,
+                    r.put_val_s,
+                    r.put_vol_b,
+                    r.put_vol_s,
+                    r.cancel_orders_b,
+                    r.cancel_orders_s,
+                    r.cancel_val_b,
+                    r.cancel_val_s,
+                    r.cancel_vol_b,
+                    r.cancel_vol_s,
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(records.len())
+    }
+
+    fn algo_orderstats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<AlgoOrderstatsRecord>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT secid, ts, market, put_orders_b, put_orders_s, put_val_b, put_val_s, \
+                 put_vol_b, put_vol_s, cancel_orders_b, cancel_orders_s, \
+                 cancel_val_b, cancel_val_s, cancel_vol_b, cancel_vol_s \
+                 FROM algo_orderstats \
+                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![market, secid, from_ts, to_ts], |row| {
+                Ok(AlgoOrderstatsRecord {
+                    secid: row.get(0)?,
+                    ts: row.get(1)?,
+                    market: row.get(2)?,
+                    put_orders_b: row.get(3)?,
+                    put_orders_s: row.get(4)?,
+                    put_val_b: row.get(5)?,
+                    put_val_s: row.get(6)?,
+                    put_vol_b: row.get(7)?,
+                    put_vol_s: row.get(8)?,
+                    cancel_orders_b: row.get(9)?,
+                    cancel_orders_s: row.get(10)?,
+                    cancel_val_b: row.get(11)?,
+                    cancel_val_s: row.get(12)?,
+                    cancel_vol_b: row.get(13)?,
+                    cancel_vol_s: row.get(14)?,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
 }
 
 /// Текущее время в UNIX-секундах UTC (для `instruments.updated_at`).
@@ -462,5 +830,189 @@ mod tests {
         // окно усекает
         assert_eq!(s.trades("SBER@MISX", 2, 2).unwrap().len(), 2);
         assert!(s.trades("GAZP@MISX", 0, 9).unwrap().is_empty());
+    }
+
+    fn candle(ts: i64, secid: &str, close: f64) -> SuperCandle {
+        SuperCandle {
+            secid: secid.into(),
+            ts,
+            pr_open: close,
+            pr_high: close,
+            pr_low: close,
+            pr_close: close,
+            pr_std: 0.1,
+            vol: 100.0,
+            val: close * 100.0,
+            trades: 10.0,
+            pr_vwap: close,
+            pr_change: 0.0,
+            vol_b: 60.0,
+            vol_s: 40.0,
+            val_b: close * 60.0,
+            val_s: close * 40.0,
+            trades_b: 6.0,
+            trades_s: 4.0,
+            disb: 0.2,
+            pr_vwap_b: close,
+            pr_vwap_s: close,
+        }
+    }
+
+    #[test]
+    fn algo_tradestats_roundtrip_upserted_ordered_and_isolated_by_market() {
+        let mut s = store();
+        s.insert_algo_tradestats("fo", &[candle(3, "RIH5", 30.0), candle(1, "RIH5", 10.0)])
+            .unwrap();
+        s.insert_algo_tradestats("fo", &[candle(1, "RIH5", 99.0)])
+            .unwrap(); // перезапись ts=1
+
+        let got = s.algo_tradestats("fo", "RIH5", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].ts, 1);
+        assert!((got[0].pr_close - 99.0).abs() < 1e-9);
+        assert_eq!(got[1].ts, 3);
+        assert!(s.algo_tradestats("stock", "RIH5", 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn algo_futoi_roundtrip_dedup_by_clgroup() {
+        let mut s = store();
+        let p = |ts: i64, g: ClientGroup, long: f64, short: f64| FutoiPoint {
+            ts,
+            secid: "RIH5".into(),
+            clgroup: g,
+            pos: long + short,
+            pos_long: long,
+            pos_short: short,
+            pos_long_num: long / 10.0,
+            pos_short_num: short / 10.0,
+        };
+        s.insert_algo_futoi(
+            "fo",
+            &[
+                p(1, ClientGroup::Fiz, 100.0, 50.0),
+                p(1, ClientGroup::Yur, 200.0, 20.0),
+            ],
+        )
+        .unwrap();
+        s.insert_algo_futoi("fo", &[p(1, ClientGroup::Fiz, 999.0, 1.0)])
+            .unwrap(); // перезапись группы fiz
+
+        let got = s.algo_futoi("fo", "RIH5", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        let fiz = got.iter().find(|x| x.clgroup == ClientGroup::Fiz).unwrap();
+        assert!((fiz.pos_long - 999.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn algo_hi2_roundtrip_upserted() {
+        let mut s = store();
+        let p = |ts: i64, c: f64| Hi2Point {
+            ts,
+            secid: "SBER".into(),
+            concentration: c,
+        };
+        s.insert_algo_hi2("stock", &[p(1, 0.2), p(2, 0.3)]).unwrap();
+        s.insert_algo_hi2("stock", &[p(1, 0.9)]).unwrap();
+
+        let got = s.algo_hi2("stock", "SBER", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        assert!((got[0].concentration - 0.9).abs() < 1e-9);
+        assert!(s.algo_hi2("stock", "GAZP", 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn algo_obstats_and_orderstats_roundtrip_upserted() {
+        let mut s = store();
+        let ob = AlgoObstatsRecord {
+            secid: "SBER".into(),
+            ts: 1,
+            market: "stock".into(),
+            spread_bbo: 0.001,
+            spread_lv10: 0.002,
+            levels_b: 5.0,
+            levels_s: 5.0,
+            vol_b: 100.0,
+            vol_s: 90.0,
+            val_b: 1000.0,
+            val_s: 900.0,
+            imbalance_vol_bbo: 0.05,
+            imbalance_val_bbo: 0.04,
+        };
+        s.insert_algo_obstats(&[ob.clone()]).unwrap();
+        let mut ob2 = ob.clone();
+        ob2.spread_bbo = 0.5;
+        s.insert_algo_obstats(&[ob2]).unwrap(); // перезапись по (secid, ts, market)
+        let got = s.algo_obstats("stock", "SBER", 0, 9).unwrap();
+        assert_eq!(got.len(), 1);
+        assert!((got[0].spread_bbo - 0.5).abs() < 1e-9);
+
+        let os = AlgoOrderstatsRecord {
+            secid: "SBER".into(),
+            ts: 1,
+            market: "stock".into(),
+            put_orders_b: 5.0,
+            put_orders_s: 4.0,
+            put_val_b: 1000.0,
+            put_val_s: 900.0,
+            put_vol_b: 100.0,
+            put_vol_s: 90.0,
+            cancel_orders_b: 1.0,
+            cancel_orders_s: 1.0,
+            cancel_val_b: 100.0,
+            cancel_val_s: 90.0,
+            cancel_vol_b: 10.0,
+            cancel_vol_s: 9.0,
+        };
+        s.insert_algo_orderstats(&[os]).unwrap();
+        let got_os = s.algo_orderstats("stock", "SBER", 0, 9).unwrap();
+        assert_eq!(got_os.len(), 1);
+        assert!((got_os[0].put_orders_b - 5.0).abs() < 1e-9);
+        assert!(s.algo_orderstats("fo", "SBER", 0, 9).unwrap().is_empty());
+    }
+
+    /// Миграция v2→v3: создаём БД на старом наборе DDL (без algo_* таблиц) со
+    /// `schema_version=2`, затем прогоняем текущую [`Store::migrate`] — версия
+    /// должна подняться, а новые таблицы появиться, без потери старых данных.
+    #[test]
+    fn migration_v2_to_v3_adds_algo_tables_and_bumps_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Старый (v2) набор DDL: те же таблицы, что и в ALL_DDL до фазы 10.5.
+        conn.execute_batch(crate::schema::DDL_SCHEMA_VERSION)
+            .unwrap();
+        conn.execute_batch(crate::schema::DDL_INSTRUMENTS).unwrap();
+        conn.execute_batch(crate::schema::DDL_BARS).unwrap();
+        conn.execute_batch(crate::schema::DDL_TURNOVER_SNAPSHOTS)
+            .unwrap();
+        conn.execute_batch(crate::schema::DDL_TRADES).unwrap();
+        conn.execute_batch(crate::schema::DDL_SECTOR_MAP).unwrap();
+        conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO bars (symbol, timeframe, ts, open, high, low, close, volume) \
+             VALUES ('SBER@MISX', 'd1', 1, 10.0, 11.0, 9.0, 10.5, 100.0)",
+            [],
+        )
+        .unwrap();
+
+        let mut s = DuckStore { conn };
+        assert_eq!(s.schema_version().unwrap(), Some(2));
+        s.migrate().unwrap();
+        assert_eq!(s.schema_version().unwrap(), Some(SCHEMA_VERSION));
+        assert_eq!(SCHEMA_VERSION, 3);
+
+        // старые данные не потеряны
+        assert_eq!(s.bars("SBER@MISX", TimeFrame::D1, 0, 9).unwrap().len(), 1);
+        // новые таблицы созданы и рабочие
+        s.insert_algo_hi2(
+            "stock",
+            &[Hi2Point {
+                ts: 1,
+                secid: "SBER".into(),
+                concentration: 0.3,
+            }],
+        )
+        .unwrap();
+        assert_eq!(s.algo_hi2("stock", "SBER", 0, 9).unwrap().len(), 1);
     }
 }

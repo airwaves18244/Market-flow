@@ -9,11 +9,17 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 
 use crate::schema::SCHEMA_VERSION;
-use crate::store::{SectorEntry, Store, TurnoverSnapshot};
+use crate::store::{AlgoObstatsRecord, AlgoOrderstatsRecord, SectorEntry, Store, TurnoverSnapshot};
 use crate::StorageError;
+
+/// Ключ таблиц ALGOPACK в памяти: (рынок, SECID).
+type AlgoKey = (String, String);
+/// Точки FUTOI на момент `ts`, по группе клиентов (код `fiz`/`yur` → точка).
+type FutoiByGroup = HashMap<&'static str, FutoiPoint>;
 
 /// Хранилище в оперативной памяти.
 #[derive(Debug, Default)]
@@ -28,6 +34,16 @@ pub struct MemStore {
     /// append-only, поэтому внутри секунды держим `Vec`, а не перезапись.
     trades: HashMap<String, BTreeMap<i64, Vec<Trade>>>,
     sector_map: HashMap<String, SectorEntry>,
+    /// (market, secid) → (ts → свеча).
+    algo_tradestats: HashMap<AlgoKey, BTreeMap<i64, SuperCandle>>,
+    /// (market, secid) → (ts → (код группы клиентов → точка)).
+    algo_futoi: HashMap<AlgoKey, BTreeMap<i64, FutoiByGroup>>,
+    /// (market, secid) → (ts → точка).
+    algo_hi2: HashMap<AlgoKey, BTreeMap<i64, Hi2Point>>,
+    /// (market, secid) → (ts → запись).
+    algo_obstats: HashMap<AlgoKey, BTreeMap<i64, AlgoObstatsRecord>>,
+    /// (market, secid) → (ts → запись).
+    algo_orderstats: HashMap<AlgoKey, BTreeMap<i64, AlgoOrderstatsRecord>>,
 }
 
 impl MemStore {
@@ -151,11 +167,160 @@ impl Store for MemStore {
     fn sector_map(&self) -> Result<Vec<SectorEntry>, StorageError> {
         Ok(self.sector_map.values().cloned().collect())
     }
+
+    fn insert_algo_tradestats(
+        &mut self,
+        market: &str,
+        candles: &[SuperCandle],
+    ) -> Result<usize, StorageError> {
+        for c in candles {
+            self.algo_tradestats
+                .entry((market.to_string(), c.secid.clone()))
+                .or_default()
+                .insert(c.ts, c.clone());
+        }
+        Ok(candles.len())
+    }
+
+    fn algo_tradestats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<SuperCandle>, StorageError> {
+        Ok(self
+            .algo_tradestats
+            .get(&(market.to_string(), secid.to_string()))
+            .into_iter()
+            .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, c)| c.clone()))
+            .collect())
+    }
+
+    fn insert_algo_futoi(
+        &mut self,
+        market: &str,
+        points: &[FutoiPoint],
+    ) -> Result<usize, StorageError> {
+        for p in points {
+            self.algo_futoi
+                .entry((market.to_string(), p.secid.clone()))
+                .or_default()
+                .entry(p.ts)
+                .or_default()
+                .insert(p.clgroup.code(), p.clone());
+        }
+        Ok(points.len())
+    }
+
+    fn algo_futoi(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<FutoiPoint>, StorageError> {
+        Ok(self
+            .algo_futoi
+            .get(&(market.to_string(), secid.to_string()))
+            .into_iter()
+            .flat_map(|m| {
+                m.range(from_ts..=to_ts)
+                    .flat_map(|(_, groups)| groups.values().cloned())
+            })
+            .collect())
+    }
+
+    fn insert_algo_hi2(
+        &mut self,
+        market: &str,
+        points: &[Hi2Point],
+    ) -> Result<usize, StorageError> {
+        for p in points {
+            self.algo_hi2
+                .entry((market.to_string(), p.secid.clone()))
+                .or_default()
+                .insert(p.ts, p.clone());
+        }
+        Ok(points.len())
+    }
+
+    fn algo_hi2(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<Hi2Point>, StorageError> {
+        Ok(self
+            .algo_hi2
+            .get(&(market.to_string(), secid.to_string()))
+            .into_iter()
+            .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, p)| p.clone()))
+            .collect())
+    }
+
+    fn insert_algo_obstats(
+        &mut self,
+        records: &[AlgoObstatsRecord],
+    ) -> Result<usize, StorageError> {
+        for r in records {
+            self.algo_obstats
+                .entry((r.market.clone(), r.secid.clone()))
+                .or_default()
+                .insert(r.ts, r.clone());
+        }
+        Ok(records.len())
+    }
+
+    fn algo_obstats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<AlgoObstatsRecord>, StorageError> {
+        Ok(self
+            .algo_obstats
+            .get(&(market.to_string(), secid.to_string()))
+            .into_iter()
+            .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, r)| r.clone()))
+            .collect())
+    }
+
+    fn insert_algo_orderstats(
+        &mut self,
+        records: &[AlgoOrderstatsRecord],
+    ) -> Result<usize, StorageError> {
+        for r in records {
+            self.algo_orderstats
+                .entry((r.market.clone(), r.secid.clone()))
+                .or_default()
+                .insert(r.ts, r.clone());
+        }
+        Ok(records.len())
+    }
+
+    fn algo_orderstats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<AlgoOrderstatsRecord>, StorageError> {
+        Ok(self
+            .algo_orderstats
+            .get(&(market.to_string(), secid.to_string()))
+            .into_iter()
+            .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, r)| r.clone()))
+            .collect())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::algo::ClientGroup;
     use domain::AssetClass;
 
     fn bar(ts: i64, close: f64) -> Bar {
@@ -301,5 +466,178 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(s.sector_map().unwrap().len(), 2);
+    }
+
+    fn candle(ts: i64, secid: &str, close: f64) -> SuperCandle {
+        SuperCandle {
+            secid: secid.into(),
+            ts,
+            pr_open: close,
+            pr_high: close,
+            pr_low: close,
+            pr_close: close,
+            pr_std: 0.1,
+            vol: 100.0,
+            val: close * 100.0,
+            trades: 10.0,
+            pr_vwap: close,
+            pr_change: 0.0,
+            vol_b: 60.0,
+            vol_s: 40.0,
+            val_b: close * 60.0,
+            val_s: close * 40.0,
+            trades_b: 6.0,
+            trades_s: 4.0,
+            disb: 0.2,
+            pr_vwap_b: close,
+            pr_vwap_s: close,
+        }
+    }
+
+    #[test]
+    fn algo_tradestats_upsert_and_range_ordered() {
+        let mut s = MemStore::new();
+        s.insert_algo_tradestats("fo", &[candle(3, "RIH5", 30.0), candle(1, "RIH5", 10.0)])
+            .unwrap();
+        // повторная вставка с тем же (secid, ts, market) перезаписывает, не дублирует
+        s.insert_algo_tradestats("fo", &[candle(1, "RIH5", 99.0)])
+            .unwrap();
+
+        let got = s.algo_tradestats("fo", "RIH5", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].ts, 1);
+        assert!((got[0].pr_close - 99.0).abs() < 1e-12);
+        assert_eq!(got[1].ts, 3);
+        // изоляция по рынку
+        assert!(s.algo_tradestats("stock", "RIH5", 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn algo_tradestats_empty_range_is_empty() {
+        let s = MemStore::new();
+        assert!(s.algo_tradestats("fo", "GAZP", 0, 100).unwrap().is_empty());
+    }
+
+    fn futoi(ts: i64, secid: &str, group: ClientGroup, long: f64, short: f64) -> FutoiPoint {
+        FutoiPoint {
+            ts,
+            secid: secid.into(),
+            clgroup: group,
+            pos: long + short,
+            pos_long: long,
+            pos_short: short,
+            pos_long_num: long / 10.0,
+            pos_short_num: short / 10.0,
+        }
+    }
+
+    #[test]
+    fn algo_futoi_upsert_dedup_by_ts_market_clgroup() {
+        let mut s = MemStore::new();
+        s.insert_algo_futoi(
+            "fo",
+            &[
+                futoi(1, "RIH5", ClientGroup::Fiz, 100.0, 50.0),
+                futoi(1, "RIH5", ClientGroup::Yur, 200.0, 20.0),
+            ],
+        )
+        .unwrap();
+        // перезапись группы Fiz на той же ts — не дублирует
+        s.insert_algo_futoi("fo", &[futoi(1, "RIH5", ClientGroup::Fiz, 999.0, 1.0)])
+            .unwrap();
+
+        let got = s.algo_futoi("fo", "RIH5", 0, 9).unwrap();
+        assert_eq!(got.len(), 2); // одна строка на группу, без дублей
+        let fiz = got.iter().find(|p| p.clgroup == ClientGroup::Fiz).unwrap();
+        assert_eq!(fiz.pos_long, 999.0);
+    }
+
+    #[test]
+    fn algo_hi2_upsert_and_range() {
+        let mut s = MemStore::new();
+        let p = |ts: i64, c: f64| Hi2Point {
+            ts,
+            secid: "SBER".into(),
+            concentration: c,
+        };
+        s.insert_algo_hi2("stock", &[p(1, 0.2), p(2, 0.3)]).unwrap();
+        s.insert_algo_hi2("stock", &[p(1, 0.9)]).unwrap(); // перезапись ts=1
+
+        let got = s.algo_hi2("stock", "SBER", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        assert!((got[0].concentration - 0.9).abs() < 1e-12);
+        assert!(s.algo_hi2("stock", "GAZP", 0, 9).unwrap().is_empty());
+    }
+
+    fn obstats(ts: i64, secid: &str, market: &str, spread: f64) -> AlgoObstatsRecord {
+        AlgoObstatsRecord {
+            secid: secid.into(),
+            ts,
+            market: market.into(),
+            spread_bbo: spread,
+            spread_lv10: spread * 2.0,
+            levels_b: 5.0,
+            levels_s: 5.0,
+            vol_b: 100.0,
+            vol_s: 90.0,
+            val_b: 1000.0,
+            val_s: 900.0,
+            imbalance_vol_bbo: 0.05,
+            imbalance_val_bbo: 0.04,
+        }
+    }
+
+    #[test]
+    fn algo_obstats_upsert_and_range() {
+        let mut s = MemStore::new();
+        s.insert_algo_obstats(&[
+            obstats(1, "SBER", "stock", 0.001),
+            obstats(2, "SBER", "stock", 0.002),
+        ])
+        .unwrap();
+        s.insert_algo_obstats(&[obstats(1, "SBER", "stock", 0.5)])
+            .unwrap(); // перезапись ts=1
+
+        let got = s.algo_obstats("stock", "SBER", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        assert!((got[0].spread_bbo - 0.5).abs() < 1e-12);
+        assert!(s.algo_obstats("fo", "SBER", 0, 9).unwrap().is_empty());
+    }
+
+    fn orderstats(ts: i64, secid: &str, market: &str, put_b: f64) -> AlgoOrderstatsRecord {
+        AlgoOrderstatsRecord {
+            secid: secid.into(),
+            ts,
+            market: market.into(),
+            put_orders_b: put_b,
+            put_orders_s: 10.0,
+            put_val_b: 1000.0,
+            put_val_s: 900.0,
+            put_vol_b: 100.0,
+            put_vol_s: 90.0,
+            cancel_orders_b: 3.0,
+            cancel_orders_s: 2.0,
+            cancel_val_b: 300.0,
+            cancel_val_s: 200.0,
+            cancel_vol_b: 30.0,
+            cancel_vol_s: 20.0,
+        }
+    }
+
+    #[test]
+    fn algo_orderstats_upsert_and_range() {
+        let mut s = MemStore::new();
+        s.insert_algo_orderstats(&[
+            orderstats(1, "SBER", "stock", 5.0),
+            orderstats(2, "SBER", "stock", 6.0),
+        ])
+        .unwrap();
+        s.insert_algo_orderstats(&[orderstats(1, "SBER", "stock", 42.0)])
+            .unwrap(); // перезапись ts=1
+
+        let got = s.algo_orderstats("stock", "SBER", 0, 9).unwrap();
+        assert_eq!(got.len(), 2);
+        assert!((got[0].put_orders_b - 42.0).abs() < 1e-12);
+        assert!(s.algo_orderstats("fo", "SBER", 0, 9).unwrap().is_empty());
     }
 }
