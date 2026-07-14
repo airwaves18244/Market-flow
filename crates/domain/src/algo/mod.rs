@@ -14,16 +14,22 @@
 //!   buy-pressure, аномальный объём);
 //! - [`futoi`] — открытый интерес физ/юр и его динамика;
 //! - [`hi2`] — индекс концентрации участников;
-//! - [`mega_alerts`] — движок сигналов поверх tradestats/futoi/hi2.
+//! - [`obstats`] — статистика стакана (спред BBO, дисбаланс объёма/стоимости);
+//! - [`orderstats`] — статистика заявок (put/cancel по бид/аск-сторонам);
+//! - [`mega_alerts`] — движок сигналов поверх tradestats/futoi/hi2/obstats.
 
 pub mod futoi;
 pub mod hi2;
 pub mod mega_alerts;
+pub mod obstats;
+pub mod orderstats;
 pub mod tradestats;
 
 pub use futoi::{ClientGroup, FutoiPoint};
 pub use hi2::Hi2Point;
 pub use mega_alerts::{MegaAlert, MegaAlertEngine, MegaAlertKind, MegaThresholds};
+pub use obstats::ObstatsPoint;
+pub use orderstats::OrderstatsPoint;
 pub use tradestats::SuperCandle;
 
 /// z-score последнего значения относительно скользящего окна предыдущих

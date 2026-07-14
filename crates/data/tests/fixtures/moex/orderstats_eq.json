@@ -1,0 +1,48 @@
+{
+  "data": {
+    "columns": [
+      "secid",
+      "tradedate",
+      "tradetime",
+      "put_orders_b",
+      "put_orders_s",
+      "put_vol_b",
+      "put_vol_s",
+      "put_val_b",
+      "put_val_s",
+      "cancel_orders_b",
+      "cancel_orders_s",
+      "cancel_vol_b",
+      "cancel_vol_s",
+      "cancel_val_b",
+      "cancel_val_s",
+      "systime"
+    ],
+    "data": [
+      [
+        "SBER", "2024-01-15", "10:00:00",
+        4210, 3980,
+        612000, 588500,
+        162400000.0, 155600000.0,
+        3980, 3760,
+        541000, 519000,
+        143500000.0, 137300000.0,
+        "2024-01-15 10:05:01"
+      ],
+      [
+        "SBER", "2024-01-15", "10:05:00",
+        3900, 4055,
+        597000, 601200,
+        158600000.0, 159400000.0,
+        null, null,
+        null, null,
+        null, null,
+        "2024-01-15 10:10:02"
+      ]
+    ]
+  },
+  "data.cursor": {
+    "columns": ["INDEX", "TOTAL", "PAGESIZE"],
+    "data": [[0, 2, 100]]
+  }
+}
