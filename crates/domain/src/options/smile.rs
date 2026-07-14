@@ -69,22 +69,36 @@ pub trait SmileModel: Sized {
 // MOEX — биржевая параметрическая улыбка
 // ---------------------------------------------------------------------------
 
-/// MOEX-параметрическая улыбка: парабола по моней­ности с раздельными крыльями
-/// и насыщающим (tanh) демпфированием.
+/// MOEX-параметрическая улыбка: парабола по **стандартизованной** моней­ности с
+/// раздельными крыльями и насыщающим (tanh) демпфированием.
 ///
-/// `σ(k) = s0 + skew·k + c(k)·damp(k)²`, где `c = cl` при `k<0` (путовое
-/// крыло), `cr` при `k≥0` (колловое), `damp(k) = |tanh(k/wing)·wing|`.
+/// `σ(d) = s0 + skew·d + c(d)·damp(d)²`, где `d = ln(K/F)/(s0·√T)` —
+/// стандартизованная моней­ность (страйк в единицах `σ·√T`, «сколько сигм до
+/// страйка»), `c = cl` при `d<0` (путовое крыло), `cr` при `d≥0` (колловое),
+/// `damp(d) = tanh(d/wing)·wing`.
+///
+/// Нормировка на `s0·√T` даёт кривой **срочную структуру** («подъём крыльев» с
+/// приближением экспирации) и делает `skew`/крылья безразмерными и слабо
+/// зависящими от `T` — как в семействе кривых MOEX/НКЦ и модели Каленковича
+/// (см. `docs/options-smile-models.html`).
+///
+/// Верификация формы: конвенции ценообразования (Black-76/Bachelier, `r=0`,
+/// нормировка моней­ности по `σ·√T`, срочная структура/подъём крыльев) сверены
+/// по методике MOEX/НКЦ; точные коэффициенты биржевой кривой закрыты в деталях
+/// методики, поэтому конкретный демпфер крыльев (tanh) — модельный выбор
+/// (unverified), сохраняющий документированное качественное поведение
+/// (ограниченный, насыщающийся наклон крыльев).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MoexSmile {
     /// ATM-уровень волатильности.
     pub s0: f64,
-    /// Наклон (skew).
+    /// Наклон (skew) в единицах стандартизованной моней­ности.
     pub skew: f64,
-    /// Кривизна путового крыла (`k<0`).
+    /// Кривизна путового крыла (`d<0`).
     pub cl: f64,
-    /// Кривизна коллового крыла (`k≥0`).
+    /// Кривизна коллового крыла (`d≥0`).
     pub cr: f64,
-    /// Масштаб насыщения крыльев.
+    /// Масштаб насыщения крыльев (в единицах `σ·√T`).
     pub wing: f64,
 }
 
@@ -101,11 +115,18 @@ impl Default for MoexSmile {
 }
 
 impl SmileModel for MoexSmile {
-    fn iv(&self, strike: f64, forward: f64, _t: f64) -> f64 {
+    fn iv(&self, strike: f64, forward: f64, t: f64) -> f64 {
         let k = log_moneyness(strike, forward);
-        let c = if k < 0.0 { self.cl } else { self.cr };
-        let damp = (k / self.wing).tanh() * self.wing;
-        (self.s0 + self.skew * k + c * damp * damp).max(1e-6)
+        // Стандартизованная моней­ность в единицах σ·√T («сколько сигм до
+        // страйка»): даёт кривой срочную структуру и делает наклон/крылья
+        // безразмерными (методика MOEX/НКЦ, Каленкович).
+        let tt = if t <= 0.0 { 1e-9 } else { t };
+        let d = k / (self.s0 * tt.sqrt());
+        let c = if d < 0.0 { self.cl } else { self.cr };
+        // Насыщающее (tanh) демпфирование крыльев: на больших |d| кривизна
+        // ограничена и IV не «улетает».
+        let damp = (d / self.wing).tanh() * self.wing;
+        (self.s0 + self.skew * d + c * damp * damp).max(1e-6)
     }
 
     fn calibrate(points: &[SmilePoint], forward: f64, t: f64) -> Self {
@@ -546,6 +567,74 @@ mod tests {
         assert!(approx(up, dn, 1e-12));
         // Крылья выше ATM.
         assert!(up > m.iv(f, f, 0.25));
+    }
+
+    #[test]
+    fn moex_atm_equals_s0_any_maturity() {
+        // При K=F (d=0) улыбка возвращает ровно ATM-уровень s0 на любом сроке.
+        let m = MoexSmile::default();
+        let f = 100.0;
+        for &t in &[0.02, 0.25, 1.0, 3.0] {
+            assert!(approx(m.iv(f, f, t), m.s0, 1e-12), "t={t}");
+        }
+    }
+
+    #[test]
+    fn moex_wings_lift_as_expiry_approaches() {
+        // Срочная структура: на фиксированном страйке вне денег IV на крыле
+        // растёт с приближением экспирации (моней­ность нормирована на σ·√T,
+        // поэтому при малом T |d| больше и вклад крыла выше).
+        let m = MoexSmile {
+            s0: 0.30,
+            skew: 0.0,
+            cl: 0.8,
+            cr: 0.8,
+            wing: 0.6,
+        };
+        let f = 100.0;
+        let strike = f * 0.15_f64.exp(); // колловое крыло, k=+0.15
+        let long = m.iv(strike, f, 1.0);
+        let mid = m.iv(strike, f, 0.25);
+        let short = m.iv(strike, f, 0.05);
+        assert!(short > mid && mid > long, "{short} {mid} {long}");
+    }
+
+    #[test]
+    fn moex_skew_makes_puts_richer() {
+        // При skew<0 путовое крыло (k<0, d<0) дороже симметричного коллового.
+        let m = MoexSmile {
+            s0: 0.30,
+            skew: -0.05,
+            cl: 0.5,
+            cr: 0.5,
+            wing: 0.5,
+        };
+        let f = 100.0;
+        let put = m.iv(f * (-0.1_f64).exp(), f, 0.25);
+        let call = m.iv(f * 0.1_f64.exp(), f, 0.25);
+        assert!(put > call, "put {put} vs call {call}");
+    }
+
+    #[test]
+    fn moex_wings_rise_monotonically_from_atm() {
+        // Симметричные крылья без skew: IV монотонно растёт при удалении от ATM.
+        let m = MoexSmile {
+            s0: 0.30,
+            skew: 0.0,
+            cl: 0.6,
+            cr: 0.6,
+            wing: 0.8,
+        };
+        let (f, t) = (100.0, 0.25);
+        let mut prev = m.iv(f, f, t);
+        for i in 1..=6 {
+            let k = 0.05 * i as f64;
+            let up = m.iv(f * k.exp(), f, t);
+            let dn = m.iv(f * (-k).exp(), f, t);
+            assert!(approx(up, dn, 1e-12), "asymmetry at k={k}");
+            assert!(up > prev, "not monotone at k={k}: {up} <= {prev}");
+            prev = up;
+        }
     }
 
     #[test]
