@@ -385,6 +385,43 @@ export interface SmileModelDto {
   name: string;
 }
 
+// ── Фаза 12.4 — Опционная доска MOEX ─────────────────────────────────────────
+
+export interface OptionQuoteDto {
+  secid: string;
+  underlying: string;
+  /** Дата экспирации серии, unix-секунды UTC. */
+  expirationTs: number;
+  strike: number;
+  kind: OptionKind;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  iv: number | null;
+  oi: number | null;
+  theorPrice: number | null;
+}
+
+export interface OptionBoardInput {
+  /** Код базового актива (например, фьючерса). */
+  underlying: string;
+  /** Экспирация серии для точек улыбки; по умолчанию — ближайшая на доске. */
+  expirationTs?: number | null;
+  /** Форвард-фолбэк, если доска не определила цену базового актива. */
+  forwardHint?: number | null;
+  /** Время до экспирации в годах. */
+  t: number;
+  rate?: number | null;
+}
+
+export interface OptionBoardDto {
+  quotes: OptionQuoteDto[];
+  forward: number | null;
+  expirationTs: number | null;
+  /** Готовые рыночные точки улыбки (вход `smile_fit`). */
+  smilePoints: SmilePointInput[];
+}
+
 export interface StrategyLegInput {
   kind: LegKind;
   side: LegSide;

@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "moex")]
+use data::moex::OptionQuote;
 use domain::backtest::{
     BacktestConfig, BacktestReport, FillTiming, PerfMetrics, SimTrade, StrategyDescriptor,
 };
@@ -866,7 +868,12 @@ pub struct ImpliedVolDto {
 }
 
 /// Рыночная точка улыбки (вход калибровки).
-#[derive(Debug, Clone, Deserialize)]
+///
+/// `Serialize` нужен помимо `Deserialize` с фазы 12.4: [`OptionBoardDto`]
+/// отдаёт фронту уже готовые точки, построенные из опционной доски
+/// (`data::moex::board_to_smile_points`), тем же типом, что фронт потом
+/// передаёт обратно в `smile_fit`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmilePointInput {
     pub strike: f64,
@@ -997,6 +1004,87 @@ pub struct SmileModelDto {
     pub id: String,
     /// Человекочитаемое имя.
     pub name: String,
+}
+
+// ── Фаза 12.4 — Опционная доска MOEX (транспорт `data::moex`, фича `moex`) ───
+
+/// Одна котировка опционной доски для фронта.
+#[cfg(feature = "moex")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionQuoteDto {
+    pub secid: String,
+    pub underlying: String,
+    /// Дата экспирации серии, unix-секунды UTC.
+    pub expiration_ts: i64,
+    pub strike: f64,
+    /// `call|put`.
+    pub kind: String,
+    pub bid: Option<f64>,
+    pub ask: Option<f64>,
+    pub last: Option<f64>,
+    pub iv: Option<f64>,
+    pub oi: Option<f64>,
+    pub theor_price: Option<f64>,
+}
+
+#[cfg(feature = "moex")]
+impl From<&OptionQuote> for OptionQuoteDto {
+    fn from(q: &OptionQuote) -> Self {
+        Self {
+            secid: q.secid.clone(),
+            underlying: q.underlying.clone(),
+            expiration_ts: q.expiration_ts,
+            strike: q.strike,
+            kind: match q.kind {
+                OptionType::Call => "call".to_owned(),
+                OptionType::Put => "put".to_owned(),
+            },
+            bid: q.bid,
+            ask: q.ask,
+            last: q.last,
+            iv: q.iv,
+            oi: q.oi,
+            theor_price: q.theor_price,
+        }
+    }
+}
+
+/// Вход загрузки доски: базовый актив + параметры для маппинга в точки улыбки
+/// одной серии (см. `data::moex::board_to_smile_points`).
+#[cfg(feature = "moex")]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionBoardInput {
+    /// Код базового актива (ASSETCODE), например код фьючерса.
+    pub underlying: String,
+    /// Экспирация серии (unix-секунды), для которой строятся точки улыбки.
+    /// Если не задана — берётся ближайшая по времени серия на доске.
+    pub expiration_ts: Option<i64>,
+    /// Форвард — подставляется, если доска не смогла определить его сама
+    /// (см. `forward` в ответе); например, из настроек/ручного ввода.
+    pub forward_hint: Option<f64>,
+    /// Время до экспирации в годах (для IV-солвера и калибратора).
+    pub t: f64,
+    /// Ставка дисконта (по умолчанию 0 — MOEX-маржируемые).
+    pub rate: Option<f64>,
+}
+
+/// Опционная доска + форвард + уже готовые точки улыбки для калибратора.
+#[cfg(feature = "moex")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionBoardDto {
+    pub quotes: Vec<OptionQuoteDto>,
+    /// Форвард базового актива: из доски (цена фьючерса), либо `forwardHint`
+    /// входа, либо `null`, если ни то ни другое не доступно.
+    pub forward: Option<f64>,
+    /// Экспирация серии, по которой построены `smilePoints` (`null`, если
+    /// доска пуста и серию выбрать не из чего).
+    pub expiration_ts: Option<i64>,
+    /// Готовые рыночные точки улыбки (пусто, если не удалось определить
+    /// серию/форвард — тогда фронт может передать их вручную).
+    pub smile_points: Vec<SmilePointInput>,
 }
 
 // ── Фаза 10 — MOEX ALGO: Key Activity (ключевая активность) ──────────────────

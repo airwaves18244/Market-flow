@@ -21,8 +21,12 @@ import type {
   KeyActivityRuleDto,
   KeyActivitySampleInput,
   KeyActivitySummaryDto,
+  OptionBoardDto,
+  OptionBoardInput,
+  OptionKind,
   OptionPriceDto,
   OptionPriceInput,
+  OptionQuoteDto,
   OrderBookDto,
   OrderDto,
   OrderInput,
@@ -35,6 +39,7 @@ import type {
   SmileFitDto,
   SmileFitInput,
   SmileModelDto,
+  SmilePointInput,
   StrategyDescriptorDto,
   StrategyEvalDto,
   StrategyEvalInput,
@@ -709,6 +714,59 @@ const smileModels: SmileModelDto[] = [
   { id: "kalenkovich", name: "Каленкович" },
 ];
 
+// ── Фаза 12.4 — Опционная доска MOEX (детерминированная синтетика) ────────────
+// Зеркалит контракт `option_board` Rust-ядра: котировки одной серии вокруг
+// форварда + готовые точки улыбки. Без Math.random — тесты и UI стабильны.
+
+function mockOptionBoard(input: OptionBoardInput): OptionBoardDto {
+  const forward = input.forwardHint ?? basePrice(input.underlying);
+  const expirationTs =
+    input.expirationTs ?? Math.floor(Date.UTC(2026, 2, 20) / 1000); // фикс. серия
+  const t = input.t > 0 ? input.t : 30 / 365;
+  const quotes: OptionQuoteDto[] = [];
+  const smilePoints: SmilePointInput[] = [];
+  // Лог-моней­ности страйков и параметры демо-улыбки (skew + крылья).
+  const ks = [-0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15];
+  for (const k of ks) {
+    const strike = Number((forward * Math.exp(k)).toFixed(2));
+    const iv = Math.max(0.05, 0.3 - 0.15 * k + 0.9 * k * k);
+    const kind: OptionKind = k < 0 ? "put" : "call";
+    const theor = black76(forward, strike, t, iv, kind).price;
+    // OI-колокол вокруг ATM — вес точки для калибратора.
+    const oi = Math.round(1200 * Math.exp(-((k / 0.09) ** 2)));
+    quotes.push({
+      secid: `${input.underlying}-${strike}${kind === "call" ? "C" : "P"}`,
+      underlying: input.underlying,
+      expirationTs,
+      strike,
+      kind,
+      bid: Number((theor * 0.98).toFixed(4)),
+      ask: Number((theor * 1.02).toFixed(4)),
+      last: Number(theor.toFixed(4)),
+      iv,
+      oi,
+      theorPrice: Number(theor.toFixed(4)),
+    });
+    smilePoints.push({ strike, iv, weight: oi });
+  }
+  // Неликвидная строка: присутствует в котировках, но не в точках улыбки —
+  // как и в Rust-маппинге (`board_to_smile_points` отбрасывает без bid/ask/OI).
+  quotes.push({
+    secid: `${input.underlying}-FARC`,
+    underlying: input.underlying,
+    expirationTs,
+    strike: Number((forward * 1.25).toFixed(2)),
+    kind: "call",
+    bid: null,
+    ask: null,
+    last: null,
+    iv: null,
+    oi: null,
+    theorPrice: null,
+  });
+  return { quotes, forward, expirationTs, smilePoints };
+}
+
 // ── Фаза 10 — MOEX ALGO: Key Activity (упрощённые правила для мок-режима) ─────
 // Зеркалит доменный `default_rules()` достаточно, чтобы таблица «Ключевая
 // активность» и панель «ИТОГО» работали без бэкенда.
@@ -935,6 +993,8 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return mockSmileFit(args?.input as SmileFitInput) as unknown as T;
     case "strategy_eval":
       return mockStrategyEval(args?.input as StrategyEvalInput) as unknown as T;
+    case "option_board":
+      return mockOptionBoard(args?.input as OptionBoardInput) as unknown as T;
 
     // ── Фаза 10 / MOEX ALGO: Key Activity ───────────────────────────────────────
     case "key_activity": {

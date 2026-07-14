@@ -51,6 +51,10 @@ live = ["ingest", "data/grpc"]
 # Живой LLM-провайдер для ИИ-резюме Key Activity (фаза 10.4). Async-runtime
 # переиспользуется из фичи `ingest` (`dep:tokio` — та же опциональная зависимость).
 llm = ["data/llm", "dep:tokio"]
+# Опционная доска MOEX через публичный ISS (фаза 12.4): DTO/обработчик/команда
+# `option_board` существуют только с этой фичей (без неё — как без `llm`,
+# команда отсутствует). Async-runtime — тот же паттерн, что у `llm`.
+moex = ["data/moex", "dep:tokio"]
 # Боевой роутинг заявок (каркас): включает заглушку `data::FinamOrderRouter`.
 # По умолчанию торговля идёт через симулятор (`SimOrderRouter`).
 live-trading = ["data/live-trading"]

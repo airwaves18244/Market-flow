@@ -53,10 +53,13 @@ pub struct AppState {
     llm_cache: crate::llm::SummaryCache,
 }
 
-// В headless-live режиме (а также при сборке одной фичи `llm` без `tauri`)
-// IPC-read-методы (обработчики команд) не вызываются — их потребляет
+// В headless-live режиме (а также при сборке одной фичи `llm`/`moex` без
+// `tauri`) IPC-read-методы (обработчики команд) не вызываются — их потребляет
 // Tauri-UI и тесты. Глушим dead_code только для этих комбинаций.
-#[cfg_attr(any(feature = "live", feature = "llm"), allow(dead_code))]
+#[cfg_attr(
+    any(feature = "live", feature = "llm", feature = "moex"),
+    allow(dead_code)
+)]
 impl AppState {
     /// Создать состояние поверх произвольного бэкенда хранилища. Настройки
     /// резолвятся в стандартную ОС-директорию (см. [`SettingsStore::from_env`]);
@@ -342,6 +345,20 @@ impl AppState {
     /// Оценка опционной стратегии (payoff, греки, безубыток).
     pub fn strategy_eval(&self, input: &StrategyEvalInput) -> Result<StrategyEvalDto, String> {
         api::strategy_eval(input)
+    }
+
+    /// Опционная доска MOEX через публичный ISS (фаза 12.4, фича `moex`):
+    /// котировки + форвард + готовые точки улыбки для калибратора. Сетевой
+    /// вызов — метод асинхронный (как [`AppState::key_activity_summary_live`]),
+    /// чтобы не блокировать IPC-поток. Логика с выбором серии/форварда — в
+    /// [`api::option_board`], протестированном на фейковом источнике;
+    /// здесь только live-обёртка над публичным ISS.
+    #[cfg(feature = "moex")]
+    pub async fn option_board(
+        &self,
+        input: &crate::dto::OptionBoardInput,
+    ) -> Result<crate::dto::OptionBoardDto, String> {
+        api::option_board_live(input).await
     }
 
     // ── Фаза 10 — MOEX ALGO: Key Activity ─────────────────────────────────────
