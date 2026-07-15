@@ -908,6 +908,76 @@ pub fn strategy_eval(input: &StrategyEvalInput) -> Result<StrategyEvalDto, Strin
     })
 }
 
+// ── Фаза 12.4 — Опционная доска MOEX (фича `moex`) ────────────────────────────
+//
+// Без фичи `moex` этот раздел не компилируется вовсе — команда `option_board`
+// отсутствует в Tauri-сборке без неё (тот же приём, что у `llm`/
+// `key_activity_summary_live`, только здесь нет содержательного фолбэка без
+// сети: доска — сетевые данные по определению).
+
+#[cfg(feature = "moex")]
+use data::moex::{board_to_smile_points, MoexIss, OptionsSource};
+
+#[cfg(feature = "moex")]
+use crate::dto::{OptionBoardDto, OptionBoardInput, OptionQuoteDto, SmilePointInput};
+
+/// Загрузить опционную доску через произвольный источник ([`OptionsSource`])
+/// и построить точки улыбки для калибратора. Источник — параметр (не привязан
+/// к конкретному транспорту), поэтому функция тестируется на
+/// `data::moex::FakeOptionsSource` без сети; live-обёртка — [`option_board_live`].
+///
+/// Серия для точек улыбки — `input.expiration_ts`, либо (если не задана)
+/// ближайшая по времени экспирации серия, присутствующая на доске. Форвард —
+/// из снимка доски (цена фьючерса-андерлаинга), либо `input.forward_hint`,
+/// если доска его не определила. Без и того и другого точки улыбки не
+/// строятся (`smile_points` пуст, но котировки всё равно возвращаются).
+#[cfg(feature = "moex")]
+pub async fn option_board<S: OptionsSource>(
+    source: &S,
+    input: &OptionBoardInput,
+) -> Result<OptionBoardDto, String> {
+    let snapshot = source
+        .options_board(input.underlying.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let expiration_ts = input
+        .expiration_ts
+        .or_else(|| snapshot.quotes.iter().map(|q| q.expiration_ts).min());
+    let forward = snapshot.forward.or(input.forward_hint);
+    let rate = input.rate.unwrap_or(0.0);
+
+    let smile_points = match (expiration_ts, forward) {
+        (Some(exp), Some(fwd)) => board_to_smile_points(&snapshot.quotes, exp, fwd, input.t, rate)
+            .into_iter()
+            .map(|p| SmilePointInput {
+                strike: p.strike,
+                iv: p.iv,
+                weight: Some(p.weight),
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Ok(OptionBoardDto {
+        quotes: snapshot.quotes.iter().map(OptionQuoteDto::from).collect(),
+        forward,
+        expiration_ts,
+        smile_points,
+    })
+}
+
+/// Live-обёртка: строит `MoexIss<ReqwestTransport>` — публичный ISS
+/// (`iss.moex.com`), без авторизации, секрет не нужен — и вызывает
+/// [`option_board`]. Отдельная функция, чтобы конкретный тип транспорта не
+/// протекал в сигнатуру [`option_board`] (там нужен только дженерик-трейт).
+#[cfg(feature = "moex")]
+pub async fn option_board_live(input: &OptionBoardInput) -> Result<OptionBoardDto, String> {
+    let transport = data::ReqwestTransport::new().map_err(|e| e.to_string())?;
+    let client = MoexIss::new(transport);
+    option_board(&client, input).await
+}
+
 // ── Фаза 10 — MOEX ALGO: Key Activity (чистый движок правил) ─────────────────
 
 use domain::keyactivity::{default_rules, evaluate as ka_evaluate, prompt, Period, Rule, Sample};
@@ -1097,6 +1167,173 @@ pub fn history_plan(input: &HistoryPlanInput) -> Vec<TimeRangeDto> {
         .iter()
         .map(TimeRangeDto::from)
         .collect()
+}
+
+/// Превью загруженного датасета (11.4.4): последние `limit` баров ключа
+/// (source, secid, tf) из локального хранилища истории — для верификации
+/// свечами (`CandleChart`). Читает всё окно ключа и берёт хвост, чтобы график
+/// показывал самые свежие бары.
+pub fn history_preview(
+    store: &dyn Store,
+    source: domain::history::DataSource,
+    secid: &str,
+    tf: TimeFrame,
+    limit: usize,
+) -> Result<Vec<BarPoint>, StorageError> {
+    let bars = store.history_bars(source, secid, tf, i64::MIN, i64::MAX)?;
+    let start = bars.len().saturating_sub(limit.max(1));
+    Ok(bars[start..]
+        .iter()
+        .map(|b| BarPoint {
+            ts: b.ts,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+            volume: b.volume,
+        })
+        .collect())
+}
+
+// ── T11 — MOEX ALGO: датасеты ALGOPACK (чтение из storage T8) ────────────────
+
+use domain::algo::hi2::concentration_spikes;
+use domain::algo::mega_alerts::{MegaAlertEngine, MegaObservation, MegaThresholds};
+use domain::algo::tradestats::volume_zscore;
+
+use crate::dto::{FutoiDto, Hi2Dto, MegaAlertDto, TradestatsDto};
+
+/// Свечи Super Candles (датасет `tradestats`) инструмента `secid` на рынке
+/// `market` в `[from_ts, to_ts]`.
+pub fn algo_tradestats(
+    store: &dyn Store,
+    market: &str,
+    secid: &str,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<TradestatsDto>, StorageError> {
+    Ok(store
+        .algo_tradestats(market, secid, from_ts, to_ts)?
+        .iter()
+        .map(TradestatsDto::from)
+        .collect())
+}
+
+/// Точки FUTOI (датасет `futoi`, только рынок `fo`) инструмента `secid` в
+/// `[from_ts, to_ts]` (все группы клиентов).
+pub fn algo_futoi(
+    store: &dyn Store,
+    market: &str,
+    secid: &str,
+    from_ts: i64,
+    to_ts: i64,
+) -> Result<Vec<FutoiDto>, StorageError> {
+    Ok(store
+        .algo_futoi(market, secid, from_ts, to_ts)?
+        .iter()
+        .map(FutoiDto::from)
+        .collect())
+}
+
+/// Точки HI2 (датасет `hi2`) инструмента `secid` в `[from_ts, to_ts]` с
+/// проставленным флагом всплеска концентрации (z-score ≥ `threshold` по
+/// скользящему окну `window`, см. [`domain::algo::hi2::concentration_spikes`]).
+pub fn algo_hi2(
+    store: &dyn Store,
+    market: &str,
+    secid: &str,
+    from_ts: i64,
+    to_ts: i64,
+    window: usize,
+    threshold: f64,
+) -> Result<Vec<Hi2Dto>, StorageError> {
+    let points = store.algo_hi2(market, secid, from_ts, to_ts)?;
+    let spikes = concentration_spikes(&points, window, threshold);
+    Ok(points
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let mut dto = Hi2Dto::from(p);
+            dto.spike = spikes.contains(&i);
+            dto
+        })
+        .collect())
+}
+
+/// Прогнать движок Mega Alerts (10.2.8) по сохранённым датасетам ALGOPACK
+/// (`tradestats`/`hi2`/`obstats`/`futoi`) для каждого инструмента из `secids`
+/// в окне `[from_ts, to_ts]`.
+///
+/// Наблюдения по каждому инструменту собираются по меткам времени из всех
+/// доступных источников (z-score объёма — из `tradestats`, дисбаланс потока —
+/// оттуда же, концентрация — из `hi2`, спред BBO — из `obstats`, изменение
+/// нетто-OI между соседними точками — из `futoi`) и по возрастанию `ts`
+/// прогоняются через edge-triggered [`MegaAlertEngine`]. Отсутствие датасета
+/// для инструмента — не ошибка (соответствующие детекторы просто не
+/// срабатывают). Пороги — `thresholds` (`None` → значения по умолчанию).
+pub fn algo_mega_alerts(
+    store: &dyn Store,
+    market: &str,
+    secids: &[String],
+    from_ts: i64,
+    to_ts: i64,
+    thresholds: Option<MegaThresholds>,
+    vol_window: usize,
+) -> Result<Vec<MegaAlertDto>, StorageError> {
+    let mut engine = MegaAlertEngine::new(thresholds.unwrap_or_default());
+    let mut out = Vec::new();
+
+    for secid in secids {
+        let mut by_ts: BTreeMap<i64, MegaObservation> = BTreeMap::new();
+
+        let candles = store.algo_tradestats(market, secid, from_ts, to_ts)?;
+        for (i, c) in candles.iter().enumerate() {
+            let e = by_ts
+                .entry(c.ts)
+                .or_insert_with(|| MegaObservation::at(c.ts));
+            e.vol_z = volume_zscore(&candles, i, vol_window);
+            e.disb = Some(c.disb);
+        }
+
+        for p in store.algo_hi2(market, secid, from_ts, to_ts)? {
+            let e = by_ts
+                .entry(p.ts)
+                .or_insert_with(|| MegaObservation::at(p.ts));
+            e.hi2 = Some(p.concentration);
+        }
+
+        for r in store.algo_obstats(market, secid, from_ts, to_ts)? {
+            let e = by_ts
+                .entry(r.ts)
+                .or_insert_with(|| MegaObservation::at(r.ts));
+            e.spread = Some(r.spread_bbo);
+        }
+
+        // FUTOI хранит позиции по группам клиентов раздельно; суммируем нетто
+        // по всем группам на каждый ts и берём изменение между соседними
+        // точками серии (первая точка — без предыдущей, изменения не даёт).
+        let mut net_by_ts: BTreeMap<i64, f64> = BTreeMap::new();
+        for p in store.algo_futoi(market, secid, from_ts, to_ts)? {
+            *net_by_ts.entry(p.ts).or_insert(0.0) += p.net();
+        }
+        let mut prev_net: Option<f64> = None;
+        for (ts, net) in net_by_ts {
+            if let Some(pv) = prev_net {
+                let e = by_ts.entry(ts).or_insert_with(|| MegaObservation::at(ts));
+                e.oi_change = Some(net - pv);
+            }
+            prev_net = Some(net);
+        }
+
+        for (_, obs) in by_ts {
+            for alert in engine.observe(secid, &obs) {
+                out.push(MegaAlertDto::from(&alert));
+            }
+        }
+    }
+
+    out.sort_by_key(|a| a.ts);
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -1685,6 +1922,166 @@ mod tests {
         assert!(out.greeks.delta > 0.0);
     }
 
+    // ── Фаза 12.4 — Опционная доска MOEX (фича `moex`) ────────────────────────
+
+    #[cfg(feature = "moex")]
+    fn quote(
+        secid: &str,
+        strike: f64,
+        kind: domain::options::OptionType,
+        expiration_ts: i64,
+    ) -> data::moex::OptionQuote {
+        data::moex::OptionQuote {
+            secid: secid.to_owned(),
+            underlying: "RIH5".to_owned(),
+            expiration_ts,
+            strike,
+            kind,
+            bid: None,
+            ask: None,
+            last: None,
+            iv: None,
+            oi: None,
+            theor_price: None,
+        }
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_builds_smile_points_from_fake_source() {
+        use data::moex::{FakeOptionsSource, OptionsBoardSnapshot};
+        use domain::options::OptionType;
+
+        let mut itm = quote("A", 100.0, OptionType::Call, 1_000);
+        itm.bid = Some(4.0);
+        itm.ask = Some(5.0);
+        itm.iv = Some(0.3);
+        itm.oi = Some(50.0);
+
+        let mut illiquid = quote("B", 110.0, OptionType::Call, 1_000);
+        illiquid.iv = None; // ни bid/ask, ни oi — неликвид, должен отсеяться.
+
+        let fake = FakeOptionsSource {
+            options_board: Ok(OptionsBoardSnapshot {
+                quotes: vec![itm, illiquid],
+                forward: Some(100.0),
+            }),
+        };
+
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: None,
+                forward_hint: None,
+                t: 0.1,
+                rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.quotes.len(), 2);
+        assert_eq!(out.forward, Some(100.0));
+        assert_eq!(out.expiration_ts, Some(1_000));
+        // Неликвидная котировка отфильтрована маппингом в точки улыбки.
+        assert_eq!(out.smile_points.len(), 1);
+        assert!((out.smile_points[0].iv - 0.3).abs() < 1e-12);
+        assert_eq!(out.smile_points[0].weight, Some(50.0));
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_falls_back_to_forward_hint_without_board_forward() {
+        use data::moex::{FakeOptionsSource, OptionsBoardSnapshot};
+        use domain::options::OptionType;
+
+        let mut q = quote("A", 100.0, OptionType::Put, 2_000);
+        q.bid = Some(3.0);
+        q.ask = Some(3.5);
+        q.iv = Some(0.28);
+
+        let fake = FakeOptionsSource {
+            options_board: Ok(OptionsBoardSnapshot {
+                quotes: vec![q],
+                forward: None, // доска не смогла определить форвард.
+            }),
+        };
+
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: Some(2_000),
+                forward_hint: Some(99.0),
+                t: 0.2,
+                rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.forward, Some(99.0));
+        assert_eq!(out.smile_points.len(), 1);
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_without_forward_returns_quotes_but_no_smile_points() {
+        use data::moex::{FakeOptionsSource, OptionsBoardSnapshot};
+        use domain::options::OptionType;
+
+        let mut q = quote("A", 100.0, OptionType::Call, 3_000);
+        q.bid = Some(4.0);
+        q.ask = Some(5.0);
+        q.iv = Some(0.3);
+
+        let fake = FakeOptionsSource {
+            options_board: Ok(OptionsBoardSnapshot {
+                quotes: vec![q],
+                forward: None,
+            }),
+        };
+
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: None,
+                forward_hint: None,
+                t: 0.2,
+                rate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.quotes.len(), 1);
+        assert!(out.smile_points.is_empty());
+    }
+
+    #[cfg(feature = "moex")]
+    #[tokio::test]
+    async fn option_board_propagates_source_error() {
+        use data::moex::FakeOptionsSource;
+
+        let fake = FakeOptionsSource {
+            options_board: Err(data::DataError::Transport("недоступен".into())),
+        };
+        let out = option_board(
+            &fake,
+            &OptionBoardInput {
+                underlying: "RIH5".into(),
+                expiration_ts: None,
+                forward_hint: None,
+                t: 0.1,
+                rate: None,
+            },
+        )
+        .await;
+        assert!(out.is_err());
+    }
+
     // ── Фаза 10 — MOEX ALGO: Key Activity ─────────────────────────────────────
 
     #[test]
@@ -1891,5 +2288,184 @@ mod tests {
             requested_till: 90,
         });
         assert!(plan.is_empty());
+    }
+
+    // ── T11 — MOEX ALGO: датасеты ALGOPACK ──────────────────────────────────
+
+    use domain::algo::{ClientGroup, FutoiPoint, Hi2Point, SuperCandle};
+    use storage::store::AlgoObstatsRecord;
+
+    #[allow(clippy::too_many_arguments)]
+    fn algo_candle(secid: &str, ts: i64, close: f64, vol: f64, disb: f64) -> SuperCandle {
+        SuperCandle {
+            secid: secid.into(),
+            ts,
+            pr_open: close,
+            pr_high: close,
+            pr_low: close,
+            pr_close: close,
+            pr_std: 0.1,
+            vol,
+            val: close * vol,
+            trades: 10.0,
+            pr_vwap: close,
+            pr_change: 0.0,
+            vol_b: vol * (0.5 + disb / 2.0),
+            vol_s: vol * (0.5 - disb / 2.0),
+            val_b: close * vol * (0.5 + disb / 2.0),
+            val_s: close * vol * (0.5 - disb / 2.0),
+            trades_b: 5.0,
+            trades_s: 5.0,
+            disb,
+            pr_vwap_b: close,
+            pr_vwap_s: close,
+        }
+    }
+
+    fn algo_seeded() -> MemStore {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        let mut w = Writer::new(&mut store);
+        // Ненулевая дисперсия базового объёма, всплеск на последней свече.
+        let candles = [
+            algo_candle("SBER", 0, 100.0, 95.0, 0.05),
+            algo_candle("SBER", 300, 100.5, 105.0, 0.1),
+            algo_candle("SBER", 600, 101.0, 98.0, -0.05),
+            algo_candle("SBER", 900, 101.5, 102.0, 0.02),
+            algo_candle("SBER", 1200, 105.0, 500.0, 0.9), // всплеск объёма + перевес покупок
+        ];
+        w.algo_tradestats("stock", &candles).unwrap();
+        store
+    }
+
+    #[test]
+    fn algo_tradestats_maps_rows_and_buy_pressure() {
+        let store = algo_seeded();
+        let rows = algo_tradestats(&store, "stock", "SBER", 0, 9_999).unwrap();
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[0].secid, "SBER");
+        assert!(rows[4].buy_pressure > 0.9); // disb=0.9 → почти все покупки
+    }
+
+    #[test]
+    fn algo_futoi_maps_net_and_share() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        let mut w = Writer::new(&mut store);
+        let points = [FutoiPoint {
+            ts: 1,
+            secid: "RIH5".into(),
+            clgroup: ClientGroup::Yur,
+            pos: 1000.0,
+            pos_long: 800.0,
+            pos_short: 200.0,
+            pos_long_num: 80.0,
+            pos_short_num: 20.0,
+        }];
+        w.algo_futoi("fo", &points).unwrap();
+
+        let rows = algo_futoi(&store, "fo", "RIH5", 0, 9).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].clgroup, "yur");
+        assert_eq!(rows[0].net, 600.0);
+        assert!((rows[0].long_share - 0.8).abs() < 1e-12);
+    }
+
+    #[test]
+    fn algo_hi2_flags_spike_and_maps_level() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        let mut w = Writer::new(&mut store);
+        let points: Vec<Hi2Point> = [0.09, 0.11, 0.10, 0.10, 0.10, 0.60]
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| Hi2Point {
+                ts: i as i64 * 300,
+                secid: "SBER".into(),
+                concentration: c,
+            })
+            .collect();
+        w.algo_hi2("stock", &points).unwrap();
+
+        let rows = algo_hi2(&store, "stock", "SBER", 0, 9_999, 5, 3.0).unwrap();
+        assert_eq!(rows.len(), 6);
+        assert!(rows[5].spike, "последняя точка — всплеск концентрации");
+        assert!(!rows[0].spike);
+        assert_eq!(rows[5].level, "dominated");
+    }
+
+    #[test]
+    fn algo_mega_alerts_fires_from_combined_datasets() {
+        let store = algo_seeded();
+        let alerts =
+            algo_mega_alerts(&store, "stock", &["SBER".to_string()], 0, 9_999, None, 4).unwrap();
+        // Последняя свеча (ts=1200): всплеск объёма (vol 500 после базы ~95-105)
+        // и перевес покупок (disb=0.9 ≥ 0.5 по умолчанию) — оба фронтом.
+        assert!(alerts.iter().any(|a| a.kind == "volume_spike"));
+        assert!(alerts.iter().any(|a| a.kind == "buy_imbalance"));
+        assert!(alerts.iter().all(|a| a.secid == "SBER"));
+        // Отсортированы по возрастанию ts.
+        assert!(alerts.windows(2).all(|w| w[0].ts <= w[1].ts));
+    }
+
+    #[test]
+    fn algo_mega_alerts_combines_obstats_and_futoi_signals() {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        let mut w = Writer::new(&mut store);
+        w.algo_obstats(&[AlgoObstatsRecord {
+            secid: "RIH5".into(),
+            ts: 1,
+            market: "fo".into(),
+            spread_bbo: 0.02, // выше порога по умолчанию (0.01)
+            spread_lv10: 0.03,
+            levels_b: 5.0,
+            levels_s: 5.0,
+            vol_b: 100.0,
+            vol_s: 100.0,
+            val_b: 100.0,
+            val_s: 100.0,
+            imbalance_vol_bbo: 0.0,
+            imbalance_val_bbo: 0.0,
+        }])
+        .unwrap();
+        w.algo_futoi(
+            "fo",
+            &[
+                FutoiPoint {
+                    ts: 1,
+                    secid: "RIH5".into(),
+                    clgroup: ClientGroup::Fiz,
+                    pos: 100.0,
+                    pos_long: 50.0,
+                    pos_short: 50.0,
+                    pos_long_num: 5.0,
+                    pos_short_num: 5.0,
+                },
+                FutoiPoint {
+                    ts: 2,
+                    secid: "RIH5".into(),
+                    clgroup: ClientGroup::Fiz,
+                    pos: 3_000.0,
+                    pos_long: 2_900.0,
+                    pos_short: 100.0,
+                    pos_long_num: 90.0,
+                    pos_short_num: 5.0,
+                },
+            ],
+        )
+        .unwrap();
+
+        let alerts = algo_mega_alerts(&store, "fo", &["RIH5".to_string()], 0, 9, None, 20).unwrap();
+        assert!(alerts.iter().any(|a| a.kind == "spread_widening"));
+        assert!(alerts.iter().any(|a| a.kind == "oi_jump"));
+    }
+
+    #[test]
+    fn algo_mega_alerts_unknown_secid_is_empty() {
+        let store = algo_seeded();
+        let alerts =
+            algo_mega_alerts(&store, "stock", &["NOPE".to_string()], 0, 9_999, None, 4).unwrap();
+        assert!(alerts.is_empty());
     }
 }

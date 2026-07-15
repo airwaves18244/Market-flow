@@ -1,17 +1,27 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import * as echarts from "echarts";
+  import type { Hi2Dto } from "../types";
 
   // Концентрация рынка HI2 во времени (Фаза 10) с зонами «умеренная» /
-  // «доминирование» и пороговыми линиями.
-  let { times = [], vals = [] }: { times: string[]; vals: number[] } = $props();
+  // «доминирование» и пороговыми линиями. Данные — датасет ALGOPACK `hi2`
+  // (боевой IPC/мок, T11).
+  let { points = [] }: { points: Hi2Dto[] } = $props();
 
   let el: HTMLDivElement;
   let chart: echarts.ECharts | undefined;
   let ro: ResizeObserver | undefined;
 
+  function timeLabel(ts: number): string {
+    const d = new Date(ts * 1000);
+    return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  }
+
   function render() {
     if (!chart) return;
+    const sorted = [...points].sort((a, b) => a.ts - b.ts);
+    const times = sorted.map((p) => timeLabel(p.ts));
+    const vals = sorted.map((p) => p.concentration);
     const axis = {
       axisLine: { lineStyle: { color: "#1d2530" } },
       axisLabel: { color: "#8b98a9", fontSize: 10 },
@@ -66,8 +76,7 @@
   }
 
   $effect(() => {
-    void times;
-    void vals;
+    void points;
     render();
   });
 

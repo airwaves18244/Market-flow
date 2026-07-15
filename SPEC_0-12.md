@@ -1,34 +1,45 @@
 # SPEC 0–12 — спецификация Market Terminal с отметками выполнения
 
 Спецификация всех фаз проекта с фактическим статусом, **сверенным с кодом**
-(ревизия 2026-07-14). Карта высот — `ROADMAP.md`; задачи по невыполненному —
+(ревизия 2026-07-15). Карта высот — `ROADMAP.md`; задачи по невыполненному —
 `TASKS_list.md`.
 
 Легенда: `[x]` — сделано и проверено · `[~]` — частично · `[ ]` — не сделано.
 Идентификаторы задач фаз 10–12 (`10.1.2` и т.п.) стабильны — на них ссылаются
 `TASKS_list.md` и дизайн-бриф (`design/claude-design-brief.md`).
 
-## Снимок верификации (2026-07-14)
+## Снимок верификации (2026-07-15, после волн 1–4 TASKS_list)
 
-Проверено фактически в этой ревизии:
+Проверено фактически в этой ревизии (ветка PR #23):
 
-- `cargo test --workspace` — **255 тестов, зелёные** (без нативных фич);
-- `cargo test -p app --features ingest` — зелёные;
-- фронт: `vitest` — **26 тестов зелёные**;
-- IPC-контракт согласован end-to-end: **одни и те же 37 команд** в
-  `frontend/src/lib/mock.ts`, `frontend/src/lib/ipc.ts` и регистрации
-  `crates/app/src/tauri_app.rs`;
-- модули `data`: auth, backoff, classify, dotenv, endpoint, grpc, market,
-  orders, rate, secret, stream — **нет `moex`, `http`, `llm`** (фазы 10–12,
-  сетевой контур не начат);
-- `storage::schema` v2: `instruments`, `bars`, `turnover_snapshots`, `trades`,
-  `sector_map` — **нет таблиц ALGOPACK/истории/опционов**;
-- фронт: 8 вкладок (Обзор · Delta · Торговля · Бэктест · Данные · MOEX ALGO ·
-  Опционы · Настройки); модули Супер-свечи/FUTOI/HI2/Мега работают на
-  демо-генераторах `lib/algoMock.ts`, Key Activity — на боевом IPC;
-- настройки/правила Key Activity хранятся **только в localStorage**;
+- `cargo test --workspace` — **334 теста, зелёные** (без нативных фич);
+- фиче-комбо: `data` (`grpc,http,moex,llm,keyring`) — 141;
+  `app` (`moex,llm,ingest`) — 116; `storage --features duckdb` — 62
+  (вкл. миграции v2→v3→v4 и Parquet-roundtrip);
+- фронт: `svelte-check` 0 ошибок · `vitest` **41 тест** · `vite build` ок;
+- IPC-контракт согласован end-to-end: **одни и те же 49 команд** в
+  `frontend/src/lib/ipc.ts` и регистрации `crates/app/src/tauri_app.rs`,
+  все покрыты моком `mock.ts`;
+- модули `data`: + **`http`, `moex` (ALGOPACK + ISS-доска опционов), `llm`
+  (OpenRouter/OpenAI/Anthropic), `history` (HistorySource: Finam/MOEX)**;
+- `storage::schema` **v4**: + таблицы `algo_*` (5 датасетов ALGOPACK),
+  `history_bars`, `history_datasets`; Parquet экспорт/импорт (фича `duckdb`);
+- фронт: все модули MOEX ALGO (Супер-свечи/FUTOI/HI2/Мега) и Key Activity —
+  на типизированном IPC (`algoMock.ts` удалён); вкладка «Данные» — реальный
+  загрузчик с событиями `history:*` и превью датасета; улыбка опционов
+  умеет живую доску (`option_board`);
+- настройки/правила Key Activity персистятся в ядро (`settings.json` в
+  ОС-config-dir, атомарная запись) с миграцией из localStorage;
 - cargo-фичи: `grpc`, `keyring`, `duckdb`, `tauri`, `ingest`, `live`,
-  `live-trading` (заглушка роутера).
+  `live-trading` (заглушка), **`http`, `moex`, `llm`** (data),
+  **`moex`, `llm`** (app).
+
+⚠️ **(unverified)**: контракты ISS/ALGOPACK (имена блоков/колонок, пагинация,
+параметры) и точные коэффициенты биржевой улыбки MOEX построены по публичной
+документации на синтетических фикстурах — живой доступ к
+`apim.moex.com`/`iss.moex.com`/`fs.moex.com` закрыт egress-allowlist'ом.
+Процедура сверки живым ключом — `crates/data/tests/fixtures/moex/README.md`
+(задача T14).
 
 ---
 
@@ -152,17 +163,19 @@
 
 - [x] `S.1` Вкладочная навигация: `TabBar` + 8 вкладок, ленивая сборка чанков.
 - [x] `S.2.1` Секционные настройки UI (`lib/settings.ts`, миграция).
-- [~] `S.2.2` Секреты вне localStorage: резолвер env → `.env` → keyring есть,
-      UI хранит «секрет задан: да/нет»; **но правила Key Activity и настройки
-      паспорта живут только в localStorage** (нет персиста в ядро — см. 10.5.3).
+- [x] `S.2.2` Секреты вне localStorage: резолвер env → `.env` → keyring;
+      правила Key Activity и настройки персистятся в ядро (`app::settings`,
+      `settings.json` + атомарная запись; миграция из localStorage).
 - [ ] `S.3.1` Egress-allowlist: `apim.moex.com`, `iss.moex.com`,
       `data.moex.com`, LLM-хосты; документировать в README.
 - [x] `S.3.2` `.env.example`: ключ `MOEX_ALGO_API` с комментариями.
-- [ ] `S.4.1` Фича `http` в `data`: обёртка над `reqwest` (rustls, gzip),
-      тайм-ауты, повторы через `Backoff`, ошибки в `DataError`.
-- [ ] `S.4.2` Расширить `data::Method`: `MoexTradestats`, `MoexFutoi`,
-      `MoexHi2`, `MoexObstats`, `MoexOrderstats`, `MoexOptions`, `Llm`.
-- [ ] `S.4.3` Юнит-тесты HTTP-слоя на моках (URL, заголовки, ретраи, 4xx/5xx).
+- [x] `S.4.1` Фича `http` в `data`: `HttpTransport`/`ReqwestTransport`/`HttpClient`
+      (`get_json`/`post_json`), rustls+gzip, тайм-ауты, повторы через `Backoff`,
+      маппинг статусов в `DataError` (429/5xx ретраябельны).
+- [x] `S.4.2` `data::Method` расширен: `MoexTradestats`, `MoexFutoi`, `MoexHi2`,
+      `MoexObstats`, `MoexOrderstats`, `MoexCandles`, `MoexOptions`, `Llm`.
+- [x] `S.4.3` Юнит-тесты HTTP-слоя на фейк-транспорте (URL, заголовки, ретраи,
+      4xx/5xx, отсутствие утечки Authorization в Debug).
 
 ## Фаза 10 — MOEX ALGO 🟡
 
@@ -180,19 +193,21 @@
       (нужны боевой ключ + egress; дальше парсер тестируется офлайн).
 
 ### 10.1 — Транспорт MOEX (`data`, фича `moex`)
-- [ ] `10.1.1` Модуль `data::moex`: клиент `MoexAlgo` поверх `HttpClient`
-      с Bearer-заголовком.
-- [ ] `10.1.2` Методы `tradestats`/`orderstats`/`obstats`/`hi2`/`futoi`;
+- [x] `10.1.1` Модуль `data::moex`: клиент `MoexAlgo` поверх `HttpClient`
+      с Bearer-заголовком (токен не попадает в Debug/логи).
+- [x] `10.1.2` Методы `tradestats`/`orderstats`/`obstats`/`hi2`/`futoi`/`candles`;
       пагинация курсором, склейка страниц, лимит, ретраи.
-- [ ] `10.1.3` Парсер ISS JSON (`columns`+`data` → строки) — чистые функции
-      на фикстурах; мягкий маппинг полей (`Option`).
-- [ ] `10.1.4` Трейт `AlgoSource` + фейк для тестов оркестрации.
+- [x] `10.1.3` Парсер ISS JSON (`columns`+`data` → строки) — чистые функции
+      на фикстурах `(unverified)`; мягкий маппинг полей (`Option`), MSK→UTC.
+- [x] `10.1.4` Трейт `AlgoSource` + `FakeAlgoSource`; также `OptionsSource`
+      + фейк (доска опционов, фаза 12.4).
 
 ### 10.2 — Доменные модели и аналитика (`domain`) ✅ (кроме 10.2.4)
 - [x] `10.2.1` Типы Super Candles (`domain::algo::tradestats`).
 - [x] `10.2.2` Типы FUTOI (нетто, доли long/short, ΔOI).
 - [x] `10.2.3` Тип HI2 (Херфиндаль, интерпретация концентрации).
-- [ ] `10.2.4` Типы Order/OB-stats для Mega Alerts (спред BBO, imbalance).
+- [x] `10.2.4` Типы `ObstatsPoint`/`OrderstatsPoint` (спред BBO, imbalance,
+      put/cancel) — `Option`-мягкие, с тестами.
 - [x] `10.2.5` Аналитика Super Candles: агрегация TF, VWAP-полоса,
       buy-pressure, аномальный объём (z-score).
 - [x] `10.2.6` Аналитика FUTOI: динамика нетто, дивергенция, экстремумы.
@@ -208,56 +223,60 @@
 - [x] `10.3.6` Полное юнит-покрытие.
 
 ### 10.4 — LLM-итог
-- [ ] `10.4.1` Трейт `LlmProvider` + реализации OpenRouter (дефолт) /
-      Anthropic / OpenAI за фичей `llm`.
+- [x] `10.4.1` Трейт `LlmProvider` + реализации OpenRouter (дефолт) /
+      Anthropic / OpenAI за фичей `llm` (поверх `http`, `post_json`).
 - [x] `10.4.2` Сборка промпта (`domain::keyactivity::prompt`) — чистая,
       с лимитом токенов/усечением.
-- [ ] `10.4.3` Безопасность: ключ через резолвер, без логирования; тайм-аут,
-      ретраи, деградация в локальный свод (свод уже реализован).
-- [ ] `10.4.4` Кэш результата (хеш входа + модель) на время сессии.
+- [x] `10.4.3` Безопасность: ключ через резолвер (`OPENROUTER_API_KEY` и др.),
+      без логирования; тайм-аут 45с, ретраи, деградация в локальный свод
+      (`source: llm|local` в DTO).
+- [x] `10.4.4` Кэш результата (хеш входа + период + провайдер + модель) на
+      время сессии в `AppState`.
 
 ### 10.5 — Storage ALGOPACK
-- [ ] `10.5.1` Таблицы `algo_tradestats`/`algo_futoi`/`algo_hi2`/
-      `algo_obstats`/`algo_orderstats` (ключ secid+ts+market), схема v3.
-- [ ] `10.5.2` Writer'ы ингеста + дедуп.
-- [ ] `10.5.3` Персист правил Key Activity (таблица/файл — единый источник
-      истины с UI; сейчас только localStorage).
-- [ ] `10.5.4` Запросы чтения по тикеру/периоду/датасету.
+- [x] `10.5.1` Таблицы `algo_tradestats`/`algo_futoi`/`algo_hi2`/
+      `algo_obstats`/`algo_orderstats` (ключ secid+ts+market; futoi + clgroup),
+      схема v3, миграция v2→v3 с тестом.
+- [x] `10.5.2` Writer'ы ингеста + дедуп по ключам (MemStore + DuckStore).
+- [x] `10.5.3` Персист правил Key Activity: файл настроек `app::settings`
+      (валидация через доменные типы), UI мигрирует из localStorage.
+- [x] `10.5.4` Запросы чтения по тикеру/периоду/датасету (сортировка по ts).
 
 ### 10.6 — App/IPC
-- [~] `10.6.1` DTO: сделаны Key Activity (`KeyActivity*Dto`); остаются
-      `TradestatsDto`/`FutoiDto`/`Hi2Dto`/`MegaAlertDto`.
-- [~] `10.6.2` Обработчики: сделаны `key_activity`/`key_activity_summary`
-      (локальный свод)/`key_activity_rules`; остаются `algo_tradestats`/
-      `algo_futoi`/`algo_hi2`/`algo_mega_alerts` + LLM в summary.
+- [x] `10.6.1` DTO: `KeyActivity*Dto`, `TradestatsDto`/`FutoiDto`/`Hi2Dto`/
+      `MegaAlertDto`, `OptionQuoteDto`/`OptionBoardDto`.
+- [x] `10.6.2` Обработчики: `key_activity`/`key_activity_summary` (LLM при
+      наличии ключа, иначе локальный свод)/`key_activity_rules`,
+      `algo_tradestats`/`algo_futoi`/`algo_hi2`/`algo_mega_alerts` (чтение из
+      storage через аналитику `domain::algo`).
 - [x] `10.6.3` Tauri-команды для реализованных обработчиков.
-- [ ] `10.6.4` Ингест ALGOPACK в планировщик (`app::ingest`/`live`).
+- [x] `10.6.4` Ингест ALGOPACK: `app::algo_ingest::AlgoIngestService`
+      (батч/лимиты, тесты на FakeAlgoSource) + вход `live::run_algo`.
 - [x] `10.6.5` Мок-данные Key Activity в `frontend/src/lib/mock.ts`.
 
 ### 10.7 — Frontend: вкладка «MOEX ALGO»
 - [x] `10.7.1` `MoexAlgoTab` — тулбар (инструмент/период/рынок) + 5 модулей.
-- [~] `10.7.2` Супер-свечи (`SuperCandlesChart` + `DisbBars`) — свёрстано,
-      данные из демо-генератора `lib/algoMock.ts`.
-- [~] `10.7.3` FUTOI (`FutoiChart`) — свёрстано, данные из демо-генератора.
-- [~] `10.7.4` HI2 (`Hi2Chart`) — свёрстано, данные из демо-генератора.
-- [~] `10.7.5` Мега-алёрты — лента свёрстана, данные из демо-генератора.
+- [x] `10.7.2` Супер-свечи (`SuperCandlesChart` + `DisbBars`) — типизированный
+      IPC `algo_tradestats` (в браузере — мок-IPC; `algoMock.ts` удалён).
+- [x] `10.7.3` FUTOI (`FutoiChart`) — IPC `algo_futoi`.
+- [x] `10.7.4` HI2 (`Hi2Chart`) — IPC `algo_hi2`.
+- [x] `10.7.5` Мега-алёрты — IPC `algo_mega_alerts`.
 - [x] `10.7.6` `KeyActivityTable` — боевой IPC, периоды, фильтры.
 - [x] `10.7.7` `KeyActivitySummary` («ИТОГО») — боевой IPC, локальный свод.
 - [x] `10.7.8` Типы `lib/types.ts` + методы `lib/ipc.ts` для Key Activity.
 
 ### 10.8 — Настройки (раздел MOEX ALGO / Key Activity / LLM)
-- [~] `10.8.1` Паспорт/ALGOPACK: UI готов (статус секрета, рынки, вотчлист) —
-      персист только localStorage.
-- [~] `10.8.2` Конструктор правил Key Activity: UI готов (условия, связки,
-      импорт/экспорт JSON, засев из ядра) — персист только localStorage.
-- [~] `10.8.3` LLM-настройки: UI готов — реального LLM-вызова нет (10.4).
+- [x] `10.8.1` Паспорт/ALGOPACK: UI + персист в ядро через `app::settings`.
+- [x] `10.8.2` Конструктор правил Key Activity: UI + персист в ядро
+      (`key_activity_rules_set` с доменной валидацией).
+- [x] `10.8.3` LLM-настройки: UI + живой вызов провайдера (10.4).
 - [x] `10.8.4` Период анализа по умолчанию.
 
 ### 10.9 — Тесты/CI/доки
 - [x] `10.9.1` `domain`: аналитика, Mega Alerts, Key Activity, промпт.
-- [ ] `10.9.2` `data`: парсер ISS на фикстурах, оркестрация на фейке.
-- [~] `10.9.3` `app`: Key Activity покрыт; остальные обработчики — по мере
-      добавления.
+- [x] `10.9.2` `data`: парсер ISS на фикстурах `(unverified)`, оркестрация
+      на фейк-транспорте (пагинация, лимиты, заголовки).
+- [x] `10.9.3` `app`: Key Activity, algo_*, option_board, history — в тестах.
 - [x] `10.9.4` Документация синхронизирована (этот файл).
 
 ## Фаза 11 — Историзация 🟡
@@ -270,39 +289,45 @@
 - [x] `11.0.3` Семантика TF: `domain::TimeFrame` переиспользован.
 
 ### 11.1 — Абстракция источника истории (`data`)
-- [ ] `11.1.1` Трейт `HistorySource`:
-      `load(ticker, tf, from, till) -> Vec<HistoryBar>`.
-- [ ] `11.1.2` Адаптеры `FinamHistory` (gRPC bars + чанкинг) и `MoexHistory`
-      (ISS candles/tradestats → OHLCV+поля).
-- [ ] `11.1.3` Выбор источника из настроек; нормализация TS/TZ к UTC.
-- [ ] `11.1.4` Лимиты/ретраи через `RateLimiter`/`Backoff`.
+- [x] `11.1.1` Трейт `HistorySource`:
+      `load(ticker, tf, from, till) -> Vec<HistoryBar>` (`data::history`).
+- [x] `11.1.2` Адаптеры `FinamHistory` (gRPC bars + чанкинг, склейка/дедуп)
+      и `MoexHistory` (tradestats → OHLCV + vwap/disb); `FakeHistorySource`.
+- [x] `11.1.3` Выбор источника — параметр запроса; TS нормализованы к UTC.
+- [x] `11.1.4` Лимиты/ретраи наследуются от транспортов (gRPC/http).
 
 ### 11.2 — Локальное хранилище истории (`storage`)
 - [x] `11.2.1` Формат зафиксирован: DuckDB — основное хранилище, Parquet —
       экспорт (обоснование — в конце файла).
-- [ ] `11.2.2` Таблицы истории + идемпотентный upsert, дедуп по ключу
-      (source, secid, tf, ts); поднять `SCHEMA_VERSION`.
-- [ ] `11.2.3` Инкрементальная дозагрузка (расширить `plan_backfill` на
-      источник+TF).
-- [ ] `11.2.4` Персист `DatasetMeta`; список/размер/удаление/рефреш.
-- [ ] `11.2.5` Конфигурируемая директория данных (по умолчанию ОС data-dir).
-- [ ] `11.2.6` Экспорт в Parquet (`COPY ... TO ... (FORMAT PARQUET)`).
-- [ ] `11.2.7` Импорт/подключение Parquet (`read_parquet`).
+- [x] `11.2.2` Таблицы `history_bars`/`history_datasets` + идемпотентный
+      upsert, дедуп по ключу (source, secid, tf, ts); `SCHEMA_VERSION = 4`,
+      миграция v3→v4 с тестом.
+- [x] `11.2.3` Инкрементальная дозагрузка: `Store::history_missing_ranges`
+      поверх `domain::history::missing_ranges` (источник+TF).
+- [x] `11.2.4` Персист `DatasetMeta` (`history_datasets`): список/размер/
+      удаление/рефреш; каталог переживает переоткрытие БД.
+- [x] `11.2.5` Конфигурируемая директория данных (`storage::config`,
+      env-переопределение, по умолчанию ОС data-dir).
+- [x] `11.2.6` Экспорт в Parquet (`export_history_parquet`; расширение
+      parquet статически в bundled DuckDB — офлайн).
+- [x] `11.2.7` Импорт Parquet (`import_history_parquet`, roundtrip-тест).
 
 ### 11.3 — Загрузчик (`app`)
-- [ ] `11.3.1` Сервис `app::history`: загрузка под лимитом, каталог, прогресс.
-- [ ] `11.3.2` События `history:progress`/`history:done`/`history:error`.
-- [ ] `11.3.3` Параллелизм с уважением лимитов (очередь, отмена).
-- [~] `11.3.4` IPC: сделаны `history_datasets`/`history_delete`/`history_plan`
-      (каталог в `AppState`, DTO, Tauri, мок, тесты); остаются
-      `history_load`/`history_cancel`.
+- [x] `11.3.1` Сервис `app::history` (фича `ingest`): очередь (тикер×TF),
+      качает только дыры, пишет бары + каталог, колбэк прогресса.
+- [x] `11.3.2` События `history:progress`/`history:done`/`history:error`.
+- [x] `11.3.3` Очередь + кооперативная отмена (`history_cancel`, реестр
+      задач); ошибка одной задачи не роняет остальные.
+- [x] `11.3.4` IPC: `history_datasets`/`history_delete`/`history_plan`/
+      `history_load`/`history_cancel`/`history_preview` (DTO, Tauri, мок, тесты).
 
 ### 11.4 — Frontend: вкладка «Данные»
 - [x] `11.4.1` `HistoryTab`: источник, инструмент, мультиселект TF, диапазон,
       «Загрузить», прогресс (в мок-режиме — симуляция).
 - [x] `11.4.2` `DatasetManager`: таблица датасетов + удаление.
-- [~] `11.4.3` Типы/IPC готовы; подписки на `history:*` — с загрузчиком.
-- [ ] `11.4.4` Превью загруженного датасета (свечи).
+- [x] `11.4.3` Подписки на `history:*` в `HistoryTab` (реальный прогресс под
+      Tauri; в браузере — детерминированная симуляция мока).
+- [x] `11.4.4` Превью датасета свечами (`history_preview` + `CandleChart`).
 
 ### 11.5 — Контракт фида для бэктестера
 - [ ] `11.5.1` Расширить `ReplaySource`: мульти-TF, расширенные поля,
@@ -315,22 +340,25 @@
 
 ### 11.7 — Тесты/доки
 - [x] `11.7.1` `domain`: каталог/нормализация/план дозагрузки.
-- [ ] `11.7.2` `storage`: upsert/дедуп/планирование (MemStore + DuckDB).
-- [ ] `11.7.3` `app`: оркестрация загрузчика на фейках.
+- [x] `11.7.2` `storage`: upsert/дедуп/планирование/каталог/Parquet
+      (MemStore + DuckDB).
+- [x] `11.7.3` `app`: оркестрация загрузчика на `FakeHistorySource`
+      (дыры, монотонный прогресс, отмена, ошибки).
 - [x] `11.7.4` Документация синхронизирована (этот файл).
 
 ## Фаза 12 — Опционы 🟡
 
 ### 12.0 — Исследование и спецификация улыбки
-- [~] `12.0.1` Black-76 + Bachelier реализованы; сверка с официальной
-      «Методикой…» MOEX/НКЦ — не выполнена `(verify)`.
-- [~] `12.0.2` MOEX-параметрическая улыбка реализована (эвристическая форма);
-      выверка по методике — не выполнена `(verify)`.
+- [x] `12.0.1` Black-76 + Bachelier сверены с методикой MOEX/НКЦ (r=0 для
+      маржируемых) — совпали, изменений не потребовалось.
+- [~] `12.0.2` MOEX-улыбка приведена к документированной срочной структуре
+      (денежность σ·√T, подъём крыльев); точные коэффициенты биржевой формулы
+      дословно не сверены — первоисточники вне egress `(unverified)`.
 - [x] `12.0.3` SABR (Hagan): α, β, ρ, ν; вырожденные случаи.
 - [x] `12.0.4` SVI (raw): total variance, условия no-arbitrage.
 - [x] `12.0.5` Каленкович: уровень/наклон/кривизна/время.
-- [~] `12.0.6` `docs/options-smile-models.html` — первичная версия готова;
-      финализация после 12.0.2.
+- [x] `12.0.6` `docs/options-smile-models.html` финализирован (форма σ(d),
+      блок verified/unverified, ссылки на методики).
 
 ### 12.1 — Ядро ценообразования (`domain::options`) ✅
 - [x] `12.1.1` Black-76 (call/put, форвардная конвенция, `r`).
@@ -355,10 +383,12 @@
 - [x] `12.3.4` Профиль риска по диапазону; юнит-покрытие.
 
 ### 12.4 — Данные опционной доски (`data`, MOEX ISS)
-- [ ] `12.4.1` `(verify)` Загрузка доски (серии, страйки, bid/ask/last, IV,
-      OI, теорцена) через ISS поверх `data::moex`; фикстуры.
-- [ ] `12.4.2` Базовый актив/форвард; маппинг доски → точки улыбки.
-- [ ] `12.4.3` Трейт `OptionsSource` + фейк для тестов.
+- [x] `12.4.1` Загрузка доски (серии, страйки, bid/ask/last, IV, OI, теорцена)
+      через публичный ISS (`data::moex::options`, `MoexIss`); фикстуры
+      `(unverified)`, best-effort форвард с forts.
+- [x] `12.4.2` Базовый актив/форвард; маппинг доски → точки улыбки (IV из
+      доски или через IV-решатель, вес = OI, фильтрация неликвида).
+- [x] `12.4.3` Трейт `OptionsSource` + `FakeOptionsSource`.
 
 ### 12.5 — Storage
 - [ ] `12.5.1` Таблицы доски/снимков IV (опц. историзация улыбки).
@@ -367,9 +397,8 @@
 - [x] `12.6.1` DTO: `GreeksDto`, `OptionPrice*`, `ImpliedVol*`,
       `SmilePointInput`, `SmileFit*`, `StrategyLeg*`, `StrategyEval*`,
       `SmileModelDto`. `OptionQuoteDto` — с фазой 12.4.
-- [~] `12.6.2` Обработчики `option_price`/`option_implied_vol`/`smile_fit`/
-      `strategy_eval`/`list_smile_models` — готовы, в тестах.
-      `option_board` — с транспортом 12.4.
+- [x] `12.6.2` Обработчики `option_price`/`option_implied_vol`/`smile_fit`/
+      `strategy_eval`/`list_smile_models`/`option_board` — готовы, в тестах.
 
 ### 12.7 — Frontend: вкладка «Опционы»
 - [x] `12.7.1` `OptionsTab`: Калькулятор · Улыбка · Конструктор.
@@ -388,9 +417,10 @@
 
 ### 12.9 — Тесты/доки
 - [x] `12.9.1` `domain`: ценообразование/греки/IV/калибровка/стратегии.
-- [~] `12.9.2` `app`: обработчики опционов в тестах; `data`-парсинг доски —
-      с фазой 12.4.
-- [ ] `12.9.3` Финализация `docs/options-smile-models.html` по методике MOEX.
+- [x] `12.9.2` `app`: обработчики опционов в тестах; `data`: парсер доски на
+      фикстурах `(unverified)`.
+- [~] `12.9.3` Docs финализированы; остаток — дословная сверка коэффициентов
+      по методике при появлении egress (T14).
 
 ---
 

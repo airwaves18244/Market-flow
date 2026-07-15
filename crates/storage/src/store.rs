@@ -11,6 +11,7 @@
 //! приходят уже доменные типы.
 
 use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+use domain::history::{missing_ranges, Catalog, DataSource, DatasetMeta, HistoryBar, TimeRange};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 use serde::{Deserialize, Serialize};
 
@@ -265,6 +266,114 @@ pub trait Store {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<AlgoOrderstatsRecord>, StorageError>;
+
+    /// Вставить/обновить исторические бары (таблица `history_bars`).
+    /// Идемпотентно по ключу (source, secid, tf, ts): повторный ингест того же
+    /// бара перезаписывает строку, а не плодит дубли. Источник/тайм-фрейм берутся
+    /// из самих баров, поэтому один вызов может нести бары разных ключей.
+    /// Возвращает число обработанных строк.
+    fn insert_history_bars(&mut self, bars: &[HistoryBar]) -> Result<usize, StorageError>;
+
+    /// Исторические бары ключа (source, secid, tf) в `[from_ts, to_ts]`
+    /// (включительно), по возрастанию `ts`.
+    fn history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<HistoryBar>, StorageError>;
+
+    /// Время последнего сохранённого исторического бара ключа (для планирования
+    /// инкрементальной дозагрузки через [`crate::backfill::plan_backfill`]).
+    fn last_history_bar_ts(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<Option<i64>, StorageError>;
+
+    /// Удалить все исторические бары ключа (source, secid, tf). Возвращает число
+    /// удалённых строк. Каталог (`history_datasets`) не затрагивается — его
+    /// чистит вызывающий слой (см. [`remove_dataset`](Store::remove_dataset)).
+    fn delete_history_bars(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<usize, StorageError>;
+
+    /// Число исторических баров ключа (source, secid, tf) в `[from_ts, to_ts]`
+    /// (включительно) без их материализации — для пересчёта метаданных датасета.
+    fn count_history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<u64, StorageError>;
+
+    /// Вставить/обновить метаданные датасета в каталоге (`history_datasets`).
+    /// Идемпотентно по ключу (source, secid, tf) — строка перезаписывается
+    /// целиком. Слияние диапазонов (при необходимости) выполняет вызывающий слой
+    /// через [`domain::history::Catalog::upsert`].
+    fn upsert_dataset(&mut self, meta: &DatasetMeta) -> Result<(), StorageError>;
+
+    /// Все датасеты каталога (порядок не гарантируется).
+    fn datasets(&self) -> Result<Vec<DatasetMeta>, StorageError>;
+
+    /// Метаданные датасета по ключу (`None`, если датасета нет).
+    fn dataset(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<Option<DatasetMeta>, StorageError>;
+
+    /// Удалить датасет из каталога по ключу; `true`, если строка удалена.
+    /// Сами бары (`history_bars`) не затрагиваются — их чистит вызывающий слой,
+    /// если нужно.
+    fn remove_dataset(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<bool, StorageError>;
+
+    /// Собрать доменный каталог из строк `history_datasets`.
+    fn catalog(&self) -> Result<Catalog, StorageError> {
+        Ok(Catalog {
+            datasets: self.datasets()?,
+        })
+    }
+
+    /// Недостающие подсегменты `requested`, ещё не покрытые ключом
+    /// (source, secid, tf) — план инкрементальной дозагрузки. Покрытие считается
+    /// по фактическим барам (`history_bars`), а не по огибающему `range`
+    /// каталога: каждый сохранённый бар покрывает `[ts, ts + tf.seconds())`,
+    /// смежные бары сливаются, а внутренние дыры (несмежные догрузки) корректно
+    /// попадают в план. Дыры считает [`domain::history::missing_ranges`];
+    /// пустой результат — всё покрыто.
+    fn history_missing_ranges(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        requested: TimeRange,
+    ) -> Result<Vec<TimeRange>, StorageError> {
+        if requested.is_empty() {
+            return Ok(Vec::new());
+        }
+        let step = tf.seconds().max(1);
+        let covered: Vec<TimeRange> = self
+            .history_bars(source, secid, tf, requested.from, requested.till)?
+            .into_iter()
+            .map(|b| TimeRange::new(b.ts, b.ts + step))
+            .collect();
+        Ok(missing_ranges(requested, &covered))
+    }
 
     /// Все инструменты заданного класса активов.
     fn instruments_by_asset_class(

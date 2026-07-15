@@ -7,6 +7,10 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+#[cfg(feature = "moex")]
+use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+#[cfg(feature = "ingest")]
+use domain::history::HistoryBar;
 use domain::history::{Catalog, DataSource, DatasetMeta};
 #[cfg(feature = "ingest")]
 use domain::Bar;
@@ -21,13 +25,13 @@ use crate::api;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, DatasetIdInput, DatasetMetaDto, FlowEdgeDto,
-    FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
-    InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
-    KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderDto, OrderInput, PositionDto,
-    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SettingsDto,
-    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
-    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    FootprintBarDto, FutoiDto, FutureGroupDto, Hi2Dto, HistoryPlanInput, ImpliedVolDto,
+    ImpliedVolInput, InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
+    KeyActivitySummaryDto, MegaAlertDto, MegaThresholdsInput, OptionPriceDto, OptionPriceInput,
+    OrderDto, OrderInput, PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto,
+    SectorEntryDto, SectorRow, SettingsDto, SmileFitDto, SmileFitInput, SmileModelDto,
+    StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput, SubmitResultDto, TimeRangeDto,
+    TopMoverDto, TradestatsDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 use crate::settings::SettingsStore;
 use crate::trade::TradeSession;
@@ -51,24 +55,37 @@ pub struct AppState {
     #[cfg(feature = "llm")]
     #[allow(dead_code)]
     llm_cache: crate::llm::SummaryCache,
+    /// Реестр фоновых загрузок истории (T10, фаза 11.3): раздаёт `task_id` и
+    /// хранит флаги отмены, чтобы `history_cancel(taskId?)` мог остановить одну
+    /// загрузку или все. Живёт под фичей `ingest` (async-оркестрация).
+    #[cfg(feature = "ingest")]
+    history_tasks: crate::history::HistoryTasks,
 }
 
-// В headless-live режиме (а также при сборке одной фичи `llm` без `tauri`)
-// IPC-read-методы (обработчики команд) не вызываются — их потребляет
+// В headless-live режиме (а также при сборке одной фичи `llm`/`moex` без
+// `tauri`) IPC-read-методы (обработчики команд) не вызываются — их потребляет
 // Tauri-UI и тесты. Глушим dead_code только для этих комбинаций.
-#[cfg_attr(any(feature = "live", feature = "llm"), allow(dead_code))]
+#[cfg_attr(
+    any(feature = "live", feature = "llm", feature = "moex"),
+    allow(dead_code)
+)]
 impl AppState {
     /// Создать состояние поверх произвольного бэкенда хранилища. Настройки
     /// резолвятся в стандартную ОС-директорию (см. [`SettingsStore::from_env`]);
     /// для тестов/портейбл-режима используйте [`AppState::with_settings_dir`].
     pub fn new(store: impl Store + Send + 'static) -> Self {
+        // Гидратируем каталог из хранилища: после перезапуска поверх наполненного
+        // стора `history_datasets()` сразу видит реальные датасеты (фаза 11).
+        let history = store.catalog().unwrap_or_default();
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
-            history: Mutex::new(Catalog::new()),
+            history: Mutex::new(history),
             settings: Mutex::new(SettingsStore::from_env()),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "ingest")]
+            history_tasks: crate::history::HistoryTasks::default(),
         }
     }
 
@@ -78,13 +95,16 @@ impl AppState {
     /// консольный smoke использует [`AppState::new`], поэтому глушим dead_code.
     #[allow(dead_code)]
     pub fn with_settings_dir(store: impl Store + Send + 'static, settings_dir: PathBuf) -> Self {
+        let history = store.catalog().unwrap_or_default();
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
-            history: Mutex::new(Catalog::new()),
+            history: Mutex::new(history),
             settings: Mutex::new(SettingsStore::new(settings_dir)),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "ingest")]
+            history_tasks: crate::history::HistoryTasks::default(),
         }
     }
 
@@ -106,7 +126,7 @@ impl AppState {
     }
 
     /// Выполнить запись под блокировкой. Отравленный мьютекс → ошибка БД.
-    #[cfg(feature = "ingest")]
+    #[cfg(any(feature = "ingest", feature = "moex"))]
     fn write<F, R>(&self, f: F) -> Result<R, StorageError>
     where
         F: FnOnce(&mut dyn Store) -> Result<R, StorageError>,
@@ -344,6 +364,20 @@ impl AppState {
         api::strategy_eval(input)
     }
 
+    /// Опционная доска MOEX через публичный ISS (фаза 12.4, фича `moex`):
+    /// котировки + форвард + готовые точки улыбки для калибратора. Сетевой
+    /// вызов — метод асинхронный (как [`AppState::key_activity_summary_live`]),
+    /// чтобы не блокировать IPC-поток. Логика с выбором серии/форварда — в
+    /// [`api::option_board`], протестированном на фейковом источнике;
+    /// здесь только live-обёртка над публичным ISS.
+    #[cfg(feature = "moex")]
+    pub async fn option_board(
+        &self,
+        input: &crate::dto::OptionBoardInput,
+    ) -> Result<crate::dto::OptionBoardDto, String> {
+        api::option_board_live(input).await
+    }
+
     // ── Фаза 10 — MOEX ALGO: Key Activity ─────────────────────────────────────
 
     /// Ключевая активность за период по образцам метрик (встроенные правила).
@@ -385,6 +419,113 @@ impl AppState {
         api::key_activity_rules()
     }
 
+    // ── T11 — MOEX ALGO: датасеты ALGOPACK (чтение из storage T8) ──────────────
+
+    /// Размер скользящего окна z-score/спайков по умолчанию (в барах/точках) —
+    /// то же значение, что и в тестах `api::algo_*`.
+    const ALGO_WINDOW: usize = 20;
+    /// Порог z-score всплеска концентрации HI2 по умолчанию.
+    const ALGO_HI2_THRESHOLD: f64 = 3.0;
+
+    /// Свечи Super Candles (`tradestats`) инструмента `secid` на рынке `market`.
+    pub fn algo_tradestats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<TradestatsDto>, StorageError> {
+        self.read(|s| api::algo_tradestats(s, market, secid, from_ts, to_ts))
+    }
+
+    /// Точки FUTOI инструмента `secid` на рынке `market` (обычно `fo`).
+    pub fn algo_futoi(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<FutoiDto>, StorageError> {
+        self.read(|s| api::algo_futoi(s, market, secid, from_ts, to_ts))
+    }
+
+    /// Точки HI2 инструмента `secid` с проставленным флагом всплеска (окно/порог
+    /// по умолчанию, см. [`AppState::ALGO_WINDOW`]/[`AppState::ALGO_HI2_THRESHOLD`]).
+    pub fn algo_hi2(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<Hi2Dto>, StorageError> {
+        self.read(|s| {
+            api::algo_hi2(
+                s,
+                market,
+                secid,
+                from_ts,
+                to_ts,
+                Self::ALGO_WINDOW,
+                Self::ALGO_HI2_THRESHOLD,
+            )
+        })
+    }
+
+    /// Mega Alerts (10.2.8) по сохранённым датасетам ALGOPACK для `secids` на
+    /// рынке `market` в окне `[from_ts, to_ts]`. `thresholds` — `None` для
+    /// порогов по умолчанию.
+    pub fn algo_mega_alerts(
+        &self,
+        market: &str,
+        secids: &[String],
+        from_ts: i64,
+        to_ts: i64,
+        thresholds: Option<MegaThresholdsInput>,
+    ) -> Result<Vec<MegaAlertDto>, StorageError> {
+        self.read(|s| {
+            api::algo_mega_alerts(
+                s,
+                market,
+                secids,
+                from_ts,
+                to_ts,
+                thresholds.map(MegaThresholdsInput::to_thresholds),
+                Self::ALGO_WINDOW,
+            )
+        })
+    }
+
+    /// Записать свечи Super Candles (`tradestats`) для рынка `market`. Точка
+    /// входа планировщика ALGOPACK-ингеста ([`crate::ingest::algo`]).
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_tradestats(
+        &self,
+        market: &str,
+        candles: &[SuperCandle],
+    ) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_algo_tradestats(market, candles))
+    }
+
+    /// Записать точки FUTOI для рынка `market` (`fo`).
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_futoi(
+        &self,
+        market: &str,
+        points: &[FutoiPoint],
+    ) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_algo_futoi(market, points))
+    }
+
+    /// Записать точки HI2 для рынка `market`.
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_hi2(
+        &self,
+        market: &str,
+        points: &[Hi2Point],
+    ) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_algo_hi2(market, points))
+    }
+
     // ── Фаза 11 — Историзация: каталог локальных датасетов ────────────────────
 
     /// Список локальных датасетов истории (метаданные).
@@ -403,12 +544,30 @@ impl AppState {
         }
     }
 
-    /// Удалить датасет из каталога. `true` — если запись существовала.
+    /// Удалить датасет: из in-memory-каталога, из каталога хранилища и сами бары
+    /// (`history_bars`), чтобы после удаления не оставалось сирот. `true` — если
+    /// запись каталога существовала.
     pub fn history_delete(&self, input: &DatasetIdInput) -> Result<bool, String> {
         let source = DataSource::from_code(&input.source)
             .ok_or_else(|| format!("неизвестный источник: {}", input.source))?;
         let tf = TimeFrame::from_code(&input.tf)
             .ok_or_else(|| format!("неизвестный тайм-фрейм: {}", input.tf))?;
+        // Хранилище: снять датасет с каталога и стереть его бары. Локом стора
+        // владеем напрямую (метод компилируется во всех сборках, а хелпер
+        // `write` — только под `ingest`/`moex`).
+        {
+            let mut guard = self
+                .store
+                .lock()
+                .map_err(|_| "state lock poisoned".to_string())?;
+            let store = guard.as_mut();
+            store
+                .remove_dataset(source, &input.secid, tf)
+                .map_err(|e| e.to_string())?;
+            store
+                .delete_history_bars(source, &input.secid, tf)
+                .map_err(|e| e.to_string())?;
+        }
         let mut guard = self
             .history
             .lock()
@@ -419,6 +578,100 @@ impl AppState {
     /// План дозагрузки истории (недостающие диапазоны). Чистая обёртка.
     pub fn history_plan(&self, input: &HistoryPlanInput) -> Vec<TimeRangeDto> {
         api::history_plan(input)
+    }
+
+    /// Превью загруженного датасета (11.4.4): последние `limit` баров ключа
+    /// (source, secid, tf) из локального хранилища истории для отрисовки
+    /// свечами. Неизвестный код источника/тайм-фрейма — понятная ошибка.
+    pub fn history_preview(
+        &self,
+        source: &str,
+        secid: &str,
+        tf: &str,
+        limit: usize,
+    ) -> Result<Vec<BarPoint>, String> {
+        let src = DataSource::from_code(source)
+            .ok_or_else(|| format!("неизвестный источник: {source}"))?;
+        let timeframe =
+            TimeFrame::from_code(tf).ok_or_else(|| format!("неизвестный тайм-фрейм: {tf}"))?;
+        self.read(|s| api::history_preview(s, src, secid, timeframe, limit))
+            .map_err(|e| e.to_string())
+    }
+
+    // ── T10 — Историзация: загрузчик (async-оркестрация, фича `ingest`) ────────
+
+    /// Реестр фоновых загрузок (для запуска/отмены задач).
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn history_tasks(&self) -> &crate::history::HistoryTasks {
+        &self.history_tasks
+    }
+
+    /// Недостающие диапазоны ключа (source, secid, tf) в окне — план дыр
+    /// поверх каталога хранилища (`history_missing_ranges`).
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn history_missing(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        range: domain::history::TimeRange,
+    ) -> Result<Vec<domain::history::TimeRange>, StorageError> {
+        self.read(|s| s.history_missing_ranges(source, secid, tf, range))
+    }
+
+    /// Записать загруженные исторические бары (`history_bars`). Идемпотентно по
+    /// ключу — повторная запись не плодит дублей. Возвращает число строк.
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn ingest_history_bars(&self, bars: &[HistoryBar]) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_history_bars(bars))
+    }
+
+    /// Зафиксировать датасет в каталоге после записи баров: пересчитать
+    /// метаданные (диапазон/число баров) по фактическому содержимому стора и
+    /// обновить каталог хранилища (`upsert_dataset`) и in-memory-каталог,
+    /// который читает `history_datasets`. `covered` — обработанный на этом шаге
+    /// диапазон; он сливается с уже покрытым. Возвращает актуальные метаданные.
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn history_commit(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        covered: domain::history::TimeRange,
+    ) -> Result<DatasetMeta, StorageError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let meta = self.write(|s| {
+            // Расширить диапазон каталога до огибающей с уже покрытым — несмежные
+            // догрузки не теряются, внутренние дыры остаются на совести баров.
+            let merged = match s.dataset(source, secid, tf)? {
+                Some(existing) => existing.range.envelope(&covered),
+                None => covered,
+            };
+            // Пересчитать число баров по факту (в объединённом диапазоне).
+            let count = s.count_history_bars(source, secid, tf, merged.from, merged.till)?;
+            let meta = DatasetMeta {
+                source,
+                secid: secid.to_owned(),
+                tf,
+                range: merged,
+                bars: count,
+                updated_ts: now,
+            };
+            s.upsert_dataset(&meta)?;
+            Ok(meta)
+        })?;
+
+        // Зеркалим в in-memory-каталог, который читает `history_datasets`.
+        self.history_register(meta.clone());
+        Ok(meta)
     }
 
     // ── T3 — Персист настроек и правил Key Activity ────────────────────────────
@@ -511,6 +764,79 @@ mod tests {
             .unwrap();
         assert!(removed);
         assert!(state.history_datasets().is_empty());
+    }
+
+    #[test]
+    fn history_catalog_hydrates_from_store_on_construct() {
+        use domain::history::TimeRange;
+        // Наполняем стор напрямую, затем «перезапуск» — новый AppState поверх
+        // того же наполненного стора должен сразу видеть датасеты.
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .upsert_dataset(&DatasetMeta {
+                source: DataSource::Finam,
+                secid: "SBER".into(),
+                tf: TimeFrame::D1,
+                range: TimeRange::new(0, 86_400),
+                bars: 1,
+                updated_ts: 86_400,
+            })
+            .unwrap();
+
+        let state = AppState::new(store);
+        let ds = state.history_datasets();
+        assert_eq!(ds.len(), 1);
+        assert_eq!(ds[0].secid, "SBER");
+        assert_eq!(ds[0].source, "finam");
+    }
+
+    #[test]
+    fn history_delete_purges_catalog_and_bars() {
+        use domain::history::{HistoryBar, TimeRange};
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .insert_history_bars(&[HistoryBar::ohlcv(
+                DataSource::Finam,
+                "SBER",
+                TimeFrame::D1,
+                0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            )])
+            .unwrap();
+        store
+            .upsert_dataset(&DatasetMeta {
+                source: DataSource::Finam,
+                secid: "SBER".into(),
+                tf: TimeFrame::D1,
+                range: TimeRange::new(0, 86_400),
+                bars: 1,
+                updated_ts: 86_400,
+            })
+            .unwrap();
+
+        let state = AppState::new(store);
+        assert_eq!(state.history_datasets().len(), 1);
+
+        let removed = state
+            .history_delete(&DatasetIdInput {
+                source: "finam".into(),
+                secid: "SBER".into(),
+                tf: "d1".into(),
+            })
+            .unwrap();
+        assert!(removed);
+        // Каталог пуст и бары стёрты (нет сирот в хранилище).
+        assert!(state.history_datasets().is_empty());
+        let count = state
+            .read(|s| s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::D1, 0, i64::MAX))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     /// Изолированная временная директория для теста (не трогает реальный

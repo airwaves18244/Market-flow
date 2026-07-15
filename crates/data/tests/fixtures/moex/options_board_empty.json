@@ -1,0 +1,10 @@
+{
+  "securities": {
+    "columns": ["secid", "assetcode", "strike", "optiontype", "lasttradedate"],
+    "data": []
+  },
+  "marketdata": {
+    "columns": ["secid", "bid", "offer", "last", "iv", "openposition", "theorprice"],
+    "data": []
+  }
+}

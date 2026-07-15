@@ -14,6 +14,7 @@ use crate::http::HttpTransport;
 use crate::DataError;
 
 use super::client::{DateRange, Market, MoexAlgo};
+use super::options::{MoexIss, OptionsBoardSnapshot};
 
 /// Источник данных ALGOPACK: пять датасетов `10.0.1`. Тикер передаётся
 /// владеющей строкой (а не `&str`), чтобы сигнатура была совместима с
@@ -165,6 +166,46 @@ impl AlgoSource for FakeAlgoSource {
     }
 }
 
+/// Источник опционной доски (фаза 12.4, `12.4.3`): один метод — снимок доски
+/// по коду базового актива. Отдельный трейт от [`AlgoSource`], так как доска
+/// читается с другого хоста без авторизации ([`MoexIss`], не [`MoexAlgo`]).
+pub trait OptionsSource {
+    /// Доска опционов + best-effort форвард базового актива (см.
+    /// [`MoexIss::options_board_snapshot`]).
+    fn options_board(
+        &self,
+        underlying: String,
+    ) -> impl std::future::Future<Output = Result<OptionsBoardSnapshot, DataError>> + Send;
+}
+
+impl<T: HttpTransport + Send + Sync> OptionsSource for MoexIss<T> {
+    async fn options_board(&self, underlying: String) -> Result<OptionsBoardSnapshot, DataError> {
+        MoexIss::options_board_snapshot(self, &underlying).await
+    }
+}
+
+/// Фейковый источник опционной доски: заранее заданный результат, игнорируя
+/// параметры запроса. Для тестов оркестрации в `app` без сети.
+#[derive(Debug, Clone)]
+pub struct FakeOptionsSource {
+    pub options_board: Result<OptionsBoardSnapshot, DataError>,
+}
+
+impl Default for FakeOptionsSource {
+    /// Пустая (но успешная) доска без форварда.
+    fn default() -> Self {
+        Self {
+            options_board: Ok(OptionsBoardSnapshot::default()),
+        }
+    }
+}
+
+impl OptionsSource for FakeOptionsSource {
+    async fn options_board(&self, _underlying: String) -> Result<OptionsBoardSnapshot, DataError> {
+        self.options_board.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,4 +267,38 @@ mod tests {
 
     /// Контракт используется через дженерики (как `MarketData`), без `dyn`.
     fn _assert_generic_bound<S: AlgoSource>(_s: &S) {}
+
+    // ── FakeOptionsSource ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fake_options_source_default_is_empty_board_without_forward() {
+        let fake = FakeOptionsSource::default();
+        let snapshot = fake.options_board("RIH5".into()).await.unwrap();
+        assert!(snapshot.quotes.is_empty());
+        assert_eq!(snapshot.forward, None);
+    }
+
+    #[tokio::test]
+    async fn fake_options_source_returns_configured_snapshot_ignoring_underlying() {
+        let fake = FakeOptionsSource {
+            options_board: Ok(OptionsBoardSnapshot {
+                quotes: Vec::new(),
+                forward: Some(50_500.0),
+            }),
+        };
+        let snapshot = fake.options_board("ANYTHING".into()).await.unwrap();
+        assert_eq!(snapshot.forward, Some(50_500.0));
+    }
+
+    #[tokio::test]
+    async fn fake_options_source_can_simulate_errors() {
+        let fake = FakeOptionsSource {
+            options_board: Err(DataError::Transport("недоступен".into())),
+        };
+        let err = fake.options_board("RIH5".into()).await.unwrap_err();
+        assert!(matches!(err, DataError::Transport(_)));
+    }
+
+    /// Контракт используется через дженерики, без `dyn` (как [`AlgoSource`]).
+    fn _assert_options_generic_bound<S: OptionsSource>(_s: &S) {}
 }

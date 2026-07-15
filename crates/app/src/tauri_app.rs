@@ -8,7 +8,7 @@
 //! Модуль компилируется только в десктопном окружении (на Linux требуется
 //! webkit2gtk), поэтому он вне кросс-платформенного CI.
 
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use domain::backtest::StrategyParams;
 use domain::TimeFrame;
@@ -16,13 +16,14 @@ use domain::TimeFrame;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, DatasetIdInput, DatasetMetaDto, FillEventDto,
-    FlowEdgeDto, FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
-    InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
-    KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderBookDto, OrderDto, OrderInput,
-    PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    SettingsDto, SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
-    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    FlowEdgeDto, FootprintBarDto, FutoiDto, FutureGroupDto, Hi2Dto, HistoryPlanInput,
+    ImpliedVolDto, ImpliedVolInput, InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto,
+    KeyActivitySampleInput, KeyActivitySummaryDto, MegaAlertDto, MegaThresholdsInput,
+    OptionPriceDto, OptionPriceInput, OrderBookDto, OrderDto, OrderInput, PositionDto,
+    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SettingsDto,
+    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
+    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TradestatsDto,
+    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -238,6 +239,20 @@ fn strategy_eval(state: State<AppState>, input: StrategyEvalInput) -> CmdResult<
     state.strategy_eval(&input)
 }
 
+/// Опционная доска MOEX через публичный ISS (фаза 12.4). Существует только
+/// со включённой фичей `moex` (как `key_activity_summary` в live-варианте с
+/// `llm`, но без локального фолбэка: доска — сетевые данные по определению,
+/// без фичи команда отсутствует и фронт работает на мок-доске). Команда
+/// асинхронная, чтобы сетевой вызов не блокировал IPC-поток.
+#[cfg(feature = "moex")]
+#[tauri::command]
+async fn option_board(
+    state: State<'_, AppState>,
+    input: crate::dto::OptionBoardInput,
+) -> CmdResult<crate::dto::OptionBoardDto> {
+    state.option_board(&input).await
+}
+
 // ── Фаза 10 — MOEX ALGO: Key Activity ────────────────────────────────────────
 
 #[tauri::command]
@@ -282,6 +297,61 @@ fn key_activity_rules(state: State<AppState>) -> CmdResult<Vec<KeyActivityRuleDt
     Ok(state.key_activity_rules())
 }
 
+// ── T11 — MOEX ALGO: датасеты ALGOPACK (Super Candles/FUTOI/HI2/Mega Alerts) ─
+
+#[tauri::command]
+fn algo_tradestats(
+    state: State<AppState>,
+    market: String,
+    secid: String,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<TradestatsDto>> {
+    state
+        .algo_tradestats(&market, &secid, from_ts, to_ts)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn algo_futoi(
+    state: State<AppState>,
+    market: String,
+    secid: String,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<FutoiDto>> {
+    state
+        .algo_futoi(&market, &secid, from_ts, to_ts)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn algo_hi2(
+    state: State<AppState>,
+    market: String,
+    secid: String,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<Hi2Dto>> {
+    state
+        .algo_hi2(&market, &secid, from_ts, to_ts)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn algo_mega_alerts(
+    state: State<AppState>,
+    market: String,
+    secids: Vec<String>,
+    from_ts: i64,
+    to_ts: i64,
+    thresholds: Option<MegaThresholdsInput>,
+) -> CmdResult<Vec<MegaAlertDto>> {
+    state
+        .algo_mega_alerts(&market, &secids, from_ts, to_ts, thresholds)
+        .map_err(|e| e.to_string())
+}
+
 // ── T3 — Настройки и правила Key Activity (10.5.3/S.2.2/10.8.*/11.6.1/12.8.1) ─
 
 #[tauri::command]
@@ -322,6 +392,197 @@ fn history_delete(state: State<AppState>, id: DatasetIdInput) -> CmdResult<bool>
 #[tauri::command]
 fn history_plan(state: State<AppState>, input: HistoryPlanInput) -> CmdResult<Vec<TimeRangeDto>> {
     Ok(state.history_plan(&input))
+}
+
+/// Превью загруженного датасета (11.4.4): последние `limit` баров ключа
+/// (source, secid, tf) для верификации свечами (`CandleChart`).
+#[tauri::command]
+fn history_preview(
+    state: State<AppState>,
+    source: String,
+    secid: String,
+    tf: String,
+    limit: Option<usize>,
+) -> CmdResult<Vec<BarPoint>> {
+    state.history_preview(&source, &secid, &tf, limit.unwrap_or(500))
+}
+
+/// Перевести доменное событие загрузчика в live-push событие фронта
+/// (`history:progress|done|error`), по образцу [`emit_trade`].
+fn emit_history_event(app: &tauri::AppHandle, ev: crate::history::HistoryEvent) {
+    use crate::dto::{HistoryDoneDto, HistoryErrorDto, HistoryProgressDto};
+    use crate::history::HistoryEvent;
+
+    let result = match ev {
+        HistoryEvent::Progress {
+            task_id,
+            ticker,
+            tf,
+            percent,
+        } => app.emit(
+            "history:progress",
+            HistoryProgressDto {
+                task_id,
+                ticker,
+                tf: tf.code().to_owned(),
+                percent,
+            },
+        ),
+        HistoryEvent::Done {
+            task_id,
+            ticker,
+            tf,
+            bars,
+            summary,
+        } => app.emit(
+            "history:done",
+            HistoryDoneDto {
+                task_id,
+                ticker,
+                tf: tf.map(|t| t.code().to_owned()),
+                bars,
+                summary,
+            },
+        ),
+        HistoryEvent::Error {
+            task_id,
+            ticker,
+            tf,
+            message,
+        } => app.emit(
+            "history:error",
+            HistoryErrorDto {
+                task_id,
+                ticker,
+                tf: tf.map(|t| t.code().to_owned()),
+                message,
+            },
+        ),
+    };
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "не удалось отправить событие history:*");
+    }
+}
+
+/// Запустить фоновую загрузку истории (IPC `history_load`).
+///
+/// Регистрирует задачу в реестре, немедленно возвращает `taskId` и запускает
+/// загрузку в фоне (`tauri::async_runtime::spawn`): прогресс, завершение и
+/// ошибки идут только событиями `history:*`, команда не блокируется на всё
+/// время скачивания. Боевой источник строится по коду (`finam` — Finam Trade
+/// API, требует фичи `live`; `moex_algo` — ALGOPACK, требует фичи `moex`).
+/// Для `moex_algo` рынок берётся из `input.market` (`eq|fo|fx`, дефолт `eq`).
+/// Отмена — `history_cancel(taskId?)`; каждая пара `(тикер, TF)` качает только
+/// недостающие диапазоны, ошибка одной задачи не роняет остальные.
+#[tauri::command]
+async fn history_load(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    input: crate::dto::HistoryLoadInput,
+) -> CmdResult<crate::dto::HistoryTaskDto> {
+    use domain::history::DataSource;
+
+    // Разбор входа выполняем синхронно — ошибки ввода возвращаем сразу, до
+    // регистрации задачи и спавна.
+    let request = crate::history::parse_load_input(&input)?;
+    #[cfg(feature = "moex")]
+    let market = match input.market.as_deref() {
+        None | Some("") => data::moex::Market::Eq,
+        Some(code) => data::moex::Market::from_code(code)
+            .ok_or_else(|| format!("неизвестный рынок ALGOPACK: {code}"))?,
+    };
+
+    let (task_id, cancel) = state.history_tasks().start();
+
+    // Фоновый запуск: AppHandle клонируется в спавн, состояние достаём из него
+    // же (`app.state`) — `State<'_>` из аргументов в 'static-спавн не переносим.
+    let app_bg = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let emit = |ev| emit_history_event(&app_bg, ev);
+        let state = app_bg.state::<AppState>();
+        let state: &AppState = state.inner();
+
+        let outcome: Result<(), String> = match request.source {
+            DataSource::MoexAlgo => {
+                #[cfg(feature = "moex")]
+                {
+                    match std::env::var("MOEX_ALGOPACK_TOKEN") {
+                        Ok(token) => match data::ReqwestTransport::new() {
+                            Ok(transport) => {
+                                let client = data::MoexAlgo::new(transport, token);
+                                let source = data::MoexHistory::new(client, market);
+                                crate::history::run_load(
+                                    state, &source, &request, task_id, &cancel, &emit,
+                                )
+                                .await;
+                                Ok(())
+                            }
+                            Err(e) => Err(e.to_string()),
+                        },
+                        Err(_) => Err("токен ALGOPACK не задан (MOEX_ALGOPACK_TOKEN)".to_owned()),
+                    }
+                }
+                #[cfg(not(feature = "moex"))]
+                {
+                    Err(
+                        "источник MOEX ALGO недоступен в этой сборке (нужна фича `moex`)"
+                            .to_owned(),
+                    )
+                }
+            }
+            DataSource::Finam => {
+                #[cfg(feature = "live")]
+                {
+                    match crate::live::load_secret() {
+                        Ok(secret) => {
+                            let auth = data::AuthManager::new(
+                                data::GrpcAuthTransport::new(),
+                                data::MemSecretStore::with_secret(secret),
+                            );
+                            match data::FinamMarketData::connect(auth) {
+                                Ok(md) => {
+                                    let source = data::FinamHistory::new(md);
+                                    crate::history::run_load(
+                                        state, &source, &request, task_id, &cancel, &emit,
+                                    )
+                                    .await;
+                                    Ok(())
+                                }
+                                Err(e) => Err(e.to_string()),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                #[cfg(not(feature = "live"))]
+                {
+                    Err("источник Finam недоступен в этой сборке (нужна фича `live`)".to_owned())
+                }
+            }
+        };
+
+        // Ошибку старта/источника доносим до фронта событием (running на фронте
+        // живёт до `history:done`/`history:error`, а не до промиса команды).
+        if let Err(message) = outcome {
+            emit(crate::history::HistoryEvent::Error {
+                task_id,
+                ticker: None,
+                tf: None,
+                message,
+            });
+        }
+        state.history_tasks().finish(task_id);
+    });
+
+    Ok(crate::dto::HistoryTaskDto { task_id })
+}
+
+/// Отменить фоновую загрузку истории (IPC `history_cancel`): конкретную по
+/// `taskId` или все активные, если `taskId` не задан. Возвращает число
+/// затронутых задач.
+#[tauri::command]
+fn history_cancel(state: State<AppState>, task_id: Option<u64>) -> CmdResult<usize> {
+    Ok(state.history_tasks().cancel(task_id))
 }
 
 // ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
@@ -449,9 +710,15 @@ pub fn run() {
             option_implied_vol,
             smile_fit,
             strategy_eval,
+            #[cfg(feature = "moex")]
+            option_board,
             key_activity,
             key_activity_summary,
             key_activity_rules,
+            algo_tradestats,
+            algo_futoi,
+            algo_hi2,
+            algo_mega_alerts,
             settings_get,
             settings_set,
             key_activity_rules_get,
@@ -459,6 +726,9 @@ pub fn run() {
             history_datasets,
             history_delete,
             history_plan,
+            history_preview,
+            history_load,
+            history_cancel,
             submit_order,
             cancel_order,
             order_blotter,

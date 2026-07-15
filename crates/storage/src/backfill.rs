@@ -4,6 +4,7 @@
 //! *что именно* надо дозагрузить, и режут это на страницы под лимиты API
 //! (Finam отдаёт ограниченное число баров за запрос). Сам fetch — в `app`.
 
+use domain::history::{missing_ranges, TimeRange};
 use domain::TimeFrame;
 
 /// Диапазон времени для запроса баров, `[from_ts, to_ts]` включительно
@@ -76,6 +77,35 @@ pub fn chunk_range(range: FetchRange, tf: TimeFrame, max_bars: usize) -> Vec<Fet
         start = end + step;
     }
     out
+}
+
+/// План инкрементальной дозагрузки истории по измерениям источник+TF (фаза
+/// 11.2.3): по уже покрытым диапазонам (`covered`, из каталога
+/// `history_datasets`) и запросу `requested` вычислить недостающие куски
+/// ([`domain::history::missing_ranges`]) и нарезать каждый на страницы под
+/// лимит API (`max_bars` баров на запрос).
+///
+/// Диапазоны истории полуоткрыты `[from, till)`, а [`FetchRange`] включителен
+/// `[from_ts, to_ts]`, поэтому верхняя граница страницы — `till - 1` (последний
+/// бар строго до `till`). Страницы идут по возрастанию времени и не
+/// пересекаются; пустой результат — всё покрыто или запрос вырожден.
+pub fn plan_history_fetch(
+    covered: &[TimeRange],
+    requested: TimeRange,
+    tf: TimeFrame,
+    max_bars: usize,
+) -> Vec<FetchRange> {
+    missing_ranges(requested, covered)
+        .into_iter()
+        .filter(|gap| !gap.is_empty())
+        .flat_map(|gap| {
+            let range = FetchRange {
+                from_ts: gap.from,
+                to_ts: gap.till - 1,
+            };
+            chunk_range(range, tf, max_bars)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -176,6 +206,28 @@ mod tests {
             to_ts: DAY,
         };
         assert!(chunk_range(range, TimeFrame::D1, 0).is_empty());
+    }
+
+    #[test]
+    fn plan_history_fetch_covers_gaps_and_paginates() {
+        // Покрыто [0, 5*DAY); запрос [0, 10*DAY) → дыра [5*DAY, 10*DAY).
+        let covered = [TimeRange::new(0, 5 * DAY)];
+        let requested = TimeRange::new(0, 10 * DAY);
+        let pages = plan_history_fetch(&covered, requested, TimeFrame::D1, 3);
+        // Дыра включительно [5*DAY, 10*DAY - 1] = 5 баров по суткам → 3 + 2.
+        assert!(!pages.is_empty());
+        assert_eq!(pages.first().unwrap().from_ts, 5 * DAY);
+        // ни одна страница не выходит за верхнюю (полуоткрытую) границу
+        assert!(pages.iter().all(|p| p.to_ts < 10 * DAY));
+        let total: i64 = pages.iter().map(|p| p.bar_count(DAY)).sum();
+        assert_eq!(total, 5);
+    }
+
+    #[test]
+    fn plan_history_fetch_empty_when_covered() {
+        let covered = [TimeRange::new(0, 10 * DAY)];
+        let pages = plan_history_fetch(&covered, TimeRange::new(0, 10 * DAY), TimeFrame::D1, 5);
+        assert!(pages.is_empty());
     }
 
     #[test]

@@ -385,6 +385,43 @@ export interface SmileModelDto {
   name: string;
 }
 
+// ── Фаза 12.4 — Опционная доска MOEX ─────────────────────────────────────────
+
+export interface OptionQuoteDto {
+  secid: string;
+  underlying: string;
+  /** Дата экспирации серии, unix-секунды UTC. */
+  expirationTs: number;
+  strike: number;
+  kind: OptionKind;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  iv: number | null;
+  oi: number | null;
+  theorPrice: number | null;
+}
+
+export interface OptionBoardInput {
+  /** Код базового актива (например, фьючерса). */
+  underlying: string;
+  /** Экспирация серии для точек улыбки; по умолчанию — ближайшая на доске. */
+  expirationTs?: number | null;
+  /** Форвард-фолбэк, если доска не определила цену базового актива. */
+  forwardHint?: number | null;
+  /** Время до экспирации в годах. */
+  t: number;
+  rate?: number | null;
+}
+
+export interface OptionBoardDto {
+  quotes: OptionQuoteDto[];
+  forward: number | null;
+  expirationTs: number | null;
+  /** Готовые рыночные точки улыбки (вход `smile_fit`). */
+  smilePoints: SmilePointInput[];
+}
+
 export interface StrategyLegInput {
   kind: LegKind;
   side: LegSide;
@@ -494,6 +531,49 @@ export interface DatasetIdInput {
   tf: string;
 }
 
+// ── T10 — Историзация: загрузка (вход) и события хода (`history:*`) ───────────
+
+export interface HistoryLoadInput {
+  source: DataSource;
+  tickers: string[];
+  timeframes: string[];
+  /** Начало окна, unix-секунды (включительно). */
+  from: number;
+  /** Конец окна, unix-секунды (исключительно, полуоткрытый `[from, till)`). */
+  till: number;
+  /** Рынок ALGOPACK для `moex_algo` (`eq|fo|fx`, дефолт `eq`); для `finam` игнорируется. */
+  market?: AlgoMarket;
+}
+
+export interface HistoryTaskDto {
+  taskId: number;
+}
+
+/** Событие `history:progress`: прогресс задачи (тикер × ТФ), `0..=100`. */
+export interface HistoryProgressEvent {
+  taskId: number;
+  ticker: string;
+  tf: string;
+  percent: number;
+}
+
+/** Событие `history:done`: завершение задачи (`ticker` задан) или всей загрузки (`ticker` = null). */
+export interface HistoryDoneEvent {
+  taskId: number;
+  ticker: string | null;
+  tf: string | null;
+  bars: number;
+  summary: string;
+}
+
+/** Событие `history:error`: ошибка задачи (не прерывает остальные). */
+export interface HistoryErrorEvent {
+  taskId: number;
+  ticker: string | null;
+  tf: string | null;
+  message: string;
+}
+
 // ── T3 — Персист настроек и правил Key Activity в ядро ───────────────────────
 // (10.5.3 / S.2.2 / 10.8.* / 11.6.1 / 12.8.1)
 //
@@ -528,4 +608,89 @@ export interface SettingsDto {
   pricingModel: string;
   rate: number;
   defaultSmile: string;
+}
+
+// ── T11 — MOEX ALGO: датасеты ALGOPACK (Super Candles/FUTOI/HI2/Mega Alerts) ─
+
+/** Рынок ALGOPACK: `eq` (акции), `fo` (срочный), `fx` (валютный). */
+export type AlgoMarket = "eq" | "fo" | "fx";
+
+/** Свеча Super Candles (датасет `tradestats`) — зеркало `dto::TradestatsDto`. */
+export interface TradestatsDto {
+  secid: string;
+  ts: number;
+  prOpen: number;
+  prHigh: number;
+  prLow: number;
+  prClose: number;
+  prStd: number;
+  vol: number;
+  val: number;
+  trades: number;
+  prVwap: number;
+  prChange: number;
+  volB: number;
+  volS: number;
+  valB: number;
+  valS: number;
+  tradesB: number;
+  tradesS: number;
+  /** Дисбаланс потока (−1..1). */
+  disb: number;
+  prVwapB: number;
+  prVwapS: number;
+  /** Индекс агрессии покупателей (0..1). */
+  buyPressure: number;
+}
+
+/** Точка FUTOI (открытый интерес физ/юр лиц) — зеркало `dto::FutoiDto`. */
+export interface FutoiDto {
+  secid: string;
+  ts: number;
+  /** `fiz|yur`. */
+  clgroup: "fiz" | "yur";
+  pos: number;
+  posLong: number;
+  posShort: number;
+  posLongNum: number;
+  posShortNum: number;
+  net: number;
+  longShare: number;
+}
+
+/** Точка HI2 (индекс концентрации участников) — зеркало `dto::Hi2Dto`. */
+export interface Hi2Dto {
+  ts: number;
+  secid: string;
+  concentration: number;
+  /** `distributed|moderate|concentrated|dominated`. */
+  level: "distributed" | "moderate" | "concentrated" | "dominated";
+  spike: boolean;
+}
+
+/** Пороги детекторов Mega Alerts (вход IPC) — зеркало `dto::MegaThresholdsInput`. */
+export interface MegaThresholdsInput {
+  volZ?: number;
+  disb?: number;
+  spread?: number;
+  oiJump?: number;
+  hi2?: number;
+}
+
+/** Тип Mega-сигнала — коды `domain::algo::mega_alerts::MegaAlertKind`. */
+export type MegaAlertKind =
+  | "volume_spike"
+  | "buy_imbalance"
+  | "sell_imbalance"
+  | "spread_widening"
+  | "oi_jump"
+  | "concentration_rise";
+
+/** Сработавший Mega-сигнал — зеркало `dto::MegaAlertDto`. */
+export interface MegaAlertDto {
+  secid: string;
+  ts: number;
+  kind: MegaAlertKind;
+  value: number;
+  message: string;
 }

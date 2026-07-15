@@ -17,6 +17,7 @@ pub mod dotenv;
 pub mod endpoint;
 #[cfg(feature = "grpc")]
 pub mod grpc;
+pub mod history;
 #[cfg(feature = "http")]
 pub mod http;
 #[cfg(feature = "llm")]
@@ -37,6 +38,9 @@ pub use dotenv::{find_dotenv_secret, ENV_VAR as SECRET_ENV_VAR};
 pub use endpoint::Method;
 #[cfg(feature = "grpc")]
 pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
+#[cfg(feature = "moex")]
+pub use history::MoexHistory;
+pub use history::{FakeHistorySource, FinamHistory, HistorySource};
 #[cfg(feature = "http")]
 pub use http::{HttpClient, HttpResponse, HttpTransport, ReqwestTransport};
 #[cfg(feature = "llm")]
@@ -46,7 +50,10 @@ pub use llm::{
 #[cfg(feature = "grpc")]
 pub use market::FinamMarketData;
 #[cfg(feature = "moex")]
-pub use moex::{AlgoSource, DateRange, Market, MoexAlgo};
+pub use moex::{
+    AlgoSource, DateRange, FakeOptionsSource, Market, MoexAlgo, MoexIss, OptionQuote,
+    OptionsBoardSnapshot, OptionsSource,
+};
 #[cfg(feature = "live-trading")]
 pub use orders::FinamOrderRouter;
 pub use orders::{OrderRouter, RouterError, SimOrderRouter};

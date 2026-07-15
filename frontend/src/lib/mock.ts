@@ -13,7 +13,9 @@ import type {
   DatasetMetaDto,
   FlowEdgeDto,
   FootprintBarDto,
+  FutoiDto,
   FutureGroupDto,
+  Hi2Dto,
   ImpliedVolDto,
   ImpliedVolInput,
   InstrumentDto,
@@ -21,8 +23,14 @@ import type {
   KeyActivityRuleDto,
   KeyActivitySampleInput,
   KeyActivitySummaryDto,
+  MegaAlertDto,
+  MegaAlertKind,
+  OptionBoardDto,
+  OptionBoardInput,
+  OptionKind,
   OptionPriceDto,
   OptionPriceInput,
+  OptionQuoteDto,
   OrderBookDto,
   OrderDto,
   OrderInput,
@@ -35,6 +43,7 @@ import type {
   SmileFitDto,
   SmileFitInput,
   SmileModelDto,
+  SmilePointInput,
   StrategyDescriptorDto,
   StrategyEvalDto,
   StrategyEvalInput,
@@ -42,6 +51,7 @@ import type {
   TimeRangeDto,
   TopMoverDto,
   TradeDto,
+  TradestatsDto,
   TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
@@ -709,6 +719,59 @@ const smileModels: SmileModelDto[] = [
   { id: "kalenkovich", name: "Каленкович" },
 ];
 
+// ── Фаза 12.4 — Опционная доска MOEX (детерминированная синтетика) ────────────
+// Зеркалит контракт `option_board` Rust-ядра: котировки одной серии вокруг
+// форварда + готовые точки улыбки. Без Math.random — тесты и UI стабильны.
+
+function mockOptionBoard(input: OptionBoardInput): OptionBoardDto {
+  const forward = input.forwardHint ?? basePrice(input.underlying);
+  const expirationTs =
+    input.expirationTs ?? Math.floor(Date.UTC(2026, 2, 20) / 1000); // фикс. серия
+  const t = input.t > 0 ? input.t : 30 / 365;
+  const quotes: OptionQuoteDto[] = [];
+  const smilePoints: SmilePointInput[] = [];
+  // Лог-моней­ности страйков и параметры демо-улыбки (skew + крылья).
+  const ks = [-0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15];
+  for (const k of ks) {
+    const strike = Number((forward * Math.exp(k)).toFixed(2));
+    const iv = Math.max(0.05, 0.3 - 0.15 * k + 0.9 * k * k);
+    const kind: OptionKind = k < 0 ? "put" : "call";
+    const theor = black76(forward, strike, t, iv, kind).price;
+    // OI-колокол вокруг ATM — вес точки для калибратора.
+    const oi = Math.round(1200 * Math.exp(-((k / 0.09) ** 2)));
+    quotes.push({
+      secid: `${input.underlying}-${strike}${kind === "call" ? "C" : "P"}`,
+      underlying: input.underlying,
+      expirationTs,
+      strike,
+      kind,
+      bid: Number((theor * 0.98).toFixed(4)),
+      ask: Number((theor * 1.02).toFixed(4)),
+      last: Number(theor.toFixed(4)),
+      iv,
+      oi,
+      theorPrice: Number(theor.toFixed(4)),
+    });
+    smilePoints.push({ strike, iv, weight: oi });
+  }
+  // Неликвидная строка: присутствует в котировках, но не в точках улыбки —
+  // как и в Rust-маппинге (`board_to_smile_points` отбрасывает без bid/ask/OI).
+  quotes.push({
+    secid: `${input.underlying}-FARC`,
+    underlying: input.underlying,
+    expirationTs,
+    strike: Number((forward * 1.25).toFixed(2)),
+    kind: "call",
+    bid: null,
+    ask: null,
+    last: null,
+    iv: null,
+    oi: null,
+    theorPrice: null,
+  });
+  return { quotes, forward, expirationTs, smilePoints };
+}
+
 // ── Фаза 10 — MOEX ALGO: Key Activity (упрощённые правила для мок-режима) ─────
 // Зеркалит доменный `default_rules()` достаточно, чтобы таблица «Ключевая
 // активность» и панель «ИТОГО» работали без бэкенда.
@@ -774,6 +837,249 @@ function mockKeyActivitySummary(
   return { text, period, rowCount: rows.length, fallback: true, source: "local" };
 }
 
+// ── T11 — MOEX ALGO: датасеты ALGOPACK (мок IPC) ─────────────────────────────
+//
+// Перенесено из `algoMock.ts` (демо-генераторы вкладки «MOEX ALGO», Фаза 10):
+// генераторы теперь отдают DTO-совместимые структуры (camelCase, как из ядра)
+// через мок-команды `algo_tradestats`/`algo_futoi`/`algo_hi2`/`algo_mega_alerts`.
+// Детерминированный PRNG (FNV-hash + mulberry32) — воспроизводимые числа без
+// сети, как и у остальных генераторов этого файла.
+
+/** Якорь оси времени условной торговой сессии (unix-секунды UTC). */
+const ALGO_BASE_TS = 1_717_400_000;
+
+function algoHash(s: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function algoRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Инструмент вселенной вкладки «MOEX ALGO» (тулбар/пикер тикера). */
+export interface AlgoTicker {
+  ticker: string;
+  name: string;
+  sector: string;
+}
+
+const ALGO_UNIVERSE: AlgoTicker[] = [
+  { ticker: "SBER", name: "Сбербанк", sector: "Финансы" },
+  { ticker: "GAZP", name: "Газпром", sector: "Нефтегаз" },
+  { ticker: "LKOH", name: "Лукойл", sector: "Нефтегаз" },
+  { ticker: "GMKN", name: "ГМК Норникель", sector: "Металлургия" },
+  { ticker: "ROSN", name: "Роснефть", sector: "Нефтегаз" },
+  { ticker: "VTBR", name: "ВТБ", sector: "Финансы" },
+  { ticker: "YDEX", name: "Яндекс", sector: "IT" },
+  { ticker: "MGNT", name: "Магнит", sector: "Ритейл" },
+  { ticker: "NVTK", name: "Новатэк", sector: "Нефтегаз" },
+  { ticker: "TATN", name: "Татнефть", sector: "Нефтегаз" },
+  { ticker: "MOEX", name: "Мосбиржа", sector: "Финансы" },
+  { ticker: "PLZL", name: "Полюс", sector: "Металлургия" },
+];
+
+const ALGO_BASE_PRICE: Record<string, number> = {
+  SBER: 302.4,
+  GAZP: 128.6,
+  LKOH: 7120,
+  GMKN: 112.8,
+  ROSN: 565.2,
+  VTBR: 96.3,
+  YDEX: 4210,
+  MGNT: 6840,
+  NVTK: 1042,
+  TATN: 712.5,
+  MOEX: 198.4,
+  PLZL: 11840,
+};
+
+/** Вселенная тикеров вкладки «MOEX ALGO» (не IPC-команда — статический
+ * справочник для тулбара/пикера, как и остальной инструментарий этого файла). */
+export function algoTickers(): AlgoTicker[] {
+  return ALGO_UNIVERSE;
+}
+
+/** Свечи Super Candles (`algo_tradestats`): 78 пятиминуток условной сессии. */
+function algoCandles(secid: string): TradestatsDto[] {
+  const base = ALGO_BASE_PRICE[secid] ?? 100;
+  const r = algoRng(algoHash(secid) + 3);
+  let px = base;
+  let cumPv = 0;
+  let cumV = 0;
+  const out: TradestatsDto[] = [];
+  for (let i = 0; i < 78; i++) {
+    const drift = (r() - 0.48) * base * 0.0045;
+    const o = px;
+    const c = px + drift;
+    const h = Math.max(o, c) + r() * base * 0.0022;
+    const l = Math.min(o, c) - r() * base * 0.0022;
+    const anomalous = i % 17 === 5 || i % 23 === 3;
+    const vol = Math.round((1800 + r() * 6500) * (anomalous ? 3.4 : 1));
+    const val = vol * ((o + c) / 2);
+    cumPv += ((h + l + c) / 3) * vol;
+    cumV += vol;
+    const vwap = cumV > 0 ? cumPv / cumV : c;
+    const disb = Math.max(-1, Math.min(1, (r() - 0.5) * 2 + ((drift * 4) / base) * 100));
+    const volB = vol * (0.5 + disb / 2);
+    const volS = vol * (0.5 - disb / 2);
+    out.push({
+      secid,
+      ts: ALGO_BASE_TS + i * 300,
+      prOpen: o,
+      prHigh: h,
+      prLow: l,
+      prClose: c,
+      prStd: Math.abs(h - l) / 4,
+      vol,
+      val,
+      trades: Math.round(vol / 8),
+      prVwap: vwap,
+      prChange: o !== 0 ? (c - o) / o : 0,
+      volB,
+      volS,
+      valB: val * (vol > 0 ? volB / vol : 0.5),
+      valS: val * (vol > 0 ? volS / vol : 0.5),
+      tradesB: Math.round((vol / 8) * (vol > 0 ? volB / vol : 0.5)),
+      tradesS: Math.round((vol / 8) * (vol > 0 ? volS / vol : 0.5)),
+      disb,
+      prVwapB: vwap,
+      prVwapS: vwap,
+      buyPressure: vol > 0 ? volB / vol : 0.5,
+    });
+    px = c;
+  }
+  return out;
+}
+
+function algoFutoiPoint(
+  secid: string,
+  ts: number,
+  clgroup: "fiz" | "yur",
+  long: number,
+  short: number,
+): FutoiDto {
+  const total = long + short;
+  return {
+    secid,
+    ts,
+    clgroup,
+    pos: total,
+    posLong: long,
+    posShort: short,
+    posLongNum: long / 1000,
+    posShortNum: short / 1000,
+    net: long - short,
+    longShare: total > 0 ? long / total : 0.5,
+  };
+}
+
+/** Точки FUTOI (`algo_futoi`): 8 часовых отметок × 2 группы (физ/юр). */
+function algoFutoi(secid: string): FutoiDto[] {
+  const r = algoRng(algoHash(secid) + 55);
+  const out: FutoiDto[] = [];
+  for (let h = 0; h < 8; h++) {
+    const ts = ALGO_BASE_TS + h * 3600;
+    out.push(
+      algoFutoiPoint(secid, ts, "fiz", Math.round(120 + r() * 40) * 1000, Math.round(150 + r() * 40) * 1000),
+    );
+    out.push(
+      algoFutoiPoint(secid, ts, "yur", Math.round(180 + r() * 40) * 1000, Math.round(140 + r() * 40) * 1000),
+    );
+  }
+  return out;
+}
+
+/** Уровень концентрации по порогам — как `domain::algo::hi2::ConcentrationLevel`. */
+function algoHi2Level(c: number): Hi2Dto["level"] {
+  if (c >= 0.5) return "dominated";
+  if (c >= 0.25) return "concentrated";
+  if (c >= 0.15) return "moderate";
+  return "distributed";
+}
+
+/** Точки HI2 (`algo_hi2`): 48 десятиминуток условной сессии. */
+function algoHi2(secid: string): Hi2Dto[] {
+  const r = algoRng(algoHash(secid) + 88);
+  let x = 0.2;
+  const out: Hi2Dto[] = [];
+  for (let i = 0; i < 48; i++) {
+    x = Math.max(0.05, Math.min(0.5, x + (r() - 0.5) * 0.05));
+    const concentration = +x.toFixed(3);
+    out.push({
+      ts: ALGO_BASE_TS + i * 600,
+      secid,
+      concentration,
+      level: algoHi2Level(concentration),
+      spike: concentration > 0.3,
+    });
+  }
+  return out;
+}
+
+const MEGA_KINDS: MegaAlertKind[] = [
+  "volume_spike",
+  "buy_imbalance",
+  "sell_imbalance",
+  "spread_widening",
+  "oi_jump",
+  "concentration_rise",
+];
+
+const MEGA_MESSAGES: Record<MegaAlertKind, string> = {
+  volume_spike: "всплеск объёма",
+  buy_imbalance: "перевес покупок",
+  sell_imbalance: "перевес продаж",
+  spread_widening: "расширение спреда",
+  oi_jump: "скачок открытого интереса",
+  concentration_rise: "рост концентрации",
+};
+
+/** Лента Mega Alerts (`algo_mega_alerts`) по инструментам `secids`. */
+function algoMegaAlerts(secids: string[]): MegaAlertDto[] {
+  const pool = secids.length > 0 ? secids : ALGO_UNIVERSE.map((t) => t.ticker);
+  const r = algoRng(19);
+  const out: MegaAlertDto[] = [];
+  let ts = ALGO_BASE_TS + 12 * 60;
+  for (let i = 0; i < 18; i++) {
+    const kind = MEGA_KINDS[Math.floor(r() * MEGA_KINDS.length)];
+    const secid = pool[Math.floor(r() * pool.length)];
+    let value: number;
+    switch (kind) {
+      case "volume_spike":
+        value = r() * 4 + 2.5;
+        break;
+      case "buy_imbalance":
+        value = r() * 0.6 + 0.3;
+        break;
+      case "sell_imbalance":
+        value = -(r() * 0.6 + 0.3);
+        break;
+      case "spread_widening":
+        value = (r() * 3 + 1) / 10_000;
+        break;
+      case "oi_jump":
+        value = (r() > 0.5 ? 1 : -1) * (r() * 60_000 + 15_000);
+        break;
+      default:
+        value = r() * 0.25 + 0.3;
+    }
+    ts += Math.round(r() * 14 + 3) * 60;
+    out.push({ secid, ts, kind, value, message: MEGA_MESSAGES[kind] });
+  }
+  return out.reverse();
+}
+
 // ── Фаза 11 — Историзация: демо-каталог датасетов ────────────────────────────
 const DAY = 86_400;
 const mockDatasets: DatasetMetaDto[] = [
@@ -781,6 +1087,9 @@ const mockDatasets: DatasetMetaDto[] = [
   { source: "finam", secid: "GAZP", tf: "h1", fromTs: 0, toTs: DAY * 90, bars: 90 * 9, updatedTs: DAY * 90, looksComplete: true },
   { source: "moex_algo", secid: "SBER", tf: "m5", fromTs: 0, toTs: DAY * 30, bars: 30 * 78, updatedTs: DAY * 30, looksComplete: false },
 ];
+
+// Монотонный счётчик id мок-задач загрузки (history_load).
+let mockHistoryTaskSeq = 0;
 
 function mockHistoryPlan(input: {
   covered: { from: number; till: number }[];
@@ -935,6 +1244,8 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
       return mockSmileFit(args?.input as SmileFitInput) as unknown as T;
     case "strategy_eval":
       return mockStrategyEval(args?.input as StrategyEvalInput) as unknown as T;
+    case "option_board":
+      return mockOptionBoard(args?.input as OptionBoardInput) as unknown as T;
 
     // ── Фаза 10 / MOEX ALGO: Key Activity ───────────────────────────────────────
     case "key_activity": {
@@ -948,6 +1259,24 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
     }
     case "key_activity_rules":
       return keyActivityRules as unknown as T;
+
+    // ── T11 / MOEX ALGO: датасеты ALGOPACK ──────────────────────────────────────
+    case "algo_tradestats": {
+      const secid = String(args?.secid ?? "SBER");
+      return algoCandles(secid) as unknown as T;
+    }
+    case "algo_futoi": {
+      const secid = String(args?.secid ?? "SBER");
+      return algoFutoi(secid) as unknown as T;
+    }
+    case "algo_hi2": {
+      const secid = String(args?.secid ?? "SBER");
+      return algoHi2(secid) as unknown as T;
+    }
+    case "algo_mega_alerts": {
+      const secids = (args?.secids as string[]) ?? [];
+      return algoMegaAlerts(secids) as unknown as T;
+    }
 
     // ── Фаза 11 / Историзация ────────────────────────────────────────────────────
     case "history_datasets":
@@ -967,6 +1296,48 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
         requestedTill: number;
       };
       return mockHistoryPlan(inp) as unknown as T;
+    }
+    case "history_load": {
+      // Детерминированный мок: регистрируем датасеты по (тикер × ТФ) и отдаём
+      // id задачи. Прогресс в браузере симулируется во вкладке HistoryTab —
+      // событий `history:*` в мок-режиме нет (см. onHistory* в ipc.ts).
+      const inp = args?.input as {
+        source: string;
+        tickers: string[];
+        timeframes: string[];
+        from: number;
+        till: number;
+      };
+      for (const secid of inp.tickers) {
+        for (const tf of inp.timeframes) {
+          const idx = mockDatasets.findIndex(
+            (d) => d.source === inp.source && d.secid === secid && d.tf === tf,
+          );
+          const meta = {
+            source: inp.source,
+            secid,
+            tf,
+            fromTs: inp.from,
+            toTs: inp.till,
+            bars: Math.max(1, Math.round((inp.till - inp.from) / DAY)),
+            updatedTs: inp.till,
+            looksComplete: true,
+          };
+          if (idx >= 0) mockDatasets[idx] = meta;
+          else mockDatasets.push(meta);
+        }
+      }
+      mockHistoryTaskSeq += 1;
+      return { taskId: mockHistoryTaskSeq } as unknown as T;
+    }
+    case "history_cancel":
+      // В мок-режиме фоновых задач нет — отменять нечего.
+      return 0 as unknown as T;
+    case "history_preview": {
+      const secid = String(args?.secid ?? "SBER");
+      const limit = Number(args?.limit ?? 500);
+      const seed = secid.startsWith("LKOH") ? 7000 : secid.startsWith("GAZP") ? 160 : 300;
+      return genBars(seed).slice(-limit) as unknown as T;
     }
 
     // ── T3 / Настройки и правила Key Activity ───────────────────────────────────

@@ -39,7 +39,10 @@ tauri-build = { version = "2", optional = true }
 
 [features]
 default = []
-tauri = ["dep:tauri", "dep:tauri-build"]
+# UI-сборка тянет и загрузчик истории (T10): его async-оркестрация нужна
+# командам `history_load`/`history_cancel`, поэтому `tauri` включает `ingest`
+# (та же опциональная зависимость tokio, что у `ingest`/`moex`/`llm`).
+tauri = ["dep:tauri", "dep:tauri-build", "ingest"]
 # Продакшен-хранилище: нативный DuckDB вместо MemStore.
 duckdb = ["storage/duckdb"]
 # Асинхронный планировщик ингеста (poll рыночных данных в хранилище).
@@ -51,6 +54,15 @@ live = ["ingest", "data/grpc"]
 # Живой LLM-провайдер для ИИ-резюме Key Activity (фаза 10.4). Async-runtime
 # переиспользуется из фичи `ingest` (`dep:tokio` — та же опциональная зависимость).
 llm = ["data/llm", "dep:tokio"]
+# Контур MOEX поверх клиента `data::moex` + async-runtime (та же опциональная
+# зависимость, что у `ingest`/`llm`). Включает одним флагом:
+# — опционную доску через публичный ISS (фаза 12.4): DTO/обработчик/команда
+#   `option_board` (без фичи — как без `llm`, команды нет);
+# — ингест ALGOPACK (Super Candles/FUTOI/HI2) в планировщик (фаза 10.6.4) и
+#   read-обработчики/команды датасетов (`algo_tradestats`/`algo_futoi`/
+#   `algo_hi2`/`algo_mega_alerts`) — сами по себе сети не требуют, читают
+#   уже персистентные таблицы T8, но живут вместе с планировщиком.
+moex = ["data/moex", "dep:tokio"]
 # Боевой роутинг заявок (каркас): включает заглушку `data::FinamOrderRouter`.
 # По умолчанию торговля идёт через симулятор (`SimOrderRouter`).
 live-trading = ["data/live-trading"]
