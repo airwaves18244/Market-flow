@@ -1418,6 +1418,191 @@ pub struct DatasetIdInput {
     pub tf: String,
 }
 
+// ── T11 — MOEX ALGO: датасеты ALGOPACK (Super Candles/FUTOI/HI2/Mega Alerts) ──
+//
+// DTO для чтения датасетов T8-хранилища (`storage::algo_*`) поверх аналитики
+// `domain::algo`. Читаются напрямую из `Store` (без сети/фичи `moex` —
+// в отличие от [`OptionQuoteDto`], датасеты уже персистентны), поэтому доступны
+// в базовой сборке. Ингест этих таблиц (сетевой источник `AlgoSource`) — за
+// фичей `moex` (см. `crate::ingest::algo`).
+
+use domain::algo::mega_alerts::MegaAlert;
+use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+
+/// Свеча Super Candles (датасет `tradestats`) для фронта: поля свечи + готовая
+/// метрика [`SuperCandle::buy_pressure`], чтобы фронт не пересчитывал её сам.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TradestatsDto {
+    pub secid: String,
+    pub ts: i64,
+    pub pr_open: f64,
+    pub pr_high: f64,
+    pub pr_low: f64,
+    pub pr_close: f64,
+    pub pr_std: f64,
+    pub vol: f64,
+    pub val: f64,
+    pub trades: f64,
+    pub pr_vwap: f64,
+    pub pr_change: f64,
+    pub vol_b: f64,
+    pub vol_s: f64,
+    pub val_b: f64,
+    pub val_s: f64,
+    pub trades_b: f64,
+    pub trades_s: f64,
+    /// Дисбаланс потока (−1..1).
+    pub disb: f64,
+    pub pr_vwap_b: f64,
+    pub pr_vwap_s: f64,
+    /// Индекс агрессии покупателей (0..1) — [`SuperCandle::buy_pressure`].
+    pub buy_pressure: f64,
+}
+
+impl From<&SuperCandle> for TradestatsDto {
+    fn from(c: &SuperCandle) -> Self {
+        Self {
+            secid: c.secid.clone(),
+            ts: c.ts,
+            pr_open: c.pr_open,
+            pr_high: c.pr_high,
+            pr_low: c.pr_low,
+            pr_close: c.pr_close,
+            pr_std: c.pr_std,
+            vol: c.vol,
+            val: c.val,
+            trades: c.trades,
+            pr_vwap: c.pr_vwap,
+            pr_change: c.pr_change,
+            vol_b: c.vol_b,
+            vol_s: c.vol_s,
+            val_b: c.val_b,
+            val_s: c.val_s,
+            trades_b: c.trades_b,
+            trades_s: c.trades_s,
+            disb: c.disb,
+            pr_vwap_b: c.pr_vwap_b,
+            pr_vwap_s: c.pr_vwap_s,
+            buy_pressure: c.buy_pressure(),
+        }
+    }
+}
+
+/// Точка FUTOI (открытый интерес физ/юр лиц) для фронта: поля точки + готовые
+/// метрики [`FutoiPoint::net`]/[`FutoiPoint::long_share`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FutoiDto {
+    pub secid: String,
+    pub ts: i64,
+    /// `fiz|yur`.
+    pub clgroup: String,
+    pub pos: f64,
+    pub pos_long: f64,
+    pub pos_short: f64,
+    pub pos_long_num: f64,
+    pub pos_short_num: f64,
+    /// Нетто-позиция (long − short).
+    pub net: f64,
+    /// Доля длинных в суммарной позиции (0..1).
+    pub long_share: f64,
+}
+
+impl From<&FutoiPoint> for FutoiDto {
+    fn from(p: &FutoiPoint) -> Self {
+        Self {
+            secid: p.secid.clone(),
+            ts: p.ts,
+            clgroup: p.clgroup.code().to_string(),
+            pos: p.pos,
+            pos_long: p.pos_long,
+            pos_short: p.pos_short,
+            pos_long_num: p.pos_long_num,
+            pos_short_num: p.pos_short_num,
+            net: p.net(),
+            long_share: p.long_share(),
+        }
+    }
+}
+
+/// Точка HI2 (индекс концентрации участников) для фронта: значение + готовая
+/// классификация уровня + флаг всплеска (считается по окну вызывающей стороной
+/// — см. `api::algo_hi2`, обёртка над [`domain::algo::hi2::concentration_spikes`]).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hi2Dto {
+    pub ts: i64,
+    pub secid: String,
+    pub concentration: f64,
+    /// `distributed|moderate|concentrated|dominated`.
+    pub level: String,
+    /// `true`, если в этой точке — всплеск концентрации (z-score ≥ порога).
+    pub spike: bool,
+}
+
+impl From<&Hi2Point> for Hi2Dto {
+    fn from(p: &Hi2Point) -> Self {
+        Self {
+            ts: p.ts,
+            secid: p.secid.clone(),
+            concentration: p.concentration,
+            level: p.level().code().to_string(),
+            spike: false,
+        }
+    }
+}
+
+/// Пороги детекторов Mega Alerts, приходящие с фронта (вход IPC). Отсутствующие
+/// поля берутся из значений по умолчанию ([`domain::algo::mega_alerts::MegaThresholds`]).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MegaThresholdsInput {
+    pub vol_z: Option<f64>,
+    pub disb: Option<f64>,
+    pub spread: Option<f64>,
+    pub oi_jump: Option<f64>,
+    pub hi2: Option<f64>,
+}
+
+impl MegaThresholdsInput {
+    /// Перевести в доменные пороги, подставляя значения по умолчанию.
+    pub fn to_thresholds(self) -> domain::algo::mega_alerts::MegaThresholds {
+        let d = domain::algo::mega_alerts::MegaThresholds::default();
+        domain::algo::mega_alerts::MegaThresholds {
+            vol_z: self.vol_z.unwrap_or(d.vol_z),
+            disb: self.disb.unwrap_or(d.disb),
+            spread: self.spread.unwrap_or(d.spread),
+            oi_jump: self.oi_jump.unwrap_or(d.oi_jump),
+            hi2: self.hi2.unwrap_or(d.hi2),
+        }
+    }
+}
+
+/// Сработавший Mega-сигнал для фронта (лента алёртов).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MegaAlertDto {
+    pub secid: String,
+    pub ts: i64,
+    /// `volume_spike|buy_imbalance|sell_imbalance|spread_widening|oi_jump|concentration_rise`.
+    pub kind: String,
+    pub value: f64,
+    pub message: String,
+}
+
+impl From<&MegaAlert> for MegaAlertDto {
+    fn from(a: &MegaAlert) -> Self {
+        Self {
+            secid: a.secid.clone(),
+            ts: a.ts,
+            kind: a.kind.code().to_string(),
+            value: a.value,
+            message: a.message.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1537,5 +1722,97 @@ mod tests {
         assert_eq!(dto.symbol, "SBER@MISX");
         assert_eq!(dto.message, "цена выше 300");
         assert_eq!(dto.change, 0.03);
+    }
+
+    // ── T11 — MOEX ALGO: ALGOPACK-датасеты ──────────────────────────────────
+
+    #[test]
+    fn tradestats_dto_maps_fields_and_buy_pressure() {
+        let c = SuperCandle {
+            secid: "SBER".into(),
+            ts: 10,
+            pr_open: 100.0,
+            pr_high: 101.0,
+            pr_low: 99.0,
+            pr_close: 100.5,
+            pr_std: 0.4,
+            vol: 100.0,
+            val: 10_050.0,
+            trades: 20.0,
+            pr_vwap: 100.5,
+            pr_change: 0.005,
+            vol_b: 70.0,
+            vol_s: 30.0,
+            val_b: 7_000.0,
+            val_s: 3_000.0,
+            trades_b: 12.0,
+            trades_s: 8.0,
+            disb: 0.4,
+            pr_vwap_b: 100.6,
+            pr_vwap_s: 100.3,
+        };
+        let dto = TradestatsDto::from(&c);
+        assert_eq!(dto.secid, "SBER");
+        assert_eq!(dto.ts, 10);
+        assert!((dto.buy_pressure - 0.7).abs() < 1e-12);
+        assert_eq!(dto.disb, 0.4);
+    }
+
+    #[test]
+    fn futoi_dto_maps_group_code_and_net() {
+        let p = FutoiPoint {
+            ts: 5,
+            secid: "RIH5".into(),
+            clgroup: domain::algo::ClientGroup::Fiz,
+            pos: 1000.0,
+            pos_long: 700.0,
+            pos_short: 300.0,
+            pos_long_num: 70.0,
+            pos_short_num: 30.0,
+        };
+        let dto = FutoiDto::from(&p);
+        assert_eq!(dto.clgroup, "fiz");
+        assert_eq!(dto.net, 400.0);
+        assert!((dto.long_share - 0.7).abs() < 1e-12);
+    }
+
+    #[test]
+    fn hi2_dto_maps_level_and_defaults_spike_false() {
+        let p = Hi2Point {
+            ts: 1,
+            secid: "SBER".into(),
+            concentration: 0.6,
+        };
+        let dto = Hi2Dto::from(&p);
+        assert_eq!(dto.level, "dominated");
+        assert!(!dto.spike);
+    }
+
+    #[test]
+    fn mega_thresholds_input_falls_back_to_defaults() {
+        let t = MegaThresholdsInput {
+            vol_z: Some(5.0),
+            ..MegaThresholdsInput::default()
+        }
+        .to_thresholds();
+        assert_eq!(t.vol_z, 5.0);
+        assert_eq!(
+            t.disb,
+            domain::algo::mega_alerts::MegaThresholds::default().disb
+        );
+    }
+
+    #[test]
+    fn mega_alert_dto_maps_kind_code() {
+        let a = MegaAlert {
+            secid: "SBER".into(),
+            ts: 3,
+            kind: domain::algo::MegaAlertKind::BuyImbalance,
+            value: 0.6,
+            message: "перевес покупок".into(),
+        };
+        let dto = MegaAlertDto::from(&a);
+        assert_eq!(dto.kind, "buy_imbalance");
+        assert_eq!(dto.secid, "SBER");
     }
 }

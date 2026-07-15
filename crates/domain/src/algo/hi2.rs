@@ -66,6 +66,17 @@ impl ConcentrationLevel {
             ConcentrationLevel::Distributed
         }
     }
+
+    /// Машинный код уровня (для сериализации во фронт/IPC вне контекста, где
+    /// удобна сериализация всего `Hi2Point` через `serde`).
+    pub fn code(self) -> &'static str {
+        match self {
+            ConcentrationLevel::Distributed => "distributed",
+            ConcentrationLevel::Moderate => "moderate",
+            ConcentrationLevel::Concentrated => "concentrated",
+            ConcentrationLevel::Dominated => "dominated",
+        }
+    }
 }
 
 /// Индексы точек со всплеском концентрации (z-score ≥ `threshold` по окну).
@@ -156,5 +167,13 @@ mod tests {
         let r = rank_by_concentration(&pts);
         assert_eq!(r[0].0, "B");
         assert_eq!(r[2].0, "C");
+    }
+
+    #[test]
+    fn level_codes_match_classification() {
+        assert_eq!(ConcentrationLevel::Distributed.code(), "distributed");
+        assert_eq!(ConcentrationLevel::Moderate.code(), "moderate");
+        assert_eq!(ConcentrationLevel::Concentrated.code(), "concentrated");
+        assert_eq!(ConcentrationLevel::Dominated.code(), "dominated");
     }
 }

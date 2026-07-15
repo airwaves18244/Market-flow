@@ -16,13 +16,14 @@ use domain::TimeFrame;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, DatasetIdInput, DatasetMetaDto, FillEventDto,
-    FlowEdgeDto, FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
-    InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
-    KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderBookDto, OrderDto, OrderInput,
-    PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow,
-    SettingsDto, SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
-    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    FlowEdgeDto, FootprintBarDto, FutoiDto, FutureGroupDto, Hi2Dto, HistoryPlanInput,
+    ImpliedVolDto, ImpliedVolInput, InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto,
+    KeyActivitySampleInput, KeyActivitySummaryDto, MegaAlertDto, MegaThresholdsInput,
+    OptionPriceDto, OptionPriceInput, OrderBookDto, OrderDto, OrderInput, PositionDto,
+    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SettingsDto,
+    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
+    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TradestatsDto,
+    TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 use crate::state::AppState;
 
@@ -296,6 +297,61 @@ fn key_activity_rules(state: State<AppState>) -> CmdResult<Vec<KeyActivityRuleDt
     Ok(state.key_activity_rules())
 }
 
+// ── T11 — MOEX ALGO: датасеты ALGOPACK (Super Candles/FUTOI/HI2/Mega Alerts) ─
+
+#[tauri::command]
+fn algo_tradestats(
+    state: State<AppState>,
+    market: String,
+    secid: String,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<TradestatsDto>> {
+    state
+        .algo_tradestats(&market, &secid, from_ts, to_ts)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn algo_futoi(
+    state: State<AppState>,
+    market: String,
+    secid: String,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<FutoiDto>> {
+    state
+        .algo_futoi(&market, &secid, from_ts, to_ts)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn algo_hi2(
+    state: State<AppState>,
+    market: String,
+    secid: String,
+    from_ts: i64,
+    to_ts: i64,
+) -> CmdResult<Vec<Hi2Dto>> {
+    state
+        .algo_hi2(&market, &secid, from_ts, to_ts)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn algo_mega_alerts(
+    state: State<AppState>,
+    market: String,
+    secids: Vec<String>,
+    from_ts: i64,
+    to_ts: i64,
+    thresholds: Option<MegaThresholdsInput>,
+) -> CmdResult<Vec<MegaAlertDto>> {
+    state
+        .algo_mega_alerts(&market, &secids, from_ts, to_ts, thresholds)
+        .map_err(|e| e.to_string())
+}
+
 // ── T3 — Настройки и правила Key Activity (10.5.3/S.2.2/10.8.*/11.6.1/12.8.1) ─
 
 #[tauri::command]
@@ -468,6 +524,10 @@ pub fn run() {
             key_activity,
             key_activity_summary,
             key_activity_rules,
+            algo_tradestats,
+            algo_futoi,
+            algo_hi2,
+            algo_mega_alerts,
             settings_get,
             settings_set,
             key_activity_rules_get,
