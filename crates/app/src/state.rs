@@ -7,6 +7,8 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+#[cfg(feature = "moex")]
+use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
 use domain::history::{Catalog, DataSource, DatasetMeta};
 #[cfg(feature = "ingest")]
 use domain::Bar;
@@ -21,13 +23,13 @@ use crate::api;
 use crate::dto::{
     AccountDto, AlertEventDto, AlertRuleInput, BacktestConfigInput, BacktestReportDto, BarPoint,
     BondIssuerDto, BreadthDto, CrossAssetSummaryDto, DatasetIdInput, DatasetMetaDto, FlowEdgeDto,
-    FootprintBarDto, FutureGroupDto, HistoryPlanInput, ImpliedVolDto, ImpliedVolInput,
-    InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
-    KeyActivitySummaryDto, OptionPriceDto, OptionPriceInput, OrderDto, OrderInput, PositionDto,
-    RobotConfigInput, RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SettingsDto,
-    SmileFitDto, SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto,
-    StrategyEvalInput, SubmitResultDto, TimeRangeDto, TopMoverDto, TurnoverByClassPoint,
-    TurnoverPoint, YieldCurvePoint,
+    FootprintBarDto, FutoiDto, FutureGroupDto, Hi2Dto, HistoryPlanInput, ImpliedVolDto,
+    ImpliedVolInput, InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
+    KeyActivitySummaryDto, MegaAlertDto, MegaThresholdsInput, OptionPriceDto, OptionPriceInput,
+    OrderDto, OrderInput, PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto,
+    SectorEntryDto, SectorRow, SettingsDto, SmileFitDto, SmileFitInput, SmileModelDto,
+    StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput, SubmitResultDto, TimeRangeDto,
+    TopMoverDto, TradestatsDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
 };
 use crate::settings::SettingsStore;
 use crate::trade::TradeSession;
@@ -106,7 +108,7 @@ impl AppState {
     }
 
     /// Выполнить запись под блокировкой. Отравленный мьютекс → ошибка БД.
-    #[cfg(feature = "ingest")]
+    #[cfg(any(feature = "ingest", feature = "moex"))]
     fn write<F, R>(&self, f: F) -> Result<R, StorageError>
     where
         F: FnOnce(&mut dyn Store) -> Result<R, StorageError>,
@@ -383,6 +385,113 @@ impl AppState {
     /// Встроенные правила Key Activity (для настроек/справки).
     pub fn key_activity_rules(&self) -> Vec<KeyActivityRuleDto> {
         api::key_activity_rules()
+    }
+
+    // ── T11 — MOEX ALGO: датасеты ALGOPACK (чтение из storage T8) ──────────────
+
+    /// Размер скользящего окна z-score/спайков по умолчанию (в барах/точках) —
+    /// то же значение, что и в тестах `api::algo_*`.
+    const ALGO_WINDOW: usize = 20;
+    /// Порог z-score всплеска концентрации HI2 по умолчанию.
+    const ALGO_HI2_THRESHOLD: f64 = 3.0;
+
+    /// Свечи Super Candles (`tradestats`) инструмента `secid` на рынке `market`.
+    pub fn algo_tradestats(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<TradestatsDto>, StorageError> {
+        self.read(|s| api::algo_tradestats(s, market, secid, from_ts, to_ts))
+    }
+
+    /// Точки FUTOI инструмента `secid` на рынке `market` (обычно `fo`).
+    pub fn algo_futoi(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<FutoiDto>, StorageError> {
+        self.read(|s| api::algo_futoi(s, market, secid, from_ts, to_ts))
+    }
+
+    /// Точки HI2 инструмента `secid` с проставленным флагом всплеска (окно/порог
+    /// по умолчанию, см. [`AppState::ALGO_WINDOW`]/[`AppState::ALGO_HI2_THRESHOLD`]).
+    pub fn algo_hi2(
+        &self,
+        market: &str,
+        secid: &str,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<Hi2Dto>, StorageError> {
+        self.read(|s| {
+            api::algo_hi2(
+                s,
+                market,
+                secid,
+                from_ts,
+                to_ts,
+                Self::ALGO_WINDOW,
+                Self::ALGO_HI2_THRESHOLD,
+            )
+        })
+    }
+
+    /// Mega Alerts (10.2.8) по сохранённым датасетам ALGOPACK для `secids` на
+    /// рынке `market` в окне `[from_ts, to_ts]`. `thresholds` — `None` для
+    /// порогов по умолчанию.
+    pub fn algo_mega_alerts(
+        &self,
+        market: &str,
+        secids: &[String],
+        from_ts: i64,
+        to_ts: i64,
+        thresholds: Option<MegaThresholdsInput>,
+    ) -> Result<Vec<MegaAlertDto>, StorageError> {
+        self.read(|s| {
+            api::algo_mega_alerts(
+                s,
+                market,
+                secids,
+                from_ts,
+                to_ts,
+                thresholds.map(MegaThresholdsInput::to_thresholds),
+                Self::ALGO_WINDOW,
+            )
+        })
+    }
+
+    /// Записать свечи Super Candles (`tradestats`) для рынка `market`. Точка
+    /// входа планировщика ALGOPACK-ингеста ([`crate::ingest::algo`]).
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_tradestats(
+        &self,
+        market: &str,
+        candles: &[SuperCandle],
+    ) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_algo_tradestats(market, candles))
+    }
+
+    /// Записать точки FUTOI для рынка `market` (`fo`).
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_futoi(
+        &self,
+        market: &str,
+        points: &[FutoiPoint],
+    ) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_algo_futoi(market, points))
+    }
+
+    /// Записать точки HI2 для рынка `market`.
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_hi2(
+        &self,
+        market: &str,
+        points: &[Hi2Point],
+    ) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_algo_hi2(market, points))
     }
 
     // ── Фаза 11 — Историзация: каталог локальных датасетов ────────────────────

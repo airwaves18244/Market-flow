@@ -1,15 +1,17 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import * as echarts from "echarts";
-  import type { FutoiSeries } from "../algoMock";
+  import type { FutoiDto } from "../types";
 
   // FUTOI: открытые позиции физлиц/юрлиц (Фаза 10). Режим long/short/net
-  // выбирает, как агрегировать длинные и короткие позиции.
+  // выбирает, как агрегировать длинные и короткие позиции. Данные — датасет
+  // ALGOPACK `futoi` (боевой IPC/мок, T11): точки по (ts, clgroup), группировка
+  // в две временные серии — здесь, в компоненте.
   let {
-    series,
+    points = [],
     mode = "net",
   }: {
-    series: FutoiSeries;
+    points: FutoiDto[];
     mode: "long" | "short" | "net";
   } = $props();
 
@@ -17,11 +19,28 @@
   let chart: echarts.ECharts | undefined;
   let ro: ResizeObserver | undefined;
 
-  const pick = (L: number[], S: number[]) =>
-    mode === "long" ? L : mode === "short" ? S.map((x) => -x) : L.map((x, i) => x - S[i]);
+  function timeLabel(ts: number): string {
+    const d = new Date(ts * 1000);
+    return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  }
+
+  /** Значения в тыс. контрактов (см. `yAxis.name` ниже) — `posLong`/`posShort`
+   * в DTO хранятся в штуках. */
+  function seriesFor(group: "fiz" | "yur"): { times: string[]; values: number[] } {
+    const rows = points.filter((p) => p.clgroup === group).sort((a, b) => a.ts - b.ts);
+    return {
+      times: rows.map((p) => timeLabel(p.ts)),
+      values: rows.map(
+        (p) => (mode === "long" ? p.posLong : mode === "short" ? -p.posShort : p.net) / 1000,
+      ),
+    };
+  }
 
   function render() {
     if (!chart) return;
+    const fiz = seriesFor("fiz");
+    const yur = seriesFor("yur");
+    const times = fiz.times.length >= yur.times.length ? fiz.times : yur.times;
     const axis = {
       axisLine: { lineStyle: { color: "#1d2530" } },
       axisLabel: { color: "#8b98a9", fontSize: 10 },
@@ -38,7 +57,7 @@
         },
         legend: { data: ["Физлица", "Юрлица"], textStyle: { color: "#8b98a9", fontSize: 11 }, top: 0 },
         grid: { left: 52, right: 14, top: 28, bottom: 24 },
-        xAxis: { type: "category", data: series.times, ...axis },
+        xAxis: { type: "category", data: times, ...axis },
         yAxis: {
           ...axis,
           name: "тыс. контрактов",
@@ -49,7 +68,7 @@
             name: "Физлица",
             type: "line",
             smooth: true,
-            data: pick(series.fizL, series.fizS),
+            data: fiz.values,
             lineStyle: { color: "#4f9cf9", width: 2 },
             itemStyle: { color: "#4f9cf9" },
             areaStyle: { color: "rgba(79,156,249,.08)" },
@@ -58,7 +77,7 @@
             name: "Юрлица",
             type: "line",
             smooth: true,
-            data: pick(series.yurL, series.yurS),
+            data: yur.values,
             lineStyle: { color: "#f5a623", width: 2 },
             itemStyle: { color: "#f5a623" },
             areaStyle: { color: "rgba(245,166,35,.08)" },
@@ -70,7 +89,7 @@
   }
 
   $effect(() => {
-    void series;
+    void points;
     void mode;
     render();
   });

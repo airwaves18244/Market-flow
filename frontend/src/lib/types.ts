@@ -529,3 +529,88 @@ export interface SettingsDto {
   rate: number;
   defaultSmile: string;
 }
+
+// ── T11 — MOEX ALGO: датасеты ALGOPACK (Super Candles/FUTOI/HI2/Mega Alerts) ─
+
+/** Рынок ALGOPACK: `eq` (акции), `fo` (срочный), `fx` (валютный). */
+export type AlgoMarket = "eq" | "fo" | "fx";
+
+/** Свеча Super Candles (датасет `tradestats`) — зеркало `dto::TradestatsDto`. */
+export interface TradestatsDto {
+  secid: string;
+  ts: number;
+  prOpen: number;
+  prHigh: number;
+  prLow: number;
+  prClose: number;
+  prStd: number;
+  vol: number;
+  val: number;
+  trades: number;
+  prVwap: number;
+  prChange: number;
+  volB: number;
+  volS: number;
+  valB: number;
+  valS: number;
+  tradesB: number;
+  tradesS: number;
+  /** Дисбаланс потока (−1..1). */
+  disb: number;
+  prVwapB: number;
+  prVwapS: number;
+  /** Индекс агрессии покупателей (0..1). */
+  buyPressure: number;
+}
+
+/** Точка FUTOI (открытый интерес физ/юр лиц) — зеркало `dto::FutoiDto`. */
+export interface FutoiDto {
+  secid: string;
+  ts: number;
+  /** `fiz|yur`. */
+  clgroup: "fiz" | "yur";
+  pos: number;
+  posLong: number;
+  posShort: number;
+  posLongNum: number;
+  posShortNum: number;
+  net: number;
+  longShare: number;
+}
+
+/** Точка HI2 (индекс концентрации участников) — зеркало `dto::Hi2Dto`. */
+export interface Hi2Dto {
+  ts: number;
+  secid: string;
+  concentration: number;
+  /** `distributed|moderate|concentrated|dominated`. */
+  level: "distributed" | "moderate" | "concentrated" | "dominated";
+  spike: boolean;
+}
+
+/** Пороги детекторов Mega Alerts (вход IPC) — зеркало `dto::MegaThresholdsInput`. */
+export interface MegaThresholdsInput {
+  volZ?: number;
+  disb?: number;
+  spread?: number;
+  oiJump?: number;
+  hi2?: number;
+}
+
+/** Тип Mega-сигнала — коды `domain::algo::mega_alerts::MegaAlertKind`. */
+export type MegaAlertKind =
+  | "volume_spike"
+  | "buy_imbalance"
+  | "sell_imbalance"
+  | "spread_widening"
+  | "oi_jump"
+  | "concentration_rise";
+
+/** Сработавший Mega-сигнал — зеркало `dto::MegaAlertDto`. */
+export interface MegaAlertDto {
+  secid: string;
+  ts: number;
+  kind: MegaAlertKind;
+  value: number;
+  message: string;
+}

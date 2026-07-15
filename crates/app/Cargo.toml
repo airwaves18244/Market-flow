@@ -51,6 +51,13 @@ live = ["ingest", "data/grpc"]
 # Живой LLM-провайдер для ИИ-резюме Key Activity (фаза 10.4). Async-runtime
 # переиспользуется из фичи `ingest` (`dep:tokio` — та же опциональная зависимость).
 llm = ["data/llm", "dep:tokio"]
+# Ингест ALGOPACK (Super Candles/FUTOI/HI2) в планировщик (фаза 10.6.4): клиент
+# `data::moex` + async-runtime (та же опциональная зависимость, что у `ingest`/
+# `llm`). Также включает read-обработчики/команды датасетов ALGOPACK
+# (`algo_tradestats`/`algo_futoi`/`algo_hi2`/`algo_mega_alerts`), которые сами
+# по себе не требуют сети — они читают уже персистентные таблицы T8, — но живут
+# за этой фичей вместе с планировщиком, чтобы включаться одним флагом.
+moex = ["data/moex", "dep:tokio"]
 # Боевой роутинг заявок (каркас): включает заглушку `data::FinamOrderRouter`.
 # По умолчанию торговля идёт через симулятор (`SimOrderRouter`).
 live-trading = ["data/live-trading"]

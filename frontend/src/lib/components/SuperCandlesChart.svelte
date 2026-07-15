@@ -7,10 +7,11 @@
     type ISeriesApi,
     type UTCTimestamp,
   } from "lightweight-charts";
-  import type { SuperBar } from "../algoMock";
+  import type { TradestatsDto } from "../types";
 
   // Супер-свечи: свечи + линия VWAP + гистограмма объёма (Фаза 10).
-  let { bars = [] }: { bars: SuperBar[] } = $props();
+  // Данные — датасет ALGOPACK `tradestats` (боевой IPC/мок, T11).
+  let { bars = [] }: { bars: TradestatsDto[] } = $props();
 
   let el: HTMLDivElement;
   let chart: IChartApi | undefined;
@@ -18,25 +19,23 @@
   let vwap: ISeriesApi<"Line"> | undefined;
   let vol: ISeriesApi<"Histogram"> | undefined;
 
-  const BASE = 1_717_400_000; // якорь оси времени (условная торговая сессия)
-
   function render() {
     if (!cs || !vwap || !vol) return;
     cs.setData(
       bars.map((b) => ({
-        time: (BASE + b.min * 60) as UTCTimestamp,
-        open: b.o,
-        high: b.h,
-        low: b.l,
-        close: b.c,
+        time: b.ts as UTCTimestamp,
+        open: b.prOpen,
+        high: b.prHigh,
+        low: b.prLow,
+        close: b.prClose,
       })),
     );
-    vwap.setData(bars.map((b) => ({ time: (BASE + b.min * 60) as UTCTimestamp, value: b.vwap })));
+    vwap.setData(bars.map((b) => ({ time: b.ts as UTCTimestamp, value: b.prVwap })));
     vol.setData(
       bars.map((b) => ({
-        time: (BASE + b.min * 60) as UTCTimestamp,
+        time: b.ts as UTCTimestamp,
         value: b.vol,
-        color: b.c >= b.o ? "rgba(38,166,154,.5)" : "rgba(239,83,80,.5)",
+        color: b.prClose >= b.prOpen ? "rgba(38,166,154,.5)" : "rgba(239,83,80,.5)",
       })),
     );
     chart?.timeScale().fitContent();

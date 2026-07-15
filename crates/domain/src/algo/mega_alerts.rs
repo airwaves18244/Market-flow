@@ -74,6 +74,20 @@ impl MegaAlertKind {
             MegaAlertKind::ConcentrationRise => "рост концентрации",
         }
     }
+
+    /// Машинный код типа сигнала (для сериализации во фронт/IPC) — то же, что
+    /// даёт `#[serde(rename_all = "snake_case")]` на этом enum, но как метод,
+    /// удобный без похода через `serde_json`.
+    pub fn code(self) -> &'static str {
+        match self {
+            MegaAlertKind::VolumeSpike => "volume_spike",
+            MegaAlertKind::BuyImbalance => "buy_imbalance",
+            MegaAlertKind::SellImbalance => "sell_imbalance",
+            MegaAlertKind::SpreadWidening => "spread_widening",
+            MegaAlertKind::OiJump => "oi_jump",
+            MegaAlertKind::ConcentrationRise => "concentration_rise",
+        }
+    }
 }
 
 /// Пороги детекторов.
@@ -263,5 +277,26 @@ mod tests {
         assert_eq!(e.observe("A", &o).len(), 1);
         // Тот же сигнал для другого инструмента — независимое состояние.
         assert_eq!(e.observe("B", &o).len(), 1);
+    }
+
+    #[test]
+    fn kind_codes_are_stable_and_unique() {
+        let kinds = [
+            MegaAlertKind::VolumeSpike,
+            MegaAlertKind::BuyImbalance,
+            MegaAlertKind::SellImbalance,
+            MegaAlertKind::SpreadWidening,
+            MegaAlertKind::OiJump,
+            MegaAlertKind::ConcentrationRise,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for k in kinds {
+            assert!(seen.insert(k.code()), "дубликат кода: {}", k.code());
+        }
+        assert_eq!(MegaAlertKind::VolumeSpike.code(), "volume_spike");
+        assert_eq!(
+            MegaAlertKind::ConcentrationRise.code(),
+            "concentration_rise"
+        );
     }
 }

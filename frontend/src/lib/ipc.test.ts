@@ -86,4 +86,47 @@ describe("ipc (mock mode)", () => {
   it("raises when cancelling an order that does not exist", async () => {
     await expect(ipc.cancelOrder(999_999)).rejects.toThrow();
   });
+
+  // ── T11 — MOEX ALGO: датасеты ALGOPACK ─────────────────────────────────────
+
+  it("generates Super Candles (tradestats) with buy pressure in 0..1", async () => {
+    const candles = await ipc.algoTradestats("eq", "SBER", 0, 9_999_999_999);
+    expect(candles.length).toBeGreaterThan(0);
+    for (const c of candles) {
+      expect(c.secid).toBe("SBER");
+      expect(c.buyPressure).toBeGreaterThanOrEqual(0);
+      expect(c.buyPressure).toBeLessThanOrEqual(1);
+      expect(c.prHigh).toBeGreaterThanOrEqual(c.prLow);
+    }
+  });
+
+  it("generates FUTOI points split by client group", async () => {
+    const points = await ipc.algoFutoi("fo", "SBER", 0, 9_999_999_999);
+    expect(points.length).toBeGreaterThan(0);
+    expect(points.some((p) => p.clgroup === "fiz")).toBe(true);
+    expect(points.some((p) => p.clgroup === "yur")).toBe(true);
+    for (const p of points) {
+      expect(p.net).toBeCloseTo(p.posLong - p.posShort);
+    }
+  });
+
+  it("generates HI2 points with a consistent level classification", async () => {
+    const points = await ipc.algoHi2("eq", "SBER", 0, 9_999_999_999);
+    expect(points.length).toBeGreaterThan(0);
+    for (const p of points) {
+      if (p.concentration >= 0.5) expect(p.level).toBe("dominated");
+      else if (p.concentration >= 0.25) expect(p.level).toBe("concentrated");
+      else if (p.concentration >= 0.15) expect(p.level).toBe("moderate");
+      else expect(p.level).toBe("distributed");
+    }
+  });
+
+  it("generates Mega Alerts scoped to the requested instruments", async () => {
+    const alerts = await ipc.algoMegaAlerts("eq", ["SBER", "GAZP"], 0, 9_999_999_999);
+    expect(alerts.length).toBeGreaterThan(0);
+    for (const a of alerts) {
+      expect(["SBER", "GAZP"]).toContain(a.secid);
+      expect(a.message.length).toBeGreaterThan(0);
+    }
+  });
 });

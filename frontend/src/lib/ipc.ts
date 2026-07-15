@@ -8,6 +8,7 @@ import type {
   AccountDto,
   AlertEventDto,
   AlertRuleInput,
+  AlgoMarket,
   BacktestConfigInput,
   BacktestReportDto,
   BarPoint,
@@ -19,7 +20,9 @@ import type {
   FillEventDto,
   FlowEdgeDto,
   FootprintBarDto,
+  FutoiDto,
   FutureGroupDto,
+  Hi2Dto,
   HistoryPlanInput,
   ImpliedVolDto,
   ImpliedVolInput,
@@ -29,6 +32,8 @@ import type {
   KeyActivityRuleDto,
   KeyActivitySampleInput,
   KeyActivitySummaryDto,
+  MegaAlertDto,
+  MegaThresholdsInput,
   OptionPriceDto,
   OptionPriceInput,
   OrderBookDto,
@@ -52,6 +57,7 @@ import type {
   TimeRangeDto,
   TopMoverDto,
   TradeDto,
+  TradestatsDto,
   TurnoverByClassPoint,
   TurnoverPoint,
   YieldCurvePoint,
@@ -185,6 +191,21 @@ export const ipc = {
   keyActivitySummary: (samples: KeyActivitySampleInput[], period?: KeyActivityPeriod) =>
     invoke<KeyActivitySummaryDto>("key_activity_summary", { samples, period }),
   keyActivityRules: () => invoke<KeyActivityRuleDto[]>("key_activity_rules"),
+
+  // ── T11 / MOEX ALGO: датасеты ALGOPACK ───────────────────────────────────────
+  algoTradestats: (market: AlgoMarket, secid: string, fromTs: number, toTs: number) =>
+    invoke<TradestatsDto[]>("algo_tradestats", { market, secid, fromTs, toTs }),
+  algoFutoi: (market: AlgoMarket, secid: string, fromTs: number, toTs: number) =>
+    invoke<FutoiDto[]>("algo_futoi", { market, secid, fromTs, toTs }),
+  algoHi2: (market: AlgoMarket, secid: string, fromTs: number, toTs: number) =>
+    invoke<Hi2Dto[]>("algo_hi2", { market, secid, fromTs, toTs }),
+  algoMegaAlerts: (
+    market: AlgoMarket,
+    secids: string[],
+    fromTs: number,
+    toTs: number,
+    thresholds?: MegaThresholdsInput,
+  ) => invoke<MegaAlertDto[]>("algo_mega_alerts", { market, secids, fromTs, toTs, thresholds }),
 
   // ── Фаза 11 / Историзация ────────────────────────────────────────────────────
   historyDatasets: () => invoke<DatasetMetaDto[]>("history_datasets"),

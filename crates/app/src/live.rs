@@ -101,3 +101,69 @@ pub async fn run(mic: &str) -> Result<(), Box<dyn std::error::Error>> {
     svc.run().await;
     Ok(())
 }
+
+// ── Фаза 10.6.4 — ингест ALGOPACK (фича `moex`) ───────────────────────────────
+//
+// В отличие от `run` (Finam bars, вызывается из `main()` по CLI-аргументу),
+// у `run_algo` пока нет собственного CLI-входа — вотчлист/рынок ALGOPACK
+// приходят из настроек паспорта MOEX ALGO (10.8.1), UI для которых уже есть,
+// а связка «настройки → запуск планировщика» — задача следующей интеграции.
+// Публичное API уже готово и протестировано (`AlgoIngestService` на фейке);
+// глушим dead_code, как у `ingest`/`replay`.
+
+/// Переменная окружения с токеном MOEX ALGOPACK (`Authorization: Bearer`).
+#[cfg(feature = "moex")]
+#[allow(dead_code)]
+pub const ALGO_TOKEN_ENV_VAR: &str = "MOEX_ALGOPACK_TOKEN";
+
+/// Достать токен ALGOPACK: переменная окружения [`ALGO_TOKEN_ENV_VAR`], затем
+/// файл `.env` (тот же поиск вверх по дереву каталогов, что и у
+/// [`load_secret`]; ключи `MOEX_ALGOPACK_TOKEN`/`ALGOPACK_TOKEN`, без учёта
+/// регистра). Отдельный секрет от Finam API — разные хосты/авторизация
+/// (10.0.1: `Authorization: Bearer` на `apim.moex.com`, без общего с Finam
+/// gRPC-секретом смысла).
+#[cfg(feature = "moex")]
+#[allow(dead_code)]
+pub fn load_algo_token() -> Result<String, String> {
+    if let Ok(s) = std::env::var(ALGO_TOKEN_ENV_VAR) {
+        if !s.trim().is_empty() {
+            return Ok(s.trim().to_owned());
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let keys = ["MOEX_ALGOPACK_TOKEN", "ALGOPACK_TOKEN"];
+        if let Some(s) = data::dotenv::find_dotenv_value(&cwd, 4, &keys) {
+            return Ok(s);
+        }
+    }
+    Err(
+        "токен ALGOPACK не задан: установите переменную окружения MOEX_ALGOPACK_TOKEN \
+         или положите его в файл .env (MOEX_ALGOPACK_TOKEN=…)"
+            .to_owned(),
+    )
+}
+
+/// Боевой цикл ингеста ALGOPACK: авторизация по токену → планировщик по
+/// вотчлисту `symbols` на рынке `config.market`. Отдельный вход от
+/// [`run`] — не требует Finam-секрета/справочника (символы задаёт вызывающая
+/// сторона, обычно watchlist из настроек паспорта MOEX ALGO, 10.8.1).
+#[cfg(feature = "moex")]
+#[allow(dead_code)]
+pub async fn run_algo(
+    state: Arc<AppState>,
+    symbols: Vec<String>,
+    config: crate::algo_ingest::AlgoIngestConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let token = load_algo_token()?;
+    let transport = data::ReqwestTransport::new()?;
+    let client = data::MoexAlgo::new(transport, token);
+
+    tracing::info!(
+        market = config.market.code(),
+        symbols = symbols.len(),
+        "live: запуск планировщика ингеста ALGOPACK"
+    );
+    let svc = crate::algo_ingest::AlgoIngestService::new(client, state, symbols, config);
+    svc.run().await;
+    Ok(())
+}

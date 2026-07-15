@@ -30,6 +30,15 @@ mod feed;
 #[allow(dead_code)]
 mod ingest;
 
+// Планировщик ингеста ALGOPACK (10.6.4): опрос вотчлиста по датасетам
+// Super Candles/FUTOI/HI2 (`data::moex::AlgoSource`) в хранилище. Отдельный
+// модуль от [`ingest`] (не завязан на `MarketData`/Finam), но тот же паттерн:
+// `AlgoIngestService::tick` тестируется на фейке (`FakeAlgoSource`), боевой
+// цикл `run` в headless-сборке не вызывается напрямую — глушим dead_code.
+#[cfg(feature = "moex")]
+#[allow(dead_code)]
+mod algo_ingest;
+
 #[cfg(feature = "live")]
 mod live;
 
@@ -506,6 +515,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "  key_activity_summary(1h): fallback={}, строк в своде={}",
             ka_sum.fallback, ka_sum.row_count
+        );
+
+        // T11 — MOEX ALGO: датасеты ALGOPACK (чтение из storage T8; демо-store
+        // без ALGOPACK-таблиц — пустые ответы, но контур упражняется целиком).
+        let algo_ts = state.algo_tradestats("eq", "SBER@MISX", 0, i64::MAX)?;
+        let algo_fu = state.algo_futoi("fo", "SBER@MISX", 0, i64::MAX)?;
+        let algo_hi = state.algo_hi2("eq", "SBER@MISX", 0, i64::MAX)?;
+        let algo_mega =
+            state.algo_mega_alerts("eq", &["SBER@MISX".to_string()], 0, i64::MAX, None)?;
+        println!(
+            "  algo_tradestats/futoi/hi2/mega_alerts(SBER@MISX): {}/{}/{}/{}",
+            algo_ts.len(),
+            algo_fu.len(),
+            algo_hi.len(),
+            algo_mega.len()
         );
 
         // Фаза 11 — историзация: каталог датасетов + план дозагрузки.

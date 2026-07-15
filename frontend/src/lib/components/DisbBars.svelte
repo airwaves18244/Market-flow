@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import * as echarts from "echarts";
-  import type { SuperBar } from "../algoMock";
+  import type { TradestatsDto } from "../types";
 
   // Дисбаланс покупок/продаж по барам (Фаза 10): зелёный вверх / красный вниз.
-  let { bars = [] }: { bars: SuperBar[] } = $props();
+  // Данные — датасет ALGOPACK `tradestats` (боевой IPC/мок, T11).
+  let { bars = [] }: { bars: TradestatsDto[] } = $props();
 
   let el: HTMLDivElement;
   let chart: echarts.ECharts | undefined;
