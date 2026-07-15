@@ -24,8 +24,11 @@ use storage::backfill::{chunk_range, FetchRange};
 use crate::{DataError, MarketData};
 
 /// Контракт источника исторических баров. Возвращает бары ключа
-/// (source, secid, tf) в окне `[from, till]` (включительно), нормализованные к
-/// UTC и упорядоченные по возрастанию `ts`, без дублей по `ts`.
+/// (source, secid, tf) в полуоткрытом окне `[from, till)` (бар ровно на `till`
+/// не попадает), нормализованные к UTC и упорядоченные по возрастанию `ts`, без
+/// дублей по `ts`. Полуоткрытая семантика согласована с
+/// [`domain::history::TimeRange`] и планом дыр (`missing_ranges`), поэтому
+/// смежные диапазоны стыкуются без перекрытия на границе.
 ///
 /// Как и [`MarketData`]/[`crate::moex::AlgoSource`], метод возвращает
 /// `impl Future + Send` (RPITIT), поэтому контракт используется через
@@ -33,7 +36,7 @@ use crate::{DataError, MarketData};
 /// транспортного слоя `data` (без зависимости от `async-trait`).
 pub trait HistorySource {
     /// Загрузить историю инструмента `ticker` в тайм-фрейме `tf` за окно
-    /// `[from, till]` (UNIX-секунды UTC, включительно).
+    /// `[from, till)` (UNIX-секунды UTC, полуоткрыто: `till` исключается).
     fn load(
         &self,
         ticker: &str,
@@ -103,8 +106,9 @@ impl<M: MarketData + Sync> HistorySource for FinamHistory<M> {
                 .bars(ticker, tf, page.from_ts, page.to_ts)
                 .await?;
             for b in bars {
-                // Finam отдаёт `ts` уже в UTC; страхуемся от выхода за окно.
-                if b.ts < from || b.ts > till {
+                // Finam отдаёт `ts` уже в UTC; окно полуоткрыто — бар ровно на
+                // `till` отбрасываем (MarketData::bars включает границу).
+                if b.ts < from || b.ts >= till {
                     continue;
                 }
                 merged.insert(
@@ -171,8 +175,9 @@ impl<S: crate::moex::AlgoSource + Sync> HistorySource for MoexHistory<S> {
             .await?;
         let mut merged: BTreeMap<i64, HistoryBar> = BTreeMap::new();
         for c in candles {
-            // `ts` уже в UTC (перевод MSK→UTC выполнил парсер ISS).
-            if c.ts < from || c.ts > till {
+            // `ts` уже в UTC (перевод MSK→UTC выполнил парсер ISS). Окно
+            // полуоткрыто: свеча ровно на `till` в результат не попадает.
+            if c.ts < from || c.ts >= till {
                 continue;
             }
             let mut bar = HistoryBar::ohlcv(
@@ -220,8 +225,8 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// Фейковый источник истории: отдаёт заранее заданные бары, фильтруя по
-/// (ticker, tf) и окну `[from, till]`. Для тестов оркестрации в `app`/
-/// `storage` без сети. Установленная `error` перекрывает выдачу.
+/// (ticker, tf) и полуоткрытому окну `[from, till)`. Для тестов оркестрации в
+/// `app`/`storage` без сети. Установленная `error` перекрывает выдачу.
 #[derive(Debug, Clone, Default)]
 pub struct FakeHistorySource {
     /// Пул баров, из которого выбираются подходящие запросу.
@@ -251,7 +256,8 @@ impl HistorySource for FakeHistorySource {
         let mut out: Vec<HistoryBar> = self
             .bars
             .iter()
-            .filter(|b| b.secid == ticker && b.tf == tf && b.ts >= from && b.ts <= till)
+            // Полуоткрытое окно `[from, till)`: бар ровно на `till` исключается.
+            .filter(|b| b.secid == ticker && b.tf == tf && b.ts >= from && b.ts < till)
             .cloned()
             .collect();
         out.sort_by_key(|b| b.ts);
@@ -352,20 +358,22 @@ mod tests {
 
     #[test]
     fn finam_history_chunks_range_into_pages() {
-        // Окно 10 баров по суткам, предел 4 на страницу → 3 страницы (4+4+2).
+        // Окно чанкуется на 3 страницы (предел 4 на страницу). Семантика
+        // полуоткрытая: бар ровно на `till = 9*day` в результат не попадает.
         let day = TimeFrame::D1.seconds();
         let market = FakeMarket::new(day);
         let hist = FinamHistory::with_max_bars(market, 4);
         let bars = block_on(hist.load("SBER", TimeFrame::D1, 0, 9 * day)).unwrap();
 
-        // Склейка: по бару на сутки, без дублей на стыках страниц.
-        assert_eq!(bars.len(), 10);
+        // Склейка: по бару на сутки [0, 9*day) → 9 баров (без бара на границе).
+        assert_eq!(bars.len(), 9);
         assert!(bars.iter().all(|b| b.source == DataSource::Finam));
         assert_eq!(bars.first().unwrap().ts, 0);
-        assert_eq!(bars.last().unwrap().ts, 9 * day);
+        assert_eq!(bars.last().unwrap().ts, 8 * day);
         // порядок строго по возрастанию
         assert!(bars.windows(2).all(|w| w[0].ts < w[1].ts));
 
+        // Чанкинг диапазона не зависит от полуоткрытого пост-фильтра.
         let calls = hist.market.calls.lock().unwrap().clone();
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[0], (0, 3 * day));
@@ -375,15 +383,26 @@ mod tests {
 
     #[test]
     fn finam_history_dedups_overlapping_and_out_of_window_bars() {
-        // Один запрос (предел велик): фейк вернёт бары строго в окне.
+        // Полуоткрытое окно [day, 3*day): бар ровно на `till = 3*day` отсечён.
         let day = TimeFrame::D1.seconds();
         let market = FakeMarket::new(day);
         let hist = FinamHistory::new(market);
         let bars = block_on(hist.load("SBER", TimeFrame::D1, day, 3 * day)).unwrap();
         assert_eq!(
             bars.iter().map(|b| b.ts).collect::<Vec<_>>(),
-            vec![day, 2 * day, 3 * day]
+            vec![day, 2 * day]
         );
+    }
+
+    #[test]
+    fn finam_history_excludes_bar_exactly_on_till() {
+        // Явная проверка полуоткрытости: запрос [0, 2*day) над барами 0,day,2day
+        // не должен включать бар на границе 2*day.
+        let day = TimeFrame::D1.seconds();
+        let market = FakeMarket::new(day);
+        let hist = FinamHistory::new(market);
+        let bars = block_on(hist.load("SBER", TimeFrame::D1, 0, 2 * day)).unwrap();
+        assert_eq!(bars.iter().map(|b| b.ts).collect::<Vec<_>>(), vec![0, day]);
     }
 
     #[test]

@@ -108,41 +108,52 @@
   let hi2Rank = $state<Hi2Dto[]>([]);
   let megaAlerts = $state<MegaAlertDto[]>([]);
 
-  async function loadTickerData() {
+  // Счётчик поколений запросов: при быстром переключении инструмента/рынка
+  // ответы более старых запросов не должны затирать состояние свежих. Каждый
+  // загрузчик фиксирует своё поколение и присваивает результат только если оно
+  // всё ещё актуально. `loadAlgoData` задаёт одно поколение на весь пакет.
+  let reqSeq = 0;
+
+  async function loadTickerData(seq = ++reqSeq) {
     const [ts, fu, hi] = await Promise.all([
       ipc.algoTradestats(market, ticker, FROM_TS, TO_TS),
       ipc.algoFutoi(market, ticker, FROM_TS, TO_TS),
       ipc.algoHi2(market, ticker, FROM_TS, TO_TS),
     ]);
+    if (seq !== reqSeq) return;
     candles = ts;
     futoiPoints = fu;
     hi2Points = hi;
   }
 
-  async function loadHi2Ranking() {
+  async function loadHi2Ranking(seq = ++reqSeq) {
     const results = await Promise.all(
       universe.map(async (t) => {
         const pts = await ipc.algoHi2(market, t.ticker, FROM_TS, TO_TS);
         return pts.at(-1) ?? null;
       }),
     );
+    if (seq !== reqSeq) return;
     hi2Rank = results
       .filter((r): r is Hi2Dto => r !== null)
       .sort((a, b) => b.concentration - a.concentration)
       .slice(0, 10);
   }
 
-  async function loadMegaAlerts() {
-    megaAlerts = await ipc.algoMegaAlerts(
+  async function loadMegaAlerts(seq = ++reqSeq) {
+    const alerts = await ipc.algoMegaAlerts(
       market,
       universe.map((t) => t.ticker),
       FROM_TS,
       TO_TS,
     );
+    if (seq !== reqSeq) return;
+    megaAlerts = alerts;
   }
 
   async function loadAlgoData() {
-    await Promise.all([loadTickerData(), loadHi2Ranking(), loadMegaAlerts()]);
+    const seq = ++reqSeq;
+    await Promise.all([loadTickerData(seq), loadHi2Ranking(seq), loadMegaAlerts(seq)]);
   }
 
   async function setTicker(t: string) {
@@ -164,11 +175,17 @@
   // ── Производные представления для остальных модулей ────────────────────────
   const scRows = $derived([...candles].slice(-14).reverse());
 
-  function isAnomalous(c: TradestatsDto, all: TradestatsDto[]): boolean {
-    if (all.length < 5) return false;
-    const sorted = [...all].map((x) => x.vol).sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    return median > 0 && c.vol > median * 2.2;
+  // Медиана объёма считается один раз на смену `candles`, а не на каждую строку
+  // таблицы (раньше copy+sort выполнялись для каждого бара). `null` — если
+  // выборки мало для оценки (меньше 5 баров).
+  const volMedian = $derived.by((): number | null => {
+    if (candles.length < 5) return null;
+    const sorted = candles.map((x) => x.vol).sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  });
+
+  function isAnomalous(c: TradestatsDto): boolean {
+    return volMedian !== null && volMedian > 0 && c.vol > volMedian * 2.2;
   }
 
   interface FutoiRow {
@@ -339,7 +356,7 @@
             </thead>
             <tbody>
               {#each scRows as b (b.ts)}
-                <tr class:anom={isAnomalous(b, candles)}>
+                <tr class:anom={isAnomalous(b)}>
                   <td class="dim">{timeLabel(b.ts)}</td>
                   <td class="num">{fmt(b.prOpen)}</td><td class="num">{fmt(b.prHigh)}</td>
                   <td class="num">{fmt(b.prLow)}</td><td class="num">{fmt(b.prClose)}</td>

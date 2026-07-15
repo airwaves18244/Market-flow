@@ -294,6 +294,27 @@ pub trait Store {
         tf: TimeFrame,
     ) -> Result<Option<i64>, StorageError>;
 
+    /// Удалить все исторические бары ключа (source, secid, tf). Возвращает число
+    /// удалённых строк. Каталог (`history_datasets`) не затрагивается — его
+    /// чистит вызывающий слой (см. [`remove_dataset`](Store::remove_dataset)).
+    fn delete_history_bars(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<usize, StorageError>;
+
+    /// Число исторических баров ключа (source, secid, tf) в `[from_ts, to_ts]`
+    /// (включительно) без их материализации — для пересчёта метаданных датасета.
+    fn count_history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<u64, StorageError>;
+
     /// Вставить/обновить метаданные датасета в каталоге (`history_datasets`).
     /// Идемпотентно по ключу (source, secid, tf) — строка перезаписывается
     /// целиком. Слияние диапазонов (при необходимости) выполняет вызывающий слой
@@ -328,10 +349,13 @@ pub trait Store {
         })
     }
 
-    /// Недостающие подсегменты `requested`, ещё не покрытые датасетом ключа
-    /// (source, secid, tf) — план инкрементальной дозагрузки. Покрытие берётся
-    /// из каталога (`history_datasets`), дыры считает
-    /// [`domain::history::missing_ranges`]. Пустой результат — всё покрыто.
+    /// Недостающие подсегменты `requested`, ещё не покрытые ключом
+    /// (source, secid, tf) — план инкрементальной дозагрузки. Покрытие считается
+    /// по фактическим барам (`history_bars`), а не по огибающему `range`
+    /// каталога: каждый сохранённый бар покрывает `[ts, ts + tf.seconds())`,
+    /// смежные бары сливаются, а внутренние дыры (несмежные догрузки) корректно
+    /// попадают в план. Дыры считает [`domain::history::missing_ranges`];
+    /// пустой результат — всё покрыто.
     fn history_missing_ranges(
         &self,
         source: DataSource,
@@ -339,10 +363,15 @@ pub trait Store {
         tf: TimeFrame,
         requested: TimeRange,
     ) -> Result<Vec<TimeRange>, StorageError> {
-        let covered = match self.dataset(source, secid, tf)? {
-            Some(meta) => vec![meta.range],
-            None => Vec::new(),
-        };
+        if requested.is_empty() {
+            return Ok(Vec::new());
+        }
+        let step = tf.seconds().max(1);
+        let covered: Vec<TimeRange> = self
+            .history_bars(source, secid, tf, requested.from, requested.till)?
+            .into_iter()
+            .map(|b| TimeRange::new(b.ts, b.ts + step))
+            .collect();
         Ok(missing_ranges(requested, &covered))
     }
 

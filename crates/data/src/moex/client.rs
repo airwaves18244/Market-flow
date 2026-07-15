@@ -48,6 +48,16 @@ impl Market {
             Market::Fx => "fx",
         }
     }
+
+    /// Разбор рынка из кода (`eq`/`fo`/`fx`); `None` для неизвестного.
+    pub fn from_code(code: &str) -> Option<Market> {
+        match code {
+            "eq" => Some(Market::Eq),
+            "fo" => Some(Market::Fo),
+            "fx" => Some(Market::Fx),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for Market {

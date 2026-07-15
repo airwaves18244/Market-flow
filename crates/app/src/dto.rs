@@ -1440,6 +1440,10 @@ pub struct HistoryLoadInput {
     pub from: i64,
     /// Конец окна (unix-секунды, исключительно — полуоткрытый `[from, till)`).
     pub till: i64,
+    /// Рынок ALGOPACK для источника `moex_algo` (`eq|fo|fx`, по умолчанию `eq`).
+    /// Для `finam` игнорируется. Аддитивное поле — старый фронт не присылает его.
+    #[serde(default)]
+    pub market: Option<String>,
 }
 
 /// Идентификатор запущенной загрузки (ответ `history_load`).

@@ -786,6 +786,46 @@ impl Store for DuckStore {
         Ok(v)
     }
 
+    fn delete_history_bars(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<usize, StorageError> {
+        let n = self
+            .conn
+            .execute(
+                "DELETE FROM history_bars WHERE source = ? AND secid = ? AND tf = ?",
+                params![source.code(), secid, tf.code()],
+            )
+            .map_err(db)?;
+        Ok(n)
+    }
+
+    fn count_history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<u64, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT count(*) FROM history_bars \
+                 WHERE source = ? AND secid = ? AND tf = ? AND ts BETWEEN ? AND ?",
+            )
+            .map_err(db)?;
+        let n: i64 = stmt
+            .query_row(
+                params![source.code(), secid, tf.code(), from_ts, to_ts],
+                |row| row.get(0),
+            )
+            .map_err(db)?;
+        Ok(n.max(0) as u64)
+    }
+
     fn upsert_dataset(&mut self, meta: &DatasetMeta) -> Result<(), StorageError> {
         self.conn
             .execute(
@@ -1338,7 +1378,16 @@ mod tests {
         assert_eq!(d.range, TimeRange::new(0, 1200));
         assert_eq!(d.bars, 4);
 
-        // интеграция с missing_ranges: хвост за пределами покрытия
+        // интеграция с missing_ranges: покрытие считается по фактическим барам,
+        // а не по огибающему `range` каталога. Бары M5 (шаг 300) на 0..900
+        // покрывают [0,1200); хвост [1200,2000) — недостающий.
+        s.insert_history_bars(&[
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 0, 1.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 300, 2.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 600, 3.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 900, 4.0),
+        ])
+        .unwrap();
         assert_eq!(
             s.history_missing_ranges(
                 DataSource::Finam,
@@ -1348,6 +1397,23 @@ mod tests {
             )
             .unwrap(),
             vec![TimeRange::new(1200, 2000)]
+        );
+        assert_eq!(
+            s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, 2000)
+                .unwrap(),
+            4
+        );
+
+        // Удаление баров ключа чистит только бары; каталог удаляем отдельно.
+        assert_eq!(
+            s.delete_history_bars(DataSource::Finam, "SBER", TimeFrame::M5)
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, 2000)
+                .unwrap(),
+            0
         );
 
         assert!(s

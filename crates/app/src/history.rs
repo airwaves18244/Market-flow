@@ -295,12 +295,26 @@ where
                     .into_iter()
                     .filter(|b| b.secid == ticker && b.tf == tf)
                     .collect();
-                if !bars.is_empty() {
+                if bars.is_empty() {
+                    // Пустой ответ без ошибки: не помечаем диапазон покрытым
+                    // (иначе бы дыра «закрылась» без единого бара). Сообщаем
+                    // предупреждением в тот же канал, что и ошибки задач.
+                    emit(HistoryEvent::Error {
+                        task_id,
+                        ticker: Some(ticker.to_owned()),
+                        tf: Some(tf),
+                        message: format!(
+                            "пустой ответ для [{}, {}) — диапазон оставлен дырой",
+                            gap.from, gap.till
+                        ),
+                    });
+                } else {
                     written += state
                         .ingest_history_bars(&bars)
                         .map_err(|e| e.to_string())? as u64;
+                    // Помечаем покрытым только фактически загруженный диапазон.
+                    attempted.push(*gap);
                 }
-                attempted.push(*gap);
                 let percent = (((i as u64) + 1) * 100 / total) as u8;
                 emit(HistoryEvent::Progress {
                     task_id,
@@ -605,6 +619,43 @@ mod tests {
         let mut tfs: Vec<String> = st.history_datasets().into_iter().map(|d| d.tf).collect();
         tfs.sort();
         assert_eq!(tfs, vec!["d1", "h1"]);
+    }
+
+    #[tokio::test]
+    async fn empty_response_keeps_range_as_gap() {
+        // Источник без баров: ответ пуст, но без ошибки транспорта.
+        let st = state();
+        let day = TimeFrame::D1.seconds();
+        let src = FakeHistorySource::with_bars(Vec::new());
+        let col = Collector::default();
+        let request = req(DataSource::Finam, &["SBER"], &[TimeFrame::D1], 0, 3 * day);
+
+        let summary = run_load(&st, &src, &request, 1, &CancelFlag::new(), &|e| col.push(e)).await;
+
+        // Задача «пройдена» без ошибки источника, но баров нет и каталог пуст.
+        assert_eq!(summary.bars, 0);
+        assert_eq!(summary.completed, 1);
+        assert_eq!(summary.errors, 0);
+        assert!(st.history_datasets().is_empty());
+
+        // Диапазон остался дырой: повторный план — весь запрос целиком.
+        let missing = st
+            .history_missing(
+                DataSource::Finam,
+                "SBER",
+                TimeFrame::D1,
+                TimeRange::new(0, 3 * day),
+            )
+            .unwrap();
+        assert_eq!(missing, vec![TimeRange::new(0, 3 * day)]);
+
+        // На пустой ответ эмитнуто предупреждение (канал `history:error`).
+        let warnings = col
+            .events()
+            .into_iter()
+            .filter(|e| matches!(e, HistoryEvent::Error { .. }))
+            .count();
+        assert!(warnings >= 1, "ожидалось предупреждение о пустом ответе");
     }
 
     #[test]

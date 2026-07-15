@@ -541,6 +541,8 @@ export interface HistoryLoadInput {
   from: number;
   /** Конец окна, unix-секунды (исключительно, полуоткрытый `[from, till)`). */
   till: number;
+  /** Рынок ALGOPACK для `moex_algo` (`eq|fo|fx`, дефолт `eq`); для `finam` игнорируется. */
+  market?: AlgoMarket;
 }
 
 export interface HistoryTaskDto {

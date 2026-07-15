@@ -12,18 +12,20 @@ use std::path::{Path, PathBuf};
 /// Имя файла основной БД DuckDB в директории данных.
 pub const DB_FILE_NAME: &str = "market-flow.duckdb";
 
-/// Имя подкаталога приложения в ОС-директории данных.
-const APP_DIR: &str = "market-flow";
+/// Имя подкаталога приложения в ОС-директории данных. Единый нейминг с
+/// каталогом настроек (`app::settings`, `APP_DIR_NAME = "market-terminal"`).
+const APP_DIR: &str = "market-terminal";
 
-/// Переменная окружения для явного переопределения директории данных.
-pub const DATA_DIR_ENV: &str = "MARKETFLOW_DATA_DIR";
+/// Переменная окружения для явного переопределения директории данных. Парная к
+/// `MARKET_TERMINAL_CONFIG_DIR` из `app::settings`.
+pub const DATA_DIR_ENV: &str = "MARKET_TERMINAL_DATA_DIR";
 
 /// Директория данных по умолчанию.
 ///
-/// Приоритет: `MARKETFLOW_DATA_DIR` → ОС-директория данных пользователя
+/// Приоритет: `MARKET_TERMINAL_DATA_DIR` → ОС-директория данных пользователя
 /// (`%APPDATA%`/`$XDG_DATA_HOME`/`~/Library/Application Support`/
-/// `~/.local/share`) с подкаталогом `market-flow` → относительный
-/// `market-flow-data` как крайний фолбэк, если окружение не задано.
+/// `~/.local/share`) с подкаталогом `market-terminal` → относительный
+/// `market-terminal-data` как крайний фолбэк, если окружение не задано.
 pub fn default_data_dir() -> PathBuf {
     if let Some(explicit) = std::env::var_os(DATA_DIR_ENV) {
         if !explicit.is_empty() {
@@ -33,7 +35,7 @@ pub fn default_data_dir() -> PathBuf {
     if let Some(dir) = os_data_dir() {
         return dir.join(APP_DIR);
     }
-    PathBuf::from("market-flow-data")
+    PathBuf::from("market-terminal-data")
 }
 
 /// ОС-директория данных пользователя (без подкаталога приложения).

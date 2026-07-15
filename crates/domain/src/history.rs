@@ -133,6 +133,14 @@ impl TimeRange {
     fn touches(&self, other: &TimeRange) -> bool {
         self.from <= other.till && other.from <= self.till
     }
+
+    /// Огибающая двух диапазонов: `[min(from), max(till))`. В отличие от
+    /// [`normalize_ranges`], не теряет несмежные куски — граничные значения
+    /// берутся по краям, а внутренние дыры остаются «дырами» (их истинное
+    /// покрытие определяется барами, а не этим диапазоном).
+    pub fn envelope(&self, other: &TimeRange) -> TimeRange {
+        TimeRange::new(self.from.min(other.from), self.till.max(other.till))
+    }
 }
 
 /// Нормализовать набор диапазонов: отбросить пустые, отсортировать и слить
@@ -192,7 +200,11 @@ pub struct DatasetMeta {
     pub source: DataSource,
     pub secid: String,
     pub tf: TimeFrame,
-    /// Покрытый диапазон (нормализованный).
+    /// Огибающий диапазон покрытия `[min(from), max(till))`. Внутри возможны
+    /// дыры — это лишь внешние границы датасета, а не гарантия сплошного
+    /// покрытия. Источник истины по фактическому покрытию — сами бары
+    /// (`history_bars`) и построенный по ним план дыр
+    /// (`Store::history_missing_ranges`).
     pub range: TimeRange,
     /// Число баров в датасете.
     pub bars: u64,
@@ -236,18 +248,17 @@ impl Catalog {
             .find(|d| d.source == source && d.secid == secid && d.tf == tf)
     }
 
-    /// Вставить или объединить метаданные: при совпадении ключа диапазоны
-    /// сливаются (нормализация), число баров и время обновления берутся из
-    /// нового значения.
+    /// Вставить или объединить метаданные: при совпадении ключа диапазон
+    /// расширяется до огибающей (`[min(from), max(till))`) — несмежные куски не
+    /// теряются, внутренние дыры остаются на совести баров/`missing_ranges`.
+    /// Число баров и время обновления берутся из нового значения.
     pub fn upsert(&mut self, meta: DatasetMeta) {
         if let Some(existing) = self
             .datasets
             .iter_mut()
             .find(|d| d.source == meta.source && d.secid == meta.secid && d.tf == meta.tf)
         {
-            let merged = normalize_ranges(&[existing.range, meta.range]);
-            // Слияние смежных/пересекающихся диапазонов даёт один кусок.
-            existing.range = merged.into_iter().next().unwrap_or(meta.range);
+            existing.range = existing.range.envelope(&meta.range);
             existing.bars = meta.bars;
             existing.updated_ts = meta.updated_ts;
         } else {
@@ -362,6 +373,33 @@ mod tests {
         assert_eq!(cat.datasets.len(), 1);
         let d = cat.find(DataSource::Finam, "SBER", TimeFrame::H1).unwrap();
         assert_eq!(d.range, r(0, 7200)); // смежные слились
+        assert_eq!(d.bars, 2);
+    }
+
+    #[test]
+    fn catalog_upsert_envelopes_non_adjacent_range() {
+        // Несмежные догрузки [0,10) и [50,60) не должны терять второй кусок:
+        // диапазон расширяется до огибающей [0,60), а дыра [10,50) остаётся на
+        // совести баров/missing_ranges.
+        let mut cat = Catalog::new();
+        cat.upsert(DatasetMeta {
+            source: DataSource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::D1,
+            range: r(0, 10),
+            bars: 1,
+            updated_ts: 10,
+        });
+        cat.upsert(DatasetMeta {
+            source: DataSource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::D1,
+            range: r(50, 60),
+            bars: 2,
+            updated_ts: 60,
+        });
+        let d = cat.find(DataSource::Finam, "SBER", TimeFrame::D1).unwrap();
+        assert_eq!(d.range, r(0, 60)); // огибающая, а не потерянный [0,10)
         assert_eq!(d.bars, 2);
     }
 

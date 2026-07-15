@@ -8,7 +8,7 @@
 //! Модуль компилируется только в десктопном окружении (на Linux требуется
 //! webkit2gtk), поэтому он вне кросс-платформенного CI.
 
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use domain::backtest::StrategyParams;
 use domain::TimeFrame;
@@ -466,13 +466,14 @@ fn emit_history_event(app: &tauri::AppHandle, ev: crate::history::HistoryEvent) 
 
 /// Запустить фоновую загрузку истории (IPC `history_load`).
 ///
-/// Регистрирует задачу в реестре, строит боевой источник по коду (`finam` —
-/// Finam Trade API, требует фичи `live`; `moex_algo` — ALGOPACK, требует фичи
-/// `moex`) и прогоняет [`crate::history::run_load`], транслируя события в
-/// каналы `history:*`. Возвращает `taskId` (для точечной отмены). Отмена
-/// работает и без него — команда `history_cancel(None)` останавливает все
-/// активные загрузки. Каждая пара `(тикер, TF)` качает только недостающие
-/// диапазоны; ошибка одной задачи не роняет остальные.
+/// Регистрирует задачу в реестре, немедленно возвращает `taskId` и запускает
+/// загрузку в фоне (`tauri::async_runtime::spawn`): прогресс, завершение и
+/// ошибки идут только событиями `history:*`, команда не блокируется на всё
+/// время скачивания. Боевой источник строится по коду (`finam` — Finam Trade
+/// API, требует фичи `live`; `moex_algo` — ALGOPACK, требует фичи `moex`).
+/// Для `moex_algo` рынок берётся из `input.market` (`eq|fo|fx`, дефолт `eq`).
+/// Отмена — `history_cancel(taskId?)`; каждая пара `(тикер, TF)` качает только
+/// недостающие диапазоны, ошибка одной задачи не роняет остальные.
 #[tauri::command]
 async fn history_load(
     app: tauri::AppHandle,
@@ -481,51 +482,98 @@ async fn history_load(
 ) -> CmdResult<crate::dto::HistoryTaskDto> {
     use domain::history::DataSource;
 
+    // Разбор входа выполняем синхронно — ошибки ввода возвращаем сразу, до
+    // регистрации задачи и спавна.
     let request = crate::history::parse_load_input(&input)?;
-    let (task_id, cancel) = state.history_tasks().start();
-    let emit = move |ev| emit_history_event(&app, ev);
-
-    let outcome: Result<(), String> = match request.source {
-        DataSource::MoexAlgo => {
-            #[cfg(feature = "moex")]
-            {
-                let token = std::env::var("MOEX_ALGOPACK_TOKEN")
-                    .map_err(|_| "токен ALGOPACK не задан (MOEX_ALGOPACK_TOKEN)".to_owned())?;
-                let transport = data::ReqwestTransport::new().map_err(|e| e.to_string())?;
-                let client = data::MoexAlgo::new(transport, token);
-                let source = data::MoexHistory::new(client, data::moex::Market::Eq);
-                crate::history::run_load(state.inner(), &source, &request, task_id, &cancel, &emit)
-                    .await;
-                Ok(())
-            }
-            #[cfg(not(feature = "moex"))]
-            {
-                Err("источник MOEX ALGO недоступен в этой сборке (нужна фича `moex`)".to_owned())
-            }
-        }
-        DataSource::Finam => {
-            #[cfg(feature = "live")]
-            {
-                let secret = crate::live::load_secret()?;
-                let auth = data::AuthManager::new(
-                    data::GrpcAuthTransport::new(),
-                    data::MemSecretStore::with_secret(secret),
-                );
-                let md = data::FinamMarketData::connect(auth).map_err(|e| e.to_string())?;
-                let source = data::FinamHistory::new(md);
-                crate::history::run_load(state.inner(), &source, &request, task_id, &cancel, &emit)
-                    .await;
-                Ok(())
-            }
-            #[cfg(not(feature = "live"))]
-            {
-                Err("источник Finam недоступен в этой сборке (нужна фича `live`)".to_owned())
-            }
-        }
+    #[cfg(feature = "moex")]
+    let market = match input.market.as_deref() {
+        None | Some("") => data::moex::Market::Eq,
+        Some(code) => data::moex::Market::from_code(code)
+            .ok_or_else(|| format!("неизвестный рынок ALGOPACK: {code}"))?,
     };
 
-    state.history_tasks().finish(task_id);
-    outcome?;
+    let (task_id, cancel) = state.history_tasks().start();
+
+    // Фоновый запуск: AppHandle клонируется в спавн, состояние достаём из него
+    // же (`app.state`) — `State<'_>` из аргументов в 'static-спавн не переносим.
+    let app_bg = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let emit = |ev| emit_history_event(&app_bg, ev);
+        let state = app_bg.state::<AppState>();
+        let state: &AppState = state.inner();
+
+        let outcome: Result<(), String> = match request.source {
+            DataSource::MoexAlgo => {
+                #[cfg(feature = "moex")]
+                {
+                    match std::env::var("MOEX_ALGOPACK_TOKEN") {
+                        Ok(token) => match data::ReqwestTransport::new() {
+                            Ok(transport) => {
+                                let client = data::MoexAlgo::new(transport, token);
+                                let source = data::MoexHistory::new(client, market);
+                                crate::history::run_load(
+                                    state, &source, &request, task_id, &cancel, &emit,
+                                )
+                                .await;
+                                Ok(())
+                            }
+                            Err(e) => Err(e.to_string()),
+                        },
+                        Err(_) => Err("токен ALGOPACK не задан (MOEX_ALGOPACK_TOKEN)".to_owned()),
+                    }
+                }
+                #[cfg(not(feature = "moex"))]
+                {
+                    Err(
+                        "источник MOEX ALGO недоступен в этой сборке (нужна фича `moex`)"
+                            .to_owned(),
+                    )
+                }
+            }
+            DataSource::Finam => {
+                #[cfg(feature = "live")]
+                {
+                    match crate::live::load_secret() {
+                        Ok(secret) => {
+                            let auth = data::AuthManager::new(
+                                data::GrpcAuthTransport::new(),
+                                data::MemSecretStore::with_secret(secret),
+                            );
+                            match data::FinamMarketData::connect(auth) {
+                                Ok(md) => {
+                                    let source = data::FinamHistory::new(md);
+                                    crate::history::run_load(
+                                        state, &source, &request, task_id, &cancel, &emit,
+                                    )
+                                    .await;
+                                    Ok(())
+                                }
+                                Err(e) => Err(e.to_string()),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                #[cfg(not(feature = "live"))]
+                {
+                    Err("источник Finam недоступен в этой сборке (нужна фича `live`)".to_owned())
+                }
+            }
+        };
+
+        // Ошибку старта/источника доносим до фронта событием (running на фронте
+        // живёт до `history:done`/`history:error`, а не до промиса команды).
+        if let Err(message) = outcome {
+            emit(crate::history::HistoryEvent::Error {
+                task_id,
+                ticker: None,
+                tf: None,
+                message,
+            });
+        }
+        state.history_tasks().finish(task_id);
+    });
+
     Ok(crate::dto::HistoryTaskDto { task_id })
 }
 

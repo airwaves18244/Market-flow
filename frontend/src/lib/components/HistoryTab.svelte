@@ -3,13 +3,21 @@
   import Panel from "./Panel.svelte";
   import DatasetManager from "./DatasetManager.svelte";
   import { ipc, inTauri, onHistoryProgress, onHistoryDone, onHistoryError } from "../ipc";
-  import type { DataSource, InstrumentDto, TimeRangeDto } from "../types";
+  import type { AlgoMarket, DataSource, InstrumentDto, TimeRangeDto } from "../types";
 
   // Вкладка «Данные»: загрузка исторических данных + менеджер локальных датасетов.
   let { instruments = [] }: { instruments: InstrumentDto[] } = $props();
 
   const timeframes = ["m1", "m5", "m15", "h1", "d1"];
+  // Рынки ALGOPACK — по образцу сегментов MoexAlgoTab; актуальны только для
+  // источника «MOEX ALGO».
+  const markets: { id: AlgoMarket; label: string }[] = [
+    { id: "eq", label: "Акции" },
+    { id: "fo", label: "Фьючерсы" },
+    { id: "fx", label: "Валюта" },
+  ];
   let source = $state<DataSource>("finam");
+  let market = $state<AlgoMarket>("eq");
   let ticker = $state("SBER@MISX");
   let selectedTf = $state<Record<string, boolean>>({ d1: true, h1: false, m5: false });
   let fromDate = $state("2024-01-01");
@@ -56,6 +64,11 @@
       }),
       onHistoryError((e) => {
         status = e.ticker ? `Ошибка ${e.ticker}: ${e.message}` : e.message;
+        // Терминальная ошибка всей загрузки (`ticker` = null) приходит, когда
+        // источник не удалось стартовать — за ней события `history:done` не
+        // будет, поэтому сбрасываем running здесь. Ошибка отдельной задачи
+        // (`ticker` задан) не завершает загрузку.
+        if (e.ticker === null) running = false;
       }),
     ]);
   }
@@ -71,45 +84,54 @@
     status = null;
     running = true;
     cancelSim = false;
+    activeTaskId = null;
     jobs = tfs.map((tf) => ({ key: jobKey(ticker, tf), label: jobLabel(ticker, tf), pct: 0 }));
 
-    // План дозагрузки (какие диапазоны недостают) — реальный backend-вызов.
-    plan = await ipc.historyPlan({
-      covered: [],
-      requestedFrom: toTs(fromDate),
-      requestedTill: toTs(tillDate),
-    });
+    // Весь путь под try/catch: любая ошибка (план/старт задачи/симуляция) не
+    // должна оставить кнопку «Загрузить» заблокированной (running=true).
+    try {
+      // План дозагрузки (какие диапазоны недостают) — реальный backend-вызов.
+      plan = await ipc.historyPlan({
+        covered: [],
+        requestedFrom: toTs(fromDate),
+        requestedTill: toTs(tillDate),
+      });
 
-    if (inTauri()) {
-      // Боевой режим: подписываемся на события и стартуем фоновую загрузку.
-      await subscribe();
-      try {
+      if (inTauri()) {
+        // Боевой режим: подписываемся на события и стартуем фоновую загрузку.
+        // Команда возвращается сразу с taskId; прогресс/итог/ошибка приходят
+        // событиями `history:*`, поэтому running сбрасываем НЕ здесь, а в
+        // обработчиках history:done / history:error (ticker=null).
+        await subscribe();
         const task = await ipc.historyLoad({
           source,
           tickers: [ticker],
           timeframes: tfs,
           from: toTs(fromDate),
           till: toTs(tillDate),
+          // Рынок актуален только для ALGOPACK; для finam бэкенд его игнорирует.
+          ...(source === "moex_algo" ? { market } : {}),
         });
         activeTaskId = task.taskId;
-      } catch (e) {
-        running = false;
-        status = String(e);
-      }
-      // Завершение/итог придёт событием `history:done` (ticker=null).
-    } else {
-      // Браузер: детерминированная симуляция прогресса по каждому (тикер × ТФ).
-      for (const job of jobs) {
-        for (let p = 0; p <= 100; p += 20) {
+      } else {
+        // Браузер: детерминированная симуляция прогресса по каждому (тикер × ТФ).
+        for (const job of jobs) {
+          for (let p = 0; p <= 100; p += 20) {
+            if (cancelSim) break;
+            setJobPct(job.key, p);
+            await new Promise((r) => setTimeout(r, 40));
+          }
           if (cancelSim) break;
-          setJobPct(job.key, p);
-          await new Promise((r) => setTimeout(r, 40));
         }
-        if (cancelSim) break;
+        running = false;
+        status = cancelSim ? "Загрузка отменена" : "Загрузка завершена";
+        await manager?.reload();
       }
+    } catch (e) {
+      // Ошибка ДО запуска фоновой задачи (или в мок-режиме): гарантированно
+      // разблокируем кнопку и показываем причину в статусе.
       running = false;
-      status = cancelSim ? "Загрузка отменена" : "Загрузка завершена";
-      await manager?.reload();
+      status = String(e);
     }
   }
 
@@ -133,6 +155,21 @@
           <option value="moex_algo">MOEX ALGO</option>
         </select>
       </label>
+      {#if source === "moex_algo"}
+        <div class="tfs">
+          <span class="lbl">Рынок</span>
+          <div class="seg">
+            {#each markets as mk (mk.id)}
+              <button
+                type="button"
+                class="seg-btn"
+                class:active={mk.id === market}
+                onclick={() => (market = mk.id)}>{mk.label}</button
+              >
+            {/each}
+          </div>
+        </div>
+      {/if}
       <label>
         Инструмент
         <select bind:value={ticker}>
@@ -222,6 +259,25 @@
     display: flex;
     gap: 4px;
     margin-top: 3px;
+  }
+  .seg {
+    display: flex;
+    gap: 4px;
+    margin-top: 3px;
+  }
+  .seg-btn {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .seg-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
   }
   .chip {
     flex-direction: row;

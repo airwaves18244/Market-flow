@@ -74,10 +74,13 @@ impl AppState {
     /// резолвятся в стандартную ОС-директорию (см. [`SettingsStore::from_env`]);
     /// для тестов/портейбл-режима используйте [`AppState::with_settings_dir`].
     pub fn new(store: impl Store + Send + 'static) -> Self {
+        // Гидратируем каталог из хранилища: после перезапуска поверх наполненного
+        // стора `history_datasets()` сразу видит реальные датасеты (фаза 11).
+        let history = store.catalog().unwrap_or_default();
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
-            history: Mutex::new(Catalog::new()),
+            history: Mutex::new(history),
             settings: Mutex::new(SettingsStore::from_env()),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
@@ -92,10 +95,11 @@ impl AppState {
     /// консольный smoke использует [`AppState::new`], поэтому глушим dead_code.
     #[allow(dead_code)]
     pub fn with_settings_dir(store: impl Store + Send + 'static, settings_dir: PathBuf) -> Self {
+        let history = store.catalog().unwrap_or_default();
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
-            history: Mutex::new(Catalog::new()),
+            history: Mutex::new(history),
             settings: Mutex::new(SettingsStore::new(settings_dir)),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
@@ -540,12 +544,30 @@ impl AppState {
         }
     }
 
-    /// Удалить датасет из каталога. `true` — если запись существовала.
+    /// Удалить датасет: из in-memory-каталога, из каталога хранилища и сами бары
+    /// (`history_bars`), чтобы после удаления не оставалось сирот. `true` — если
+    /// запись каталога существовала.
     pub fn history_delete(&self, input: &DatasetIdInput) -> Result<bool, String> {
         let source = DataSource::from_code(&input.source)
             .ok_or_else(|| format!("неизвестный источник: {}", input.source))?;
         let tf = TimeFrame::from_code(&input.tf)
             .ok_or_else(|| format!("неизвестный тайм-фрейм: {}", input.tf))?;
+        // Хранилище: снять датасет с каталога и стереть его бары. Локом стора
+        // владеем напрямую (метод компилируется во всех сборках, а хелпер
+        // `write` — только под `ingest`/`moex`).
+        {
+            let mut guard = self
+                .store
+                .lock()
+                .map_err(|_| "state lock poisoned".to_string())?;
+            let store = guard.as_mut();
+            store
+                .remove_dataset(source, &input.secid, tf)
+                .map_err(|e| e.to_string())?;
+            store
+                .delete_history_bars(source, &input.secid, tf)
+                .map_err(|e| e.to_string())?;
+        }
         let mut guard = self
             .history
             .lock()
@@ -621,26 +643,20 @@ impl AppState {
         tf: TimeFrame,
         covered: domain::history::TimeRange,
     ) -> Result<DatasetMeta, StorageError> {
-        use domain::history::normalize_ranges;
-
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
         let meta = self.write(|s| {
-            // Слить заявленный диапазон с уже покрытым (из каталога хранилища).
+            // Расширить диапазон каталога до огибающей с уже покрытым — несмежные
+            // догрузки не теряются, внутренние дыры остаются на совести баров.
             let merged = match s.dataset(source, secid, tf)? {
-                Some(existing) => normalize_ranges(&[existing.range, covered])
-                    .into_iter()
-                    .next()
-                    .unwrap_or(covered),
+                Some(existing) => existing.range.envelope(&covered),
                 None => covered,
             };
             // Пересчитать число баров по факту (в объединённом диапазоне).
-            let count = s
-                .history_bars(source, secid, tf, merged.from, merged.till)?
-                .len() as u64;
+            let count = s.count_history_bars(source, secid, tf, merged.from, merged.till)?;
             let meta = DatasetMeta {
                 source,
                 secid: secid.to_owned(),
@@ -748,6 +764,79 @@ mod tests {
             .unwrap();
         assert!(removed);
         assert!(state.history_datasets().is_empty());
+    }
+
+    #[test]
+    fn history_catalog_hydrates_from_store_on_construct() {
+        use domain::history::TimeRange;
+        // Наполняем стор напрямую, затем «перезапуск» — новый AppState поверх
+        // того же наполненного стора должен сразу видеть датасеты.
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .upsert_dataset(&DatasetMeta {
+                source: DataSource::Finam,
+                secid: "SBER".into(),
+                tf: TimeFrame::D1,
+                range: TimeRange::new(0, 86_400),
+                bars: 1,
+                updated_ts: 86_400,
+            })
+            .unwrap();
+
+        let state = AppState::new(store);
+        let ds = state.history_datasets();
+        assert_eq!(ds.len(), 1);
+        assert_eq!(ds[0].secid, "SBER");
+        assert_eq!(ds[0].source, "finam");
+    }
+
+    #[test]
+    fn history_delete_purges_catalog_and_bars() {
+        use domain::history::{HistoryBar, TimeRange};
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        store
+            .insert_history_bars(&[HistoryBar::ohlcv(
+                DataSource::Finam,
+                "SBER",
+                TimeFrame::D1,
+                0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            )])
+            .unwrap();
+        store
+            .upsert_dataset(&DatasetMeta {
+                source: DataSource::Finam,
+                secid: "SBER".into(),
+                tf: TimeFrame::D1,
+                range: TimeRange::new(0, 86_400),
+                bars: 1,
+                updated_ts: 86_400,
+            })
+            .unwrap();
+
+        let state = AppState::new(store);
+        assert_eq!(state.history_datasets().len(), 1);
+
+        let removed = state
+            .history_delete(&DatasetIdInput {
+                source: "finam".into(),
+                secid: "SBER".into(),
+                tf: "d1".into(),
+            })
+            .unwrap();
+        assert!(removed);
+        // Каталог пуст и бары стёрты (нет сирот в хранилище).
+        assert!(state.history_datasets().is_empty());
+        let count = state
+            .read(|s| s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::D1, 0, i64::MAX))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     /// Изолированная временная директория для теста (не трогает реальный

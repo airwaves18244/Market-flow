@@ -361,6 +361,34 @@ impl Store for MemStore {
             .and_then(|m| m.keys().next_back().copied()))
     }
 
+    fn delete_history_bars(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<usize, StorageError> {
+        Ok(self
+            .history_bars
+            .remove(&(source.code(), secid.to_string(), tf.code()))
+            .map(|m| m.len())
+            .unwrap_or(0))
+    }
+
+    fn count_history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<u64, StorageError> {
+        Ok(self
+            .history_bars
+            .get(&(source.code(), secid.to_string(), tf.code()))
+            .map(|m| m.range(from_ts..=to_ts).count() as u64)
+            .unwrap_or(0))
+    }
+
     fn upsert_dataset(&mut self, meta: &DatasetMeta) -> Result<(), StorageError> {
         self.history_datasets.insert(
             (meta.source.code(), meta.secid.clone(), meta.tf.code()),
@@ -820,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn history_missing_ranges_uses_catalog_coverage() {
+    fn history_missing_ranges_uses_bar_coverage() {
         let mut s = MemStore::new();
         // ничего не покрыто → весь запрос считается недостающим
         assert_eq!(
@@ -834,14 +862,11 @@ mod tests {
             vec![TimeRange::new(0, 1000)]
         );
 
-        s.upsert_dataset(&DatasetMeta {
-            source: DataSource::Finam,
-            secid: "SBER".into(),
-            tf: TimeFrame::M5,
-            range: TimeRange::new(0, 600),
-            bars: 2,
-            updated_ts: 600,
-        })
+        // Бары M5 (шаг 300) на 0 и 300 покрывают [0,300)+[300,600) → [0,600).
+        s.insert_history_bars(&[
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 0, 1.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 300, 2.0),
+        ])
         .unwrap();
         // покрыто [0,600); дозагрузить хвост [600,1000)
         assert_eq!(
@@ -853,6 +878,67 @@ mod tests {
             )
             .unwrap(),
             vec![TimeRange::new(600, 1000)]
+        );
+    }
+
+    #[test]
+    fn history_missing_ranges_reports_interior_gap() {
+        // «Несмежная догрузка»: бары на 0 и 3000 (шаг 300) дают покрытие
+        // [0,300)+[3000,3300); план для [0,3300) — ровно внутренняя дыра.
+        let mut s = MemStore::new();
+        s.insert_history_bars(&[
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 0, 1.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 3000, 2.0),
+        ])
+        .unwrap();
+        assert_eq!(
+            s.history_missing_ranges(
+                DataSource::Finam,
+                "SBER",
+                TimeFrame::M5,
+                TimeRange::new(0, 3300)
+            )
+            .unwrap(),
+            vec![TimeRange::new(300, 3000)]
+        );
+    }
+
+    #[test]
+    fn delete_and_count_history_bars() {
+        let mut s = MemStore::new();
+        s.insert_history_bars(&[
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 0, 1.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 300, 2.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 600, 3.0),
+        ])
+        .unwrap();
+        assert_eq!(
+            s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, 600)
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, 300)
+                .unwrap(),
+            2
+        );
+        // Удаление чистит бары и не трогает другой ключ.
+        s.insert_history_bars(&[hbar(DataSource::Finam, "SBER", TimeFrame::H1, 0, 9.0)])
+            .unwrap();
+        assert_eq!(
+            s.delete_history_bars(DataSource::Finam, "SBER", TimeFrame::M5)
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, i64::MAX)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            s.count_history_bars(DataSource::Finam, "SBER", TimeFrame::H1, 0, i64::MAX)
+                .unwrap(),
+            1
         );
     }
 }
