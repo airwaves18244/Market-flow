@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+use domain::history::{DataSource, DatasetMeta, HistoryBar};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 
 use crate::schema::SCHEMA_VERSION;
@@ -18,6 +19,8 @@ use crate::StorageError;
 
 /// Ключ таблиц ALGOPACK в памяти: (рынок, SECID).
 type AlgoKey = (String, String);
+/// Ключ истории/каталога в памяти: (код источника, SECID, код тайм-фрейма).
+type HistoryKey = (&'static str, String, &'static str);
 /// Точки FUTOI на момент `ts`, по группе клиентов (код `fiz`/`yur` → точка).
 type FutoiByGroup = HashMap<&'static str, FutoiPoint>;
 
@@ -44,6 +47,10 @@ pub struct MemStore {
     algo_obstats: HashMap<AlgoKey, BTreeMap<i64, AlgoObstatsRecord>>,
     /// (market, secid) → (ts → запись).
     algo_orderstats: HashMap<AlgoKey, BTreeMap<i64, AlgoOrderstatsRecord>>,
+    /// (источник, secid, tf) → (ts → историческая свеча).
+    history_bars: HashMap<HistoryKey, BTreeMap<i64, HistoryBar>>,
+    /// (источник, secid, tf) → метаданные датасета в каталоге.
+    history_datasets: HashMap<HistoryKey, DatasetMeta>,
 }
 
 impl MemStore {
@@ -315,12 +322,87 @@ impl Store for MemStore {
             .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, r)| r.clone()))
             .collect())
     }
+
+    fn insert_history_bars(&mut self, bars: &[HistoryBar]) -> Result<usize, StorageError> {
+        for b in bars {
+            self.history_bars
+                .entry((b.source.code(), b.secid.clone(), b.tf.code()))
+                .or_default()
+                .insert(b.ts, b.clone());
+        }
+        Ok(bars.len())
+    }
+
+    fn history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<HistoryBar>, StorageError> {
+        Ok(self
+            .history_bars
+            .get(&(source.code(), secid.to_string(), tf.code()))
+            .into_iter()
+            .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, b)| b.clone()))
+            .collect())
+    }
+
+    fn last_history_bar_ts(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<Option<i64>, StorageError> {
+        Ok(self
+            .history_bars
+            .get(&(source.code(), secid.to_string(), tf.code()))
+            .and_then(|m| m.keys().next_back().copied()))
+    }
+
+    fn upsert_dataset(&mut self, meta: &DatasetMeta) -> Result<(), StorageError> {
+        self.history_datasets.insert(
+            (meta.source.code(), meta.secid.clone(), meta.tf.code()),
+            meta.clone(),
+        );
+        Ok(())
+    }
+
+    fn datasets(&self) -> Result<Vec<DatasetMeta>, StorageError> {
+        Ok(self.history_datasets.values().cloned().collect())
+    }
+
+    fn dataset(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<Option<DatasetMeta>, StorageError> {
+        Ok(self
+            .history_datasets
+            .get(&(source.code(), secid.to_string(), tf.code()))
+            .cloned())
+    }
+
+    fn remove_dataset(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<bool, StorageError> {
+        Ok(self
+            .history_datasets
+            .remove(&(source.code(), secid.to_string(), tf.code()))
+            .is_some())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use domain::algo::ClientGroup;
+    use domain::history::TimeRange;
     use domain::AssetClass;
 
     fn bar(ts: i64, close: f64) -> Bar {
@@ -639,5 +721,138 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert!((got[0].put_orders_b - 42.0).abs() < 1e-12);
         assert!(s.algo_orderstats("fo", "SBER", 0, 9).unwrap().is_empty());
+    }
+
+    fn hbar(source: DataSource, secid: &str, tf: TimeFrame, ts: i64, close: f64) -> HistoryBar {
+        HistoryBar::ohlcv(source, secid, tf, ts, close, close, close, close, 10.0)
+    }
+
+    #[test]
+    fn history_bars_upsert_dedup_and_isolated_by_key() {
+        let mut s = MemStore::new();
+        s.insert_history_bars(&[
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 300, 10.0),
+            hbar(DataSource::Finam, "SBER", TimeFrame::M5, 600, 20.0),
+        ])
+        .unwrap();
+        // повторный ингест того же ключа (source, secid, tf, ts) перезаписывает
+        s.insert_history_bars(&[hbar(DataSource::Finam, "SBER", TimeFrame::M5, 300, 99.0)])
+            .unwrap();
+
+        let got = s
+            .history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap();
+        assert_eq!(got.len(), 2); // без дублей
+        assert_eq!(got[0].ts, 300);
+        assert!((got[0].close - 99.0).abs() < 1e-12);
+        assert_eq!(
+            s.last_history_bar_ts(DataSource::Finam, "SBER", TimeFrame::M5)
+                .unwrap(),
+            Some(600)
+        );
+
+        // изоляция по источнику и по тайм-фрейму
+        assert!(s
+            .history_bars(DataSource::MoexAlgo, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap()
+            .is_empty());
+        assert!(s
+            .history_bars(DataSource::Finam, "SBER", TimeFrame::H1, 0, 1000)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn history_bars_preserve_optional_algo_fields() {
+        let mut s = MemStore::new();
+        let mut b = hbar(DataSource::MoexAlgo, "GAZP", TimeFrame::M5, 300, 100.0);
+        b.vwap = Some(100.5);
+        b.disb = Some(0.2);
+        s.insert_history_bars(&[b]).unwrap();
+        let got = s
+            .history_bars(DataSource::MoexAlgo, "GAZP", TimeFrame::M5, 0, 1000)
+            .unwrap();
+        assert_eq!(got[0].vwap, Some(100.5));
+        assert_eq!(got[0].disb, Some(0.2));
+        assert_eq!(got[0].oi, None);
+    }
+
+    fn meta(source: DataSource, secid: &str, tf: TimeFrame, from: i64, till: i64) -> DatasetMeta {
+        DatasetMeta {
+            source,
+            secid: secid.into(),
+            tf,
+            range: TimeRange::new(from, till),
+            bars: ((till - from) / tf.seconds().max(1)) as u64,
+            updated_ts: till,
+        }
+    }
+
+    #[test]
+    fn catalog_upsert_list_get_remove() {
+        let mut s = MemStore::new();
+        s.upsert_dataset(&meta(DataSource::Finam, "SBER", TimeFrame::M5, 0, 3600))
+            .unwrap();
+        s.upsert_dataset(&meta(DataSource::Finam, "SBER", TimeFrame::H1, 0, 7200))
+            .unwrap();
+        assert_eq!(s.datasets().unwrap().len(), 2);
+
+        // перезапись по ключу не плодит строк
+        s.upsert_dataset(&meta(DataSource::Finam, "SBER", TimeFrame::M5, 0, 7200))
+            .unwrap();
+        assert_eq!(s.datasets().unwrap().len(), 2);
+        let d = s
+            .dataset(DataSource::Finam, "SBER", TimeFrame::M5)
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.range, TimeRange::new(0, 7200));
+
+        let cat = s.catalog().unwrap();
+        assert_eq!(cat.datasets.len(), 2);
+
+        assert!(s
+            .remove_dataset(DataSource::Finam, "SBER", TimeFrame::M5)
+            .unwrap());
+        assert!(!s
+            .remove_dataset(DataSource::Finam, "SBER", TimeFrame::M5)
+            .unwrap());
+        assert_eq!(s.datasets().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn history_missing_ranges_uses_catalog_coverage() {
+        let mut s = MemStore::new();
+        // ничего не покрыто → весь запрос считается недостающим
+        assert_eq!(
+            s.history_missing_ranges(
+                DataSource::Finam,
+                "SBER",
+                TimeFrame::M5,
+                TimeRange::new(0, 1000)
+            )
+            .unwrap(),
+            vec![TimeRange::new(0, 1000)]
+        );
+
+        s.upsert_dataset(&DatasetMeta {
+            source: DataSource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::M5,
+            range: TimeRange::new(0, 600),
+            bars: 2,
+            updated_ts: 600,
+        })
+        .unwrap();
+        // покрыто [0,600); дозагрузить хвост [600,1000)
+        assert_eq!(
+            s.history_missing_ranges(
+                DataSource::Finam,
+                "SBER",
+                TimeFrame::M5,
+                TimeRange::new(0, 1000)
+            )
+            .unwrap(),
+            vec![TimeRange::new(600, 1000)]
+        );
     }
 }
