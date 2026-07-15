@@ -11,6 +11,7 @@
 //! приходят уже доменные типы.
 
 use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+use domain::history::{DataSource, DatasetMeta, HistoryBar};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 use serde::{Deserialize, Serialize};
 
@@ -111,6 +112,31 @@ pub struct AlgoOrderstatsRecord {
     /// Объём снятых заявок.
     pub cancel_vol_b: f64,
     pub cancel_vol_s: f64,
+}
+
+/// Запись каталога исторических датасетов (`history_datasets`): доменные
+/// [`DatasetMeta`] плюс размер датасета на диске.
+///
+/// `DatasetMeta` не несёт `size_bytes` (это деталь хранилища, а не домена),
+/// поэтому storage оборачивает метаданные вместе с размером в эту запись. Так
+/// доменная модель каталога ([`domain::history::Catalog`]) остаётся чистой.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryDatasetRecord {
+    /// Доменные метаданные датасета (source, secid, tf, диапазон, число баров).
+    pub meta: DatasetMeta,
+    /// Размер датасета на диске в байтах (например, Parquet-экспорта); `0`, если
+    /// неизвестно/не выгружался.
+    pub size_bytes: u64,
+}
+
+impl HistoryDatasetRecord {
+    /// Запись с нулевым размером (датасет ещё не выгружался на диск).
+    pub fn new(meta: DatasetMeta) -> Self {
+        Self {
+            meta,
+            size_bytes: 0,
+        }
+    }
 }
 
 /// Персистентный слой: ингест рыночных данных и аналитические запросы.
@@ -265,6 +291,47 @@ pub trait Store {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<AlgoOrderstatsRecord>, StorageError>;
+
+    /// Вставить/обновить исторические бары (таблица `history_bars`).
+    /// Идемпотентно по ключу (source, secid, tf, ts) — каждый [`HistoryBar`]
+    /// самоописателен (несёт источник и тайм-фрейм). Возвращает число строк.
+    fn insert_history_bars(&mut self, bars: &[HistoryBar]) -> Result<usize, StorageError>;
+
+    /// Исторические бары `source`/`secid`/`tf` в `[from_ts, to_ts]`
+    /// (включительно), по возрастанию `ts`.
+    fn history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<HistoryBar>, StorageError>;
+
+    /// Время последнего сохранённого исторического бара `source`/`secid`/`tf`
+    /// (для планирования инкрементальной дозагрузки).
+    fn last_history_bar_ts(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<Option<i64>, StorageError>;
+
+    /// Все записи каталога исторических датасетов (`history_datasets`).
+    fn list_history_datasets(&self) -> Result<Vec<HistoryDatasetRecord>, StorageError>;
+
+    /// Вставить/обновить запись каталога датасетов. Идемпотентно по ключу
+    /// (source, secid, tf).
+    fn upsert_history_dataset(&mut self, record: &HistoryDatasetRecord)
+        -> Result<(), StorageError>;
+
+    /// Удалить запись каталога по ключу; `true`, если что-то удалено.
+    fn delete_history_dataset(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<bool, StorageError>;
 
     /// Все инструменты заданного класса активов.
     fn instruments_by_asset_class(

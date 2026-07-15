@@ -10,14 +10,20 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+use domain::history::{DataSource, HistoryBar};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 
 use crate::schema::SCHEMA_VERSION;
-use crate::store::{AlgoObstatsRecord, AlgoOrderstatsRecord, SectorEntry, Store, TurnoverSnapshot};
+use crate::store::{
+    AlgoObstatsRecord, AlgoOrderstatsRecord, HistoryDatasetRecord, SectorEntry, Store,
+    TurnoverSnapshot,
+};
 use crate::StorageError;
 
 /// Ключ таблиц ALGOPACK в памяти: (рынок, SECID).
 type AlgoKey = (String, String);
+/// Ключ историзации в памяти: (код источника, SECID, код тайм-фрейма).
+type HistoryKey = (&'static str, String, &'static str);
 /// Точки FUTOI на момент `ts`, по группе клиентов (код `fiz`/`yur` → точка).
 type FutoiByGroup = HashMap<&'static str, FutoiPoint>;
 
@@ -44,6 +50,10 @@ pub struct MemStore {
     algo_obstats: HashMap<AlgoKey, BTreeMap<i64, AlgoObstatsRecord>>,
     /// (market, secid) → (ts → запись).
     algo_orderstats: HashMap<AlgoKey, BTreeMap<i64, AlgoOrderstatsRecord>>,
+    /// (source, secid, tf) → (ts → историческая свеча).
+    history_bars: HashMap<HistoryKey, BTreeMap<i64, HistoryBar>>,
+    /// (source, secid, tf) → запись каталога датасетов.
+    history_datasets: HashMap<HistoryKey, HistoryDatasetRecord>,
 }
 
 impl MemStore {
@@ -314,6 +324,72 @@ impl Store for MemStore {
             .into_iter()
             .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, r)| r.clone()))
             .collect())
+    }
+
+    fn insert_history_bars(&mut self, bars: &[HistoryBar]) -> Result<usize, StorageError> {
+        for b in bars {
+            self.history_bars
+                .entry((b.source.code(), b.secid.clone(), b.tf.code()))
+                .or_default()
+                .insert(b.ts, b.clone());
+        }
+        Ok(bars.len())
+    }
+
+    fn history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<HistoryBar>, StorageError> {
+        Ok(self
+            .history_bars
+            .get(&(source.code(), secid.to_string(), tf.code()))
+            .into_iter()
+            .flat_map(|m| m.range(from_ts..=to_ts).map(|(_, b)| b.clone()))
+            .collect())
+    }
+
+    fn last_history_bar_ts(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<Option<i64>, StorageError> {
+        Ok(self
+            .history_bars
+            .get(&(source.code(), secid.to_string(), tf.code()))
+            .and_then(|m| m.keys().next_back().copied()))
+    }
+
+    fn list_history_datasets(&self) -> Result<Vec<HistoryDatasetRecord>, StorageError> {
+        Ok(self.history_datasets.values().cloned().collect())
+    }
+
+    fn upsert_history_dataset(
+        &mut self,
+        record: &HistoryDatasetRecord,
+    ) -> Result<(), StorageError> {
+        let m = &record.meta;
+        self.history_datasets.insert(
+            (m.source.code(), m.secid.clone(), m.tf.code()),
+            record.clone(),
+        );
+        Ok(())
+    }
+
+    fn delete_history_dataset(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<bool, StorageError> {
+        Ok(self
+            .history_datasets
+            .remove(&(source.code(), secid.to_string(), tf.code()))
+            .is_some())
     }
 }
 
@@ -639,5 +715,102 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert!((got[0].put_orders_b - 42.0).abs() < 1e-12);
         assert!(s.algo_orderstats("fo", "SBER", 0, 9).unwrap().is_empty());
+    }
+
+    fn hbar(source: DataSource, secid: &str, tf: TimeFrame, ts: i64, close: f64) -> HistoryBar {
+        HistoryBar::ohlcv(
+            source,
+            secid,
+            tf,
+            ts,
+            close,
+            close + 1.0,
+            close - 1.0,
+            close,
+            100.0,
+        )
+    }
+
+    #[test]
+    fn history_bars_upsert_dedup_and_range_ordered_and_isolated() {
+        use DataSource::{Finam, MoexAlgo};
+        let mut s = MemStore::new();
+        s.insert_history_bars(&[
+            hbar(Finam, "SBER", TimeFrame::M5, 300, 30.0),
+            hbar(Finam, "SBER", TimeFrame::M5, 100, 10.0),
+        ])
+        .unwrap();
+        // перезапись ts=100 тем же ключом — дедуп, не дубль
+        s.insert_history_bars(&[hbar(Finam, "SBER", TimeFrame::M5, 100, 99.0)])
+            .unwrap();
+
+        let got = s
+            .history_bars(Finam, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap();
+        assert_eq!(got.iter().map(|b| b.ts).collect::<Vec<_>>(), vec![100, 300]);
+        assert_eq!(got[0].close, 99.0);
+        assert_eq!(
+            s.last_history_bar_ts(Finam, "SBER", TimeFrame::M5).unwrap(),
+            Some(300)
+        );
+
+        // изоляция по источнику и тайм-фрейму
+        assert!(s
+            .history_bars(MoexAlgo, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap()
+            .is_empty());
+        assert!(s
+            .history_bars(Finam, "SBER", TimeFrame::H1, 0, 1000)
+            .unwrap()
+            .is_empty());
+        // усечение окна
+        assert_eq!(
+            s.history_bars(Finam, "SBER", TimeFrame::M5, 200, 400)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn history_datasets_crud() {
+        use domain::history::{DatasetMeta, TimeRange};
+        let mut s = MemStore::new();
+        let meta = DatasetMeta {
+            source: DataSource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::M5,
+            range: TimeRange::new(0, 3600),
+            bars: 12,
+            updated_ts: 3600,
+        };
+        s.upsert_history_dataset(&HistoryDatasetRecord {
+            meta: meta.clone(),
+            size_bytes: 4096,
+        })
+        .unwrap();
+        assert_eq!(s.list_history_datasets().unwrap().len(), 1);
+
+        // повторный upsert того же ключа — обновление, не дубль
+        s.upsert_history_dataset(&HistoryDatasetRecord {
+            meta: DatasetMeta {
+                bars: 24,
+                ..meta.clone()
+            },
+            size_bytes: 8192,
+        })
+        .unwrap();
+        let list = s.list_history_datasets().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].meta.bars, 24);
+        assert_eq!(list[0].size_bytes, 8192);
+
+        assert!(s
+            .delete_history_dataset(DataSource::Finam, "SBER", TimeFrame::M5)
+            .unwrap());
+        assert!(!s
+            .delete_history_dataset(DataSource::Finam, "SBER", TimeFrame::M5)
+            .unwrap());
+        assert!(s.list_history_datasets().unwrap().is_empty());
     }
 }

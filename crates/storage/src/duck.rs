@@ -11,11 +11,15 @@
 use duckdb::{params, Connection};
 
 use domain::algo::{ClientGroup, FutoiPoint, Hi2Point, SuperCandle};
+use domain::history::{DataSource, DatasetMeta, HistoryBar, TimeRange};
 use domain::{AssetClass, Bar, Instrument, TimeFrame, Trade};
 
 use crate::migrate;
 use crate::schema::SCHEMA_VERSION;
-use crate::store::{AlgoObstatsRecord, AlgoOrderstatsRecord, SectorEntry, Store, TurnoverSnapshot};
+use crate::store::{
+    AlgoObstatsRecord, AlgoOrderstatsRecord, HistoryDatasetRecord, SectorEntry, Store,
+    TurnoverSnapshot,
+};
 use crate::StorageError;
 
 /// Хранилище поверх DuckDB.
@@ -685,6 +689,235 @@ impl Store for DuckStore {
             .map_err(db)?;
         rows.collect::<Result<_, _>>().map_err(db)
     }
+
+    fn insert_history_bars(&mut self, bars: &[HistoryBar]) -> Result<usize, StorageError> {
+        let tx = self.conn.transaction().map_err(db)?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO history_bars \
+                     (source, secid, tf, ts, open, high, low, close, volume, \
+                      vwap, disb, oi, hi2) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .map_err(db)?;
+            for b in bars {
+                stmt.execute(params![
+                    b.source.code(),
+                    b.secid,
+                    b.tf.code(),
+                    b.ts,
+                    b.open,
+                    b.high,
+                    b.low,
+                    b.close,
+                    b.volume,
+                    b.vwap,
+                    b.disb,
+                    b.oi,
+                    b.hi2,
+                ])
+                .map_err(db)?;
+            }
+        }
+        tx.commit().map_err(db)?;
+        Ok(bars.len())
+    }
+
+    fn history_bars(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        from_ts: i64,
+        to_ts: i64,
+    ) -> Result<Vec<HistoryBar>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT source, secid, tf, ts, open, high, low, close, volume, \
+                 vwap, disb, oi, hi2 \
+                 FROM history_bars \
+                 WHERE source = ? AND secid = ? AND tf = ? AND ts BETWEEN ? AND ? \
+                 ORDER BY ts",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(
+                params![source.code(), secid, tf.code(), from_ts, to_ts],
+                |row| {
+                    let src: String = row.get(0)?;
+                    let tf_code: String = row.get(2)?;
+                    Ok(HistoryBar {
+                        source: DataSource::from_code(&src).unwrap_or(DataSource::Finam),
+                        secid: row.get(1)?,
+                        tf: TimeFrame::from_code(&tf_code).unwrap_or(TimeFrame::D1),
+                        ts: row.get(3)?,
+                        open: row.get(4)?,
+                        high: row.get(5)?,
+                        low: row.get(6)?,
+                        close: row.get(7)?,
+                        volume: row.get(8)?,
+                        vwap: row.get(9)?,
+                        disb: row.get(10)?,
+                        oi: row.get(11)?,
+                        hi2: row.get(12)?,
+                    })
+                },
+            )
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
+    fn last_history_bar_ts(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<Option<i64>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT max(ts) FROM history_bars \
+                 WHERE source = ? AND secid = ? AND tf = ?",
+            )
+            .map_err(db)?;
+        let v: Option<i64> = stmt
+            .query_row(params![source.code(), secid, tf.code()], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+            .map_err(db)?;
+        Ok(v)
+    }
+
+    fn list_history_datasets(&self) -> Result<Vec<HistoryDatasetRecord>, StorageError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT source, secid, tf, from_ts, till_ts, bars, size_bytes, updated_ts \
+                 FROM history_datasets",
+            )
+            .map_err(db)?;
+        let rows = stmt
+            .query_map([], |row| {
+                let src: String = row.get(0)?;
+                let tf_code: String = row.get(2)?;
+                let from_ts: i64 = row.get(3)?;
+                let till_ts: i64 = row.get(4)?;
+                let bars: i64 = row.get(5)?;
+                let size_bytes: i64 = row.get(6)?;
+                Ok(HistoryDatasetRecord {
+                    meta: DatasetMeta {
+                        source: DataSource::from_code(&src).unwrap_or(DataSource::Finam),
+                        secid: row.get(1)?,
+                        tf: TimeFrame::from_code(&tf_code).unwrap_or(TimeFrame::D1),
+                        range: TimeRange::new(from_ts, till_ts),
+                        bars: bars.max(0) as u64,
+                        updated_ts: row.get(7)?,
+                    },
+                    size_bytes: size_bytes.max(0) as u64,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
+    fn upsert_history_dataset(
+        &mut self,
+        record: &HistoryDatasetRecord,
+    ) -> Result<(), StorageError> {
+        let m = &record.meta;
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO history_datasets \
+                 (source, secid, tf, from_ts, till_ts, bars, size_bytes, updated_ts) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    m.source.code(),
+                    m.secid,
+                    m.tf.code(),
+                    m.range.from,
+                    m.range.till,
+                    m.bars as i64,
+                    record.size_bytes as i64,
+                    m.updated_ts,
+                ],
+            )
+            .map_err(db)?;
+        Ok(())
+    }
+
+    fn delete_history_dataset(
+        &mut self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+    ) -> Result<bool, StorageError> {
+        let n = self
+            .conn
+            .execute(
+                "DELETE FROM history_datasets WHERE source = ? AND secid = ? AND tf = ?",
+                params![source.code(), secid, tf.code()],
+            )
+            .map_err(db)?;
+        Ok(n > 0)
+    }
+}
+
+/// Экспорт/импорт истории через Parquet (только DuckDB): `COPY ... TO` и
+/// `read_parquet(...)`. Пути к файлам подставляются строковыми литералами
+/// (DuckDB не принимает bind-параметр в `COPY`/`read_parquet`), одинарные
+/// кавычки экранируются — см. [`sql_str_literal`].
+impl DuckStore {
+    /// Выгрузить датасет `source`/`secid`/`tf` в Parquet-файл `path`
+    /// (`COPY (SELECT ...) TO '<path>' (FORMAT PARQUET)`), по возрастанию `ts`.
+    pub fn export_history_parquet(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), StorageError> {
+        let path = path.as_ref().to_string_lossy();
+        let sql = format!(
+            "COPY (SELECT source, secid, tf, ts, open, high, low, close, volume, \
+             vwap, disb, oi, hi2 FROM history_bars \
+             WHERE source = {} AND secid = {} AND tf = {} ORDER BY ts) \
+             TO {} (FORMAT PARQUET)",
+            sql_str_literal(source.code()),
+            sql_str_literal(secid),
+            sql_str_literal(tf.code()),
+            sql_str_literal(&path),
+        );
+        self.conn.execute_batch(&sql).map_err(db)?;
+        Ok(())
+    }
+
+    /// Загрузить бары из Parquet-файла `path` в `history_bars`
+    /// (`INSERT OR REPLACE ... SELECT ... FROM read_parquet('<path>')`).
+    /// Идемпотентно по ключу (source, secid, tf, ts). Возвращает число строк.
+    pub fn import_history_parquet(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, StorageError> {
+        let path = path.as_ref().to_string_lossy();
+        let sql = format!(
+            "INSERT OR REPLACE INTO history_bars \
+             (source, secid, tf, ts, open, high, low, close, volume, vwap, disb, oi, hi2) \
+             SELECT source, secid, tf, ts, open, high, low, close, volume, \
+             vwap, disb, oi, hi2 FROM read_parquet({})",
+            sql_str_literal(&path),
+        );
+        let n = self.conn.execute(&sql, []).map_err(db)?;
+        Ok(n)
+    }
+}
+
+/// Обернуть значение в одинарные кавычки SQL-строкового литерала, экранируя
+/// внутренние одинарные кавычки удвоением. Для путей к Parquet-файлам, которые
+/// нельзя передать bind-параметром в `COPY`/`read_parquet`.
+fn sql_str_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 /// Текущее время в UNIX-секундах UTC (для `instruments.updated_at`).
@@ -999,7 +1232,6 @@ mod tests {
         assert_eq!(s.schema_version().unwrap(), Some(2));
         s.migrate().unwrap();
         assert_eq!(s.schema_version().unwrap(), Some(SCHEMA_VERSION));
-        assert_eq!(SCHEMA_VERSION, 3);
 
         // старые данные не потеряны
         assert_eq!(s.bars("SBER@MISX", TimeFrame::D1, 0, 9).unwrap().len(), 1);
@@ -1014,5 +1246,180 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.algo_hi2("stock", "SBER", 0, 9).unwrap().len(), 1);
+    }
+
+    /// Миграция v3→v4: создаём БД на наборе DDL до фазы 11.2 (без history_*
+    /// таблиц) со `schema_version=3`, затем прогоняем текущую миграцию — версия
+    /// поднимается, появляются `history_bars`/`history_datasets`, старые данные
+    /// (в т.ч. algo_*) не теряются.
+    #[test]
+    fn migration_v3_to_v4_adds_history_tables_and_bumps_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Старый (v3) набор DDL: базовые + algo_*, без history_*.
+        for ddl in [
+            crate::schema::DDL_SCHEMA_VERSION,
+            crate::schema::DDL_INSTRUMENTS,
+            crate::schema::DDL_BARS,
+            crate::schema::DDL_TURNOVER_SNAPSHOTS,
+            crate::schema::DDL_TRADES,
+            crate::schema::DDL_SECTOR_MAP,
+            crate::schema::DDL_ALGO_TRADESTATS,
+            crate::schema::DDL_ALGO_FUTOI,
+            crate::schema::DDL_ALGO_HI2,
+            crate::schema::DDL_ALGO_OBSTATS,
+            crate::schema::DDL_ALGO_ORDERSTATS,
+        ] {
+            conn.execute_batch(ddl).unwrap();
+        }
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO bars (symbol, timeframe, ts, open, high, low, close, volume) \
+             VALUES ('SBER@MISX', 'd1', 1, 10.0, 11.0, 9.0, 10.5, 100.0)",
+            [],
+        )
+        .unwrap();
+
+        let mut s = DuckStore { conn };
+        assert_eq!(s.schema_version().unwrap(), Some(3));
+        s.migrate().unwrap();
+        assert_eq!(s.schema_version().unwrap(), Some(SCHEMA_VERSION));
+        assert_eq!(SCHEMA_VERSION, 4);
+
+        // старые данные не потеряны
+        assert_eq!(s.bars("SBER@MISX", TimeFrame::D1, 0, 9).unwrap().len(), 1);
+        // новые таблицы созданы и рабочие
+        s.insert_history_bars(&[HistoryBar::ohlcv(
+            DataSource::Finam,
+            "SBER",
+            TimeFrame::D1,
+            1,
+            10.0,
+            11.0,
+            9.0,
+            10.5,
+            100.0,
+        )])
+        .unwrap();
+        assert_eq!(
+            s.history_bars(DataSource::Finam, "SBER", TimeFrame::D1, 0, 9)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    fn hbar(ts: i64, close: f64, vwap: Option<f64>) -> HistoryBar {
+        let mut b = HistoryBar::ohlcv(
+            DataSource::MoexAlgo,
+            "SBER",
+            TimeFrame::M5,
+            ts,
+            close,
+            close + 1.0,
+            close - 1.0,
+            close,
+            100.0,
+        );
+        b.vwap = vwap;
+        b
+    }
+
+    #[test]
+    fn history_bars_roundtrip_upserted_ordered_and_isolated() {
+        let mut s = store();
+        s.insert_history_bars(&[hbar(300, 30.0, Some(30.2)), hbar(100, 10.0, None)])
+            .unwrap();
+        // перезапись ts=100 по ключу (source, secid, tf, ts)
+        s.insert_history_bars(&[hbar(100, 99.0, Some(99.5))])
+            .unwrap();
+
+        let got = s
+            .history_bars(DataSource::MoexAlgo, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].ts, 100);
+        assert!((got[0].close - 99.0).abs() < 1e-9);
+        assert_eq!(got[0].vwap, Some(99.5));
+        assert_eq!(got[1].vwap, Some(30.2));
+        assert_eq!(
+            s.last_history_bar_ts(DataSource::MoexAlgo, "SBER", TimeFrame::M5)
+                .unwrap(),
+            Some(300)
+        );
+        // изоляция по источнику
+        assert!(s
+            .history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn history_datasets_crud_roundtrip() {
+        let mut s = store();
+        let meta = DatasetMeta {
+            source: DataSource::Finam,
+            secid: "SBER".into(),
+            tf: TimeFrame::M5,
+            range: TimeRange::new(0, 3600),
+            bars: 12,
+            updated_ts: 3600,
+        };
+        s.upsert_history_dataset(&HistoryDatasetRecord {
+            meta: meta.clone(),
+            size_bytes: 4096,
+        })
+        .unwrap();
+        s.upsert_history_dataset(&HistoryDatasetRecord {
+            meta: DatasetMeta { bars: 24, ..meta },
+            size_bytes: 8192,
+        })
+        .unwrap(); // перезапись по ключу
+        let list = s.list_history_datasets().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].meta.bars, 24);
+        assert_eq!(list[0].size_bytes, 8192);
+        assert_eq!(list[0].meta.range, TimeRange::new(0, 3600));
+
+        assert!(s
+            .delete_history_dataset(DataSource::Finam, "SBER", TimeFrame::M5)
+            .unwrap());
+        assert!(s.list_history_datasets().unwrap().is_empty());
+    }
+
+    #[test]
+    fn parquet_export_import_roundtrip() {
+        let mut s = store();
+        let bars = vec![
+            hbar(100, 10.0, None),
+            hbar(400, 40.0, Some(40.5)),
+            hbar(700, 70.0, Some(70.1)),
+        ];
+        s.insert_history_bars(&bars).unwrap();
+        let expected = s
+            .history_bars(DataSource::MoexAlgo, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap();
+
+        // уникальный путь во временной директории (без внешних зависимостей)
+        let path = std::env::temp_dir().join(format!(
+            "market_history_roundtrip_{}.parquet",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        s.export_history_parquet(DataSource::MoexAlgo, "SBER", TimeFrame::M5, &path)
+            .unwrap();
+        assert!(path.exists());
+
+        // импорт в свежую БД → та же выборка
+        let mut s2 = store();
+        let n = s2.import_history_parquet(&path).unwrap();
+        assert_eq!(n, 3);
+        let got = s2
+            .history_bars(DataSource::MoexAlgo, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap();
+        assert_eq!(got, expected);
+
+        let _ = std::fs::remove_file(&path);
     }
 }

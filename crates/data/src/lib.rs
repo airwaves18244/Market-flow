@@ -17,6 +17,7 @@ pub mod dotenv;
 pub mod endpoint;
 #[cfg(feature = "grpc")]
 pub mod grpc;
+pub mod history_source;
 #[cfg(feature = "http")]
 pub mod http;
 #[cfg(feature = "llm")]
@@ -37,6 +38,11 @@ pub use dotenv::{find_dotenv_secret, ENV_VAR as SECRET_ENV_VAR};
 pub use endpoint::Method;
 #[cfg(feature = "grpc")]
 pub use grpc::{AuthManager, AuthToken, AuthTransport, GrpcAuthTransport};
+#[cfg(feature = "grpc")]
+pub use history_source::FinamHistory;
+pub use history_source::{bar_to_history_bar, FakeHistorySource, HistorySource};
+#[cfg(feature = "moex")]
+pub use history_source::{iss_candle_to_history_bar, super_candle_to_history_bar, MoexHistory};
 #[cfg(feature = "http")]
 pub use http::{HttpClient, HttpResponse, HttpTransport, ReqwestTransport};
 #[cfg(feature = "llm")]

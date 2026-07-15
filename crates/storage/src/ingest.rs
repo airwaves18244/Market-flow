@@ -10,12 +10,32 @@
 //! Сам асинхронный цикл опроса (с tokio и реальным gRPC-клиентом) собирается в
 //! `app`; здесь — синхронные, кросс-платформенно тестируемые кирпичики.
 
+use std::collections::BTreeMap;
+
 use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+use domain::history::HistoryBar;
 use domain::metrics::turnover::{directional_turnover, total_turnover};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 
-use crate::store::{AlgoObstatsRecord, AlgoOrderstatsRecord, SectorEntry, Store, TurnoverSnapshot};
+use crate::store::{
+    AlgoObstatsRecord, AlgoOrderstatsRecord, HistoryDatasetRecord, SectorEntry, Store,
+    TurnoverSnapshot,
+};
 use crate::StorageError;
+
+/// Дедуплицировать исторические бары по ключу (source, secid, tf, ts) в пределах
+/// батча: при повторе ключа побеждает последний бар. На выходе — бары по
+/// возрастанию `ts` (внутри ключа). Хранилище и так идемпотентно по PK, но
+/// дедуп до записи убирает лишние строки в транзакции и делает счётчик записи
+/// честным.
+pub fn dedup_history_bars(bars: &[HistoryBar]) -> Vec<HistoryBar> {
+    // BTreeMap по полному ключу держит порядок и коллапсирует дубликаты.
+    let mut by_key: BTreeMap<(&str, &str, &str, i64), HistoryBar> = BTreeMap::new();
+    for b in bars {
+        by_key.insert((b.source.code(), &b.secid, b.tf.code(), b.ts), b.clone());
+    }
+    by_key.into_values().collect()
+}
 
 /// Построить снимок оборота из серии баров за период (напр. за торговый день).
 ///
@@ -171,6 +191,20 @@ impl<'a, S: Store> Writer<'a, S> {
     ) -> Result<usize, StorageError> {
         self.store.insert_algo_orderstats(records)
     }
+
+    /// Записать исторические бары (таблица `history_bars`) с дедупом батча по
+    /// ключу (source, secid, tf, ts). Возвращает число записанных (после дедупа)
+    /// строк.
+    pub fn history_bars(&mut self, bars: &[HistoryBar]) -> Result<usize, StorageError> {
+        let deduped = dedup_history_bars(bars);
+        self.store.insert_history_bars(&deduped)
+    }
+
+    /// Записать/обновить запись каталога исторических датасетов
+    /// (`history_datasets`). Идемпотентно по ключу (source, secid, tf).
+    pub fn history_dataset(&mut self, record: &HistoryDatasetRecord) -> Result<(), StorageError> {
+        self.store.upsert_history_dataset(record)
+    }
 }
 
 /// Планировщик батч-поллинга: round-robin по списку символов.
@@ -323,6 +357,60 @@ mod tests {
         let got = store.algo_tradestats("fo", "RIH5", 0, 9).unwrap();
         assert_eq!(got.len(), 2);
         assert!((got[0].pr_close - 99.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn writer_history_bars_dedups_batch_and_persists() {
+        use domain::history::{DataSource, HistoryBar};
+        let mut store = MemStore::new();
+        let hb = |ts: i64, close: f64| {
+            HistoryBar::ohlcv(
+                DataSource::Finam,
+                "SBER",
+                TimeFrame::M5,
+                ts,
+                close,
+                close,
+                close,
+                close,
+                1.0,
+            )
+        };
+        {
+            let mut w = Writer::new(&mut store);
+            // дубликат ts=100 в одном батче — коллапсирует до одной строки (последняя)
+            let n = w
+                .history_bars(&[hb(100, 10.0), hb(200, 20.0), hb(100, 99.0)])
+                .unwrap();
+            assert_eq!(n, 2); // после дедупа
+        }
+        let got = store
+            .history_bars(DataSource::Finam, "SBER", TimeFrame::M5, 0, 1000)
+            .unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].ts, 100);
+        assert_eq!(got[0].close, 99.0); // победил последний
+    }
+
+    #[test]
+    fn dedup_history_bars_keeps_last_and_orders() {
+        use domain::history::{DataSource, HistoryBar};
+        let hb = |ts: i64, close: f64| {
+            HistoryBar::ohlcv(
+                DataSource::MoexAlgo,
+                "GAZP",
+                TimeFrame::M5,
+                ts,
+                close,
+                close,
+                close,
+                close,
+                1.0,
+            )
+        };
+        let out = dedup_history_bars(&[hb(300, 3.0), hb(100, 1.0), hb(300, 33.0)]);
+        assert_eq!(out.iter().map(|b| b.ts).collect::<Vec<_>>(), vec![100, 300]);
+        assert_eq!(out[1].close, 33.0);
     }
 
     #[test]

@@ -165,6 +165,45 @@ CREATE TABLE IF NOT EXISTS algo_orderstats (
     PRIMARY KEY (secid, ts, market)
 );";
 
+/// Исторические бары для бэктестера (фаза 11.2): OHLCV плюс опциональные
+/// ALGOPACK-колонки (VWAP/дисбаланс/открытый интерес/индекс концентрации).
+/// Ключ включает `source` и `tf`, чтобы датасеты разных источников и тайм-
+/// фреймов не смешивались (см. [`domain::history::HistoryBar`]). Опциональные
+/// поля — `NULL`, если источник их не отдаёт (например, Finam OHLCV).
+pub const DDL_HISTORY_BARS: &str = "\
+CREATE TABLE IF NOT EXISTS history_bars (
+    source  TEXT NOT NULL,          -- finam|moex_algo (DataSource::code)
+    secid   TEXT NOT NULL,
+    tf      TEXT NOT NULL,          -- m1|m5|m15|h1|d1
+    ts      BIGINT NOT NULL,        -- начало бара, UNIX-секунды UTC
+    open    DOUBLE NOT NULL,
+    high    DOUBLE NOT NULL,
+    low     DOUBLE NOT NULL,
+    close   DOUBLE NOT NULL,
+    volume  DOUBLE NOT NULL,
+    vwap    DOUBLE,                 -- ALGOPACK: средневзвешенная цена
+    disb    DOUBLE,                 -- ALGOPACK: дисбаланс потока (−1..1)
+    oi      DOUBLE,                 -- ALGOPACK: открытый интерес
+    hi2     DOUBLE,                 -- ALGOPACK: индекс концентрации
+    PRIMARY KEY (source, secid, tf, ts)
+);";
+
+/// Каталог локальных исторических датасетов (фаза 11.2): персист
+/// [`domain::history::DatasetMeta`] плюс размер на диске. Ключ — (source, secid,
+/// tf); покрытый диапазон хранится как `[from_ts, till_ts)`.
+pub const DDL_HISTORY_DATASETS: &str = "\
+CREATE TABLE IF NOT EXISTS history_datasets (
+    source      TEXT NOT NULL,      -- finam|moex_algo
+    secid       TEXT NOT NULL,
+    tf          TEXT NOT NULL,      -- m1|m5|m15|h1|d1
+    from_ts     BIGINT NOT NULL,    -- нижняя граница покрытия (включительно)
+    till_ts     BIGINT NOT NULL,    -- верхняя граница покрытия (исключительно)
+    bars        BIGINT NOT NULL,    -- число баров в датасете
+    size_bytes  BIGINT NOT NULL,    -- размер на диске (например, Parquet-экспорт)
+    updated_ts  BIGINT NOT NULL,    -- время последнего обновления, UNIX-секунды
+    PRIMARY KEY (source, secid, tf)
+);";
+
 /// Однострочная таблица версии схемы — основа идемпотентных миграций.
 pub const DDL_SCHEMA_VERSION: &str = "\
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -178,11 +217,13 @@ CREATE TABLE IF NOT EXISTS schema_version (
 /// симулятора исполнения).
 /// v3 — датасеты MOEX ALGOPACK: `algo_tradestats`/`algo_futoi`/`algo_hi2`/
 /// `algo_obstats`/`algo_orderstats` (фаза 10.5).
-pub const SCHEMA_VERSION: i32 = 3;
+/// v4 — историзация бэктестера: `history_bars` (OHLCV + опц. ALGOPACK) и
+/// `history_datasets` (каталог локальных датасетов) (фаза 11.2).
+pub const SCHEMA_VERSION: i32 = 4;
 
 /// Полный набор DDL таблиц данных в порядке применения. Версия схемы
 /// (`schema_version`) применяется отдельно миграцией.
-pub const ALL_DDL: [&str; 10] = [
+pub const ALL_DDL: [&str; 12] = [
     DDL_INSTRUMENTS,
     DDL_BARS,
     DDL_TURNOVER_SNAPSHOTS,
@@ -193,6 +234,8 @@ pub const ALL_DDL: [&str; 10] = [
     DDL_ALGO_HI2,
     DDL_ALGO_OBSTATS,
     DDL_ALGO_ORDERSTATS,
+    DDL_HISTORY_BARS,
+    DDL_HISTORY_DATASETS,
 ];
 
 #[cfg(test)]
@@ -201,12 +244,23 @@ mod tests {
 
     #[test]
     fn ddl_is_present_and_keyed() {
-        assert_eq!(ALL_DDL.len(), 10);
+        assert_eq!(ALL_DDL.len(), 12);
         for ddl in ALL_DDL {
             assert!(ddl.contains("CREATE TABLE IF NOT EXISTS"));
         }
         assert!(DDL_BARS.contains("PRIMARY KEY (symbol, timeframe, ts)"));
         assert!(DDL_TRADES.contains("buyer_initiated"));
+    }
+
+    #[test]
+    fn history_ddl_keys_and_optional_columns() {
+        assert!(DDL_HISTORY_BARS.contains("PRIMARY KEY (source, secid, tf, ts)"));
+        // Опциональные ALGOPACK-колонки без NOT NULL.
+        for col in ["vwap", "disb", "oi", "hi2"] {
+            assert!(DDL_HISTORY_BARS.contains(col));
+        }
+        assert!(DDL_HISTORY_DATASETS.contains("PRIMARY KEY (source, secid, tf)"));
+        assert!(DDL_HISTORY_DATASETS.contains("size_bytes"));
     }
 
     #[test]

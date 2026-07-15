@@ -14,7 +14,9 @@ thiserror = { workspace = true }
 # Нативный движок DuckDB (bundled = компиляция из исходников). Выключен по
 # умолчанию, чтобы базовая сборка и кросс-платформенный CI не тянули C++-движок;
 # включается фичей `duckdb` (продакшен-сборка терминала, см. crate `app`).
-duckdb = { version = "1", features = ["bundled"], optional = true }
+# Фича `parquet` статически вкомпилирует расширение Parquet в bundled-движок
+# (COPY ... TO/read_parquet), иначе DuckDB пытается доустановить его из сети.
+duckdb = { version = "1", features = ["bundled", "parquet"], optional = true }
 
 [features]
 default = []
