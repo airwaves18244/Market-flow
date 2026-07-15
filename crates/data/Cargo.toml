@@ -8,6 +8,10 @@ description = "Адаптер Finam Trade API: auth+refresh, fetch, стримы
 
 [dependencies]
 domain = { workspace = true }
+# Планирование чанкинга/дозагрузки истории переиспользуется из `storage`
+# (`backfill::chunk_range`, фаза 11.1). Зависимость по умолчанию лёгкая: без
+# фичи `duckdb` крейт `storage` тянет только `domain`/`serde`/`thiserror`.
+storage = { workspace = true }
 finam-proto = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
