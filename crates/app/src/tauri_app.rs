@@ -394,6 +394,149 @@ fn history_plan(state: State<AppState>, input: HistoryPlanInput) -> CmdResult<Ve
     Ok(state.history_plan(&input))
 }
 
+/// Превью загруженного датасета (11.4.4): последние `limit` баров ключа
+/// (source, secid, tf) для верификации свечами (`CandleChart`).
+#[tauri::command]
+fn history_preview(
+    state: State<AppState>,
+    source: String,
+    secid: String,
+    tf: String,
+    limit: Option<usize>,
+) -> CmdResult<Vec<BarPoint>> {
+    state.history_preview(&source, &secid, &tf, limit.unwrap_or(500))
+}
+
+/// Перевести доменное событие загрузчика в live-push событие фронта
+/// (`history:progress|done|error`), по образцу [`emit_trade`].
+fn emit_history_event(app: &tauri::AppHandle, ev: crate::history::HistoryEvent) {
+    use crate::dto::{HistoryDoneDto, HistoryErrorDto, HistoryProgressDto};
+    use crate::history::HistoryEvent;
+
+    let result = match ev {
+        HistoryEvent::Progress {
+            task_id,
+            ticker,
+            tf,
+            percent,
+        } => app.emit(
+            "history:progress",
+            HistoryProgressDto {
+                task_id,
+                ticker,
+                tf: tf.code().to_owned(),
+                percent,
+            },
+        ),
+        HistoryEvent::Done {
+            task_id,
+            ticker,
+            tf,
+            bars,
+            summary,
+        } => app.emit(
+            "history:done",
+            HistoryDoneDto {
+                task_id,
+                ticker,
+                tf: tf.map(|t| t.code().to_owned()),
+                bars,
+                summary,
+            },
+        ),
+        HistoryEvent::Error {
+            task_id,
+            ticker,
+            tf,
+            message,
+        } => app.emit(
+            "history:error",
+            HistoryErrorDto {
+                task_id,
+                ticker,
+                tf: tf.map(|t| t.code().to_owned()),
+                message,
+            },
+        ),
+    };
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "не удалось отправить событие history:*");
+    }
+}
+
+/// Запустить фоновую загрузку истории (IPC `history_load`).
+///
+/// Регистрирует задачу в реестре, строит боевой источник по коду (`finam` —
+/// Finam Trade API, требует фичи `live`; `moex_algo` — ALGOPACK, требует фичи
+/// `moex`) и прогоняет [`crate::history::run_load`], транслируя события в
+/// каналы `history:*`. Возвращает `taskId` (для точечной отмены). Отмена
+/// работает и без него — команда `history_cancel(None)` останавливает все
+/// активные загрузки. Каждая пара `(тикер, TF)` качает только недостающие
+/// диапазоны; ошибка одной задачи не роняет остальные.
+#[tauri::command]
+async fn history_load(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    input: crate::dto::HistoryLoadInput,
+) -> CmdResult<crate::dto::HistoryTaskDto> {
+    use domain::history::DataSource;
+
+    let request = crate::history::parse_load_input(&input)?;
+    let (task_id, cancel) = state.history_tasks().start();
+    let emit = move |ev| emit_history_event(&app, ev);
+
+    let outcome: Result<(), String> = match request.source {
+        DataSource::MoexAlgo => {
+            #[cfg(feature = "moex")]
+            {
+                let token = std::env::var("MOEX_ALGOPACK_TOKEN")
+                    .map_err(|_| "токен ALGOPACK не задан (MOEX_ALGOPACK_TOKEN)".to_owned())?;
+                let transport = data::ReqwestTransport::new().map_err(|e| e.to_string())?;
+                let client = data::MoexAlgo::new(transport, token);
+                let source = data::MoexHistory::new(client, data::moex::Market::Eq);
+                crate::history::run_load(state.inner(), &source, &request, task_id, &cancel, &emit)
+                    .await;
+                Ok(())
+            }
+            #[cfg(not(feature = "moex"))]
+            {
+                Err("источник MOEX ALGO недоступен в этой сборке (нужна фича `moex`)".to_owned())
+            }
+        }
+        DataSource::Finam => {
+            #[cfg(feature = "live")]
+            {
+                let secret = crate::live::load_secret()?;
+                let auth = data::AuthManager::new(
+                    data::GrpcAuthTransport::new(),
+                    data::MemSecretStore::with_secret(secret),
+                );
+                let md = data::FinamMarketData::connect(auth).map_err(|e| e.to_string())?;
+                let source = data::FinamHistory::new(md);
+                crate::history::run_load(state.inner(), &source, &request, task_id, &cancel, &emit)
+                    .await;
+                Ok(())
+            }
+            #[cfg(not(feature = "live"))]
+            {
+                Err("источник Finam недоступен в этой сборке (нужна фича `live`)".to_owned())
+            }
+        }
+    };
+
+    state.history_tasks().finish(task_id);
+    outcome?;
+    Ok(crate::dto::HistoryTaskDto { task_id })
+}
+
+/// Отменить фоновую загрузку истории (IPC `history_cancel`): конкретную по
+/// `taskId` или все активные, если `taskId` не задан. Возвращает число
+/// затронутых задач.
+#[tauri::command]
+fn history_cancel(state: State<AppState>, task_id: Option<u64>) -> CmdResult<usize> {
+    Ok(state.history_tasks().cancel(task_id))
+}
+
 // ── V2 / Trade (симулятор исполнения) ───────────────────────────────────────
 
 #[tauri::command]
@@ -535,6 +678,9 @@ pub fn run() {
             history_datasets,
             history_delete,
             history_plan,
+            history_preview,
+            history_load,
+            history_cancel,
             submit_order,
             cancel_order,
             order_blotter,

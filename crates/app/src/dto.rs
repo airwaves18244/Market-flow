@@ -1418,6 +1418,74 @@ pub struct DatasetIdInput {
     pub tf: String,
 }
 
+// ── T10 — Историзация: загрузка (вход) и события хода (`history:*`) ───────────
+//
+// Вход/события живут только в Tauri-сборке (единственный потребитель — команда
+// `history_load` и эмиттеры `history:progress|done|error`). В базовой сборке и
+// в тестах ядра оркестрация оперирует доменными типами `crate::history`, а не
+// этими DTO, поэтому за фичей `tauri` — как `TradeDto`/`OrderBookDto` за `live`.
+
+/// Вход запуска загрузки истории (IPC `history_load`).
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryLoadInput {
+    /// Код источника (`finam|moex_algo`).
+    pub source: String,
+    /// Тикеры для загрузки.
+    pub tickers: Vec<String>,
+    /// Коды тайм-фреймов (`m1|m5|m15|h1|d1`).
+    pub timeframes: Vec<String>,
+    /// Начало окна (unix-секунды, включительно).
+    pub from: i64,
+    /// Конец окна (unix-секунды, исключительно — полуоткрытый `[from, till)`).
+    pub till: i64,
+}
+
+/// Идентификатор запущенной загрузки (ответ `history_load`).
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryTaskDto {
+    pub task_id: u64,
+}
+
+/// Событие прогресса задачи `(ticker, tf)` — канал `history:progress`.
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryProgressDto {
+    pub task_id: u64,
+    pub ticker: String,
+    /// Код тайм-фрейма (`m1|m5|m15|h1|d1`).
+    pub tf: String,
+    /// Прогресс задачи, `0..=100`.
+    pub percent: u8,
+}
+
+/// Событие завершения — канал `history:done`. `ticker=None` — вся загрузка.
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDoneDto {
+    pub task_id: u64,
+    pub ticker: Option<String>,
+    pub tf: Option<String>,
+    pub bars: u64,
+    pub summary: String,
+}
+
+/// Событие ошибки задачи — канал `history:error`. Не прерывает загрузку.
+#[cfg(feature = "tauri")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryErrorDto {
+    pub task_id: u64,
+    pub ticker: Option<String>,
+    pub tf: Option<String>,
+    pub message: String,
+}
+
 // ── T11 — MOEX ALGO: датасеты ALGOPACK (Super Candles/FUTOI/HI2/Mega Alerts) ──
 //
 // DTO для чтения датасетов T8-хранилища (`storage::algo_*`) поверх аналитики

@@ -9,6 +9,8 @@ use std::sync::Mutex;
 
 #[cfg(feature = "moex")]
 use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+#[cfg(feature = "ingest")]
+use domain::history::HistoryBar;
 use domain::history::{Catalog, DataSource, DatasetMeta};
 #[cfg(feature = "ingest")]
 use domain::Bar;
@@ -53,6 +55,11 @@ pub struct AppState {
     #[cfg(feature = "llm")]
     #[allow(dead_code)]
     llm_cache: crate::llm::SummaryCache,
+    /// Реестр фоновых загрузок истории (T10, фаза 11.3): раздаёт `task_id` и
+    /// хранит флаги отмены, чтобы `history_cancel(taskId?)` мог остановить одну
+    /// загрузку или все. Живёт под фичей `ingest` (async-оркестрация).
+    #[cfg(feature = "ingest")]
+    history_tasks: crate::history::HistoryTasks,
 }
 
 // В headless-live режиме (а также при сборке одной фичи `llm`/`moex` без
@@ -74,6 +81,8 @@ impl AppState {
             settings: Mutex::new(SettingsStore::from_env()),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "ingest")]
+            history_tasks: crate::history::HistoryTasks::default(),
         }
     }
 
@@ -90,6 +99,8 @@ impl AppState {
             settings: Mutex::new(SettingsStore::new(settings_dir)),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "ingest")]
+            history_tasks: crate::history::HistoryTasks::default(),
         }
     }
 
@@ -545,6 +556,106 @@ impl AppState {
     /// План дозагрузки истории (недостающие диапазоны). Чистая обёртка.
     pub fn history_plan(&self, input: &HistoryPlanInput) -> Vec<TimeRangeDto> {
         api::history_plan(input)
+    }
+
+    /// Превью загруженного датасета (11.4.4): последние `limit` баров ключа
+    /// (source, secid, tf) из локального хранилища истории для отрисовки
+    /// свечами. Неизвестный код источника/тайм-фрейма — понятная ошибка.
+    pub fn history_preview(
+        &self,
+        source: &str,
+        secid: &str,
+        tf: &str,
+        limit: usize,
+    ) -> Result<Vec<BarPoint>, String> {
+        let src = DataSource::from_code(source)
+            .ok_or_else(|| format!("неизвестный источник: {source}"))?;
+        let timeframe =
+            TimeFrame::from_code(tf).ok_or_else(|| format!("неизвестный тайм-фрейм: {tf}"))?;
+        self.read(|s| api::history_preview(s, src, secid, timeframe, limit))
+            .map_err(|e| e.to_string())
+    }
+
+    // ── T10 — Историзация: загрузчик (async-оркестрация, фича `ingest`) ────────
+
+    /// Реестр фоновых загрузок (для запуска/отмены задач).
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn history_tasks(&self) -> &crate::history::HistoryTasks {
+        &self.history_tasks
+    }
+
+    /// Недостающие диапазоны ключа (source, secid, tf) в окне — план дыр
+    /// поверх каталога хранилища (`history_missing_ranges`).
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn history_missing(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        range: domain::history::TimeRange,
+    ) -> Result<Vec<domain::history::TimeRange>, StorageError> {
+        self.read(|s| s.history_missing_ranges(source, secid, tf, range))
+    }
+
+    /// Записать загруженные исторические бары (`history_bars`). Идемпотентно по
+    /// ключу — повторная запись не плодит дублей. Возвращает число строк.
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn ingest_history_bars(&self, bars: &[HistoryBar]) -> Result<usize, StorageError> {
+        self.write(|s| s.insert_history_bars(bars))
+    }
+
+    /// Зафиксировать датасет в каталоге после записи баров: пересчитать
+    /// метаданные (диапазон/число баров) по фактическому содержимому стора и
+    /// обновить каталог хранилища (`upsert_dataset`) и in-memory-каталог,
+    /// который читает `history_datasets`. `covered` — обработанный на этом шаге
+    /// диапазон; он сливается с уже покрытым. Возвращает актуальные метаданные.
+    #[cfg(feature = "ingest")]
+    #[allow(dead_code)]
+    pub fn history_commit(
+        &self,
+        source: DataSource,
+        secid: &str,
+        tf: TimeFrame,
+        covered: domain::history::TimeRange,
+    ) -> Result<DatasetMeta, StorageError> {
+        use domain::history::normalize_ranges;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        let meta = self.write(|s| {
+            // Слить заявленный диапазон с уже покрытым (из каталога хранилища).
+            let merged = match s.dataset(source, secid, tf)? {
+                Some(existing) => normalize_ranges(&[existing.range, covered])
+                    .into_iter()
+                    .next()
+                    .unwrap_or(covered),
+                None => covered,
+            };
+            // Пересчитать число баров по факту (в объединённом диапазоне).
+            let count = s
+                .history_bars(source, secid, tf, merged.from, merged.till)?
+                .len() as u64;
+            let meta = DatasetMeta {
+                source,
+                secid: secid.to_owned(),
+                tf,
+                range: merged,
+                bars: count,
+                updated_ts: now,
+            };
+            s.upsert_dataset(&meta)?;
+            Ok(meta)
+        })?;
+
+        // Зеркалим в in-memory-каталог, который читает `history_datasets`.
+        self.history_register(meta.clone());
+        Ok(meta)
     }
 
     // ── T3 — Персист настроек и правил Key Activity ────────────────────────────

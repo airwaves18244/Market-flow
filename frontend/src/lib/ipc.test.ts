@@ -129,4 +129,49 @@ describe("ipc (mock mode)", () => {
       expect(a.message.length).toBeGreaterThan(0);
     }
   });
+
+  // ── T10 — Историзация: загрузка/отмена/превью ──────────────────────────────
+
+  it("starts a history load, registering datasets and returning a task id", async () => {
+    const before = await ipc.historyDatasets();
+    const hadKey = before.some((d) => d.source === "finam" && d.secid === "TESTX" && d.tf === "d1");
+    expect(hadKey).toBe(false);
+
+    const task = await ipc.historyLoad({
+      source: "finam",
+      tickers: ["TESTX"],
+      timeframes: ["d1", "h1"],
+      from: 0,
+      till: 86_400 * 10,
+    });
+    expect(task.taskId).toBeGreaterThan(0);
+
+    const after = await ipc.historyDatasets();
+    expect(after.some((d) => d.secid === "TESTX" && d.tf === "d1")).toBe(true);
+    expect(after.some((d) => d.secid === "TESTX" && d.tf === "h1")).toBe(true);
+
+    // Второй запуск выдаёт монотонно больший id задачи.
+    const task2 = await ipc.historyLoad({
+      source: "finam",
+      tickers: ["TESTX"],
+      timeframes: ["d1"],
+      from: 0,
+      till: 86_400 * 10,
+    });
+    expect(task2.taskId).toBeGreaterThan(task.taskId);
+  });
+
+  it("cancels a history load without error in mock mode", async () => {
+    await expect(ipc.historyCancel()).resolves.toBe(0);
+    await expect(ipc.historyCancel(1)).resolves.toBe(0);
+  });
+
+  it("previews a dataset with a bounded number of candles", async () => {
+    const bars = await ipc.historyPreview("finam", "SBER", "d1", 50);
+    expect(bars.length).toBeGreaterThan(0);
+    expect(bars.length).toBeLessThanOrEqual(50);
+    for (const b of bars) {
+      expect(b.high).toBeGreaterThanOrEqual(b.low);
+    }
+  });
 });

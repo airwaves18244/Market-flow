@@ -1169,6 +1169,32 @@ pub fn history_plan(input: &HistoryPlanInput) -> Vec<TimeRangeDto> {
         .collect()
 }
 
+/// Превью загруженного датасета (11.4.4): последние `limit` баров ключа
+/// (source, secid, tf) из локального хранилища истории — для верификации
+/// свечами (`CandleChart`). Читает всё окно ключа и берёт хвост, чтобы график
+/// показывал самые свежие бары.
+pub fn history_preview(
+    store: &dyn Store,
+    source: domain::history::DataSource,
+    secid: &str,
+    tf: TimeFrame,
+    limit: usize,
+) -> Result<Vec<BarPoint>, StorageError> {
+    let bars = store.history_bars(source, secid, tf, i64::MIN, i64::MAX)?;
+    let start = bars.len().saturating_sub(limit.max(1));
+    Ok(bars[start..]
+        .iter()
+        .map(|b| BarPoint {
+            ts: b.ts,
+            open: b.open,
+            high: b.high,
+            low: b.low,
+            close: b.close,
+            volume: b.volume,
+        })
+        .collect())
+}
+
 // ── T11 — MOEX ALGO: датасеты ALGOPACK (чтение из storage T8) ────────────────
 
 use domain::algo::hi2::concentration_spikes;

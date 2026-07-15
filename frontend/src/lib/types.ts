@@ -531,6 +531,47 @@ export interface DatasetIdInput {
   tf: string;
 }
 
+// ── T10 — Историзация: загрузка (вход) и события хода (`history:*`) ───────────
+
+export interface HistoryLoadInput {
+  source: DataSource;
+  tickers: string[];
+  timeframes: string[];
+  /** Начало окна, unix-секунды (включительно). */
+  from: number;
+  /** Конец окна, unix-секунды (исключительно, полуоткрытый `[from, till)`). */
+  till: number;
+}
+
+export interface HistoryTaskDto {
+  taskId: number;
+}
+
+/** Событие `history:progress`: прогресс задачи (тикер × ТФ), `0..=100`. */
+export interface HistoryProgressEvent {
+  taskId: number;
+  ticker: string;
+  tf: string;
+  percent: number;
+}
+
+/** Событие `history:done`: завершение задачи (`ticker` задан) или всей загрузки (`ticker` = null). */
+export interface HistoryDoneEvent {
+  taskId: number;
+  ticker: string | null;
+  tf: string | null;
+  bars: number;
+  summary: string;
+}
+
+/** Событие `history:error`: ошибка задачи (не прерывает остальные). */
+export interface HistoryErrorEvent {
+  taskId: number;
+  ticker: string | null;
+  tf: string | null;
+  message: string;
+}
+
 // ── T3 — Персист настроек и правил Key Activity в ядро ───────────────────────
 // (10.5.3 / S.2.2 / 10.8.* / 11.6.1 / 12.8.1)
 //

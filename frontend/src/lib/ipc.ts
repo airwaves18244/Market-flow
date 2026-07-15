@@ -23,7 +23,12 @@ import type {
   FutoiDto,
   FutureGroupDto,
   Hi2Dto,
+  HistoryDoneEvent,
+  HistoryErrorEvent,
+  HistoryLoadInput,
   HistoryPlanInput,
+  HistoryProgressEvent,
+  HistoryTaskDto,
   ImpliedVolDto,
   ImpliedVolInput,
   InstrumentDto,
@@ -217,6 +222,13 @@ export const ipc = {
   historyDatasets: () => invoke<DatasetMetaDto[]>("history_datasets"),
   historyDelete: (id: DatasetIdInput) => invoke<boolean>("history_delete", { id }),
   historyPlan: (input: HistoryPlanInput) => invoke<TimeRangeDto[]>("history_plan", { input }),
+  // T10 — фоновая загрузка истории: старт (возвращает id задачи) и отмена
+  // (без id — все активные). Прогресс приходит событиями `history:*` (см. ниже).
+  historyLoad: (input: HistoryLoadInput) => invoke<HistoryTaskDto>("history_load", { input }),
+  historyCancel: (taskId?: number) => invoke<number>("history_cancel", { taskId }),
+  // Превью загруженного датасета свечами (11.4.4).
+  historyPreview: (source: string, secid: string, tf: string, limit?: number) =>
+    invoke<BarPoint[]>("history_preview", { source, secid, tf, limit }),
 
   // ── T3 / Настройки и правила Key Activity (10.5.3/S.2.2) ────────────────────
   settingsGet: () => invoke<SettingsDto>("settings_get"),
@@ -251,4 +263,28 @@ export async function onFill(cb: (f: FillEventDto) => void): Promise<Unlisten> {
   if (!inTauri()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<FillEventDto>("fill:tick", (e) => cb(e.payload));
+}
+
+// ── T10 — Историзация: события хода загрузки (`history:*`) ────────────────────
+// В браузере (мок-режим) — no-op: там прогресс симулируется во вкладке
+// `HistoryTab`. В Tauri — реальные события фонового загрузчика.
+
+export async function onHistoryProgress(
+  cb: (p: HistoryProgressEvent) => void,
+): Promise<Unlisten> {
+  if (!inTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<HistoryProgressEvent>("history:progress", (e) => cb(e.payload));
+}
+
+export async function onHistoryDone(cb: (d: HistoryDoneEvent) => void): Promise<Unlisten> {
+  if (!inTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<HistoryDoneEvent>("history:done", (e) => cb(e.payload));
+}
+
+export async function onHistoryError(cb: (err: HistoryErrorEvent) => void): Promise<Unlisten> {
+  if (!inTauri()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<HistoryErrorEvent>("history:error", (e) => cb(e.payload));
 }

@@ -39,7 +39,10 @@ tauri-build = { version = "2", optional = true }
 
 [features]
 default = []
-tauri = ["dep:tauri", "dep:tauri-build"]
+# UI-сборка тянет и загрузчик истории (T10): его async-оркестрация нужна
+# командам `history_load`/`history_cancel`, поэтому `tauri` включает `ingest`
+# (та же опциональная зависимость tokio, что у `ingest`/`moex`/`llm`).
+tauri = ["dep:tauri", "dep:tauri-build", "ingest"]
 # Продакшен-хранилище: нативный DuckDB вместо MemStore.
 duckdb = ["storage/duckdb"]
 # Асинхронный планировщик ингеста (poll рыночных данных в хранилище).

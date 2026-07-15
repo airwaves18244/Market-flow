@@ -30,6 +30,15 @@ mod feed;
 #[allow(dead_code)]
 mod ingest;
 
+// Сервис историзации (T10, фаза 11.3): фоновая загрузка исторических баров с
+// планом дозагрузки, событиями прогресса и отменой. Тестируется на
+// `data::FakeHistorySource` + `MemStore`; боевые источники подключает Tauri-слой
+// (`tauri_app`). Как `ingest`/`replay` — часть API вызывается только под
+// `tauri`, поэтому глушим dead_code на уровне модуля.
+#[cfg(feature = "ingest")]
+#[allow(dead_code)]
+mod history;
+
 // Планировщик ингеста ALGOPACK (10.6.4): опрос вотчлиста по датасетам
 // Super Candles/FUTOI/HI2 (`data::moex::AlgoSource`) в хранилище. Отдельный
 // модуль от [`ingest`] (не завязан на `MarketData`/Finam), но тот же паттерн:
@@ -556,11 +565,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tf: "d1".into(),
             })
             .unwrap_or(false);
+        let preview = state
+            .history_preview("finam", "SBER", "d1", 100)
+            .unwrap_or_default();
         println!(
-            "  history: датасетов после удаления={}, дыр для дозагрузки={}, удалено={}",
+            "  history: датасетов после удаления={}, дыр для дозагрузки={}, удалено={}, превью баров={}",
             state.history_datasets().len(),
             plan.len(),
-            removed
+            removed,
+            preview.len()
         );
 
         // T3 — персист настроек и правил Key Activity в JSON-файл config-директории.

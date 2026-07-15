@@ -1088,6 +1088,9 @@ const mockDatasets: DatasetMetaDto[] = [
   { source: "moex_algo", secid: "SBER", tf: "m5", fromTs: 0, toTs: DAY * 30, bars: 30 * 78, updatedTs: DAY * 30, looksComplete: false },
 ];
 
+// Монотонный счётчик id мок-задач загрузки (history_load).
+let mockHistoryTaskSeq = 0;
+
 function mockHistoryPlan(input: {
   covered: { from: number; till: number }[];
   requestedFrom: number;
@@ -1293,6 +1296,48 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
         requestedTill: number;
       };
       return mockHistoryPlan(inp) as unknown as T;
+    }
+    case "history_load": {
+      // Детерминированный мок: регистрируем датасеты по (тикер × ТФ) и отдаём
+      // id задачи. Прогресс в браузере симулируется во вкладке HistoryTab —
+      // событий `history:*` в мок-режиме нет (см. onHistory* в ipc.ts).
+      const inp = args?.input as {
+        source: string;
+        tickers: string[];
+        timeframes: string[];
+        from: number;
+        till: number;
+      };
+      for (const secid of inp.tickers) {
+        for (const tf of inp.timeframes) {
+          const idx = mockDatasets.findIndex(
+            (d) => d.source === inp.source && d.secid === secid && d.tf === tf,
+          );
+          const meta = {
+            source: inp.source,
+            secid,
+            tf,
+            fromTs: inp.from,
+            toTs: inp.till,
+            bars: Math.max(1, Math.round((inp.till - inp.from) / DAY)),
+            updatedTs: inp.till,
+            looksComplete: true,
+          };
+          if (idx >= 0) mockDatasets[idx] = meta;
+          else mockDatasets.push(meta);
+        }
+      }
+      mockHistoryTaskSeq += 1;
+      return { taskId: mockHistoryTaskSeq } as unknown as T;
+    }
+    case "history_cancel":
+      // В мок-режиме фоновых задач нет — отменять нечего.
+      return 0 as unknown as T;
+    case "history_preview": {
+      const secid = String(args?.secid ?? "SBER");
+      const limit = Number(args?.limit ?? 500);
+      const seed = secid.startsWith("LKOH") ? 7000 : secid.startsWith("GAZP") ? 160 : 300;
+      return genBars(seed).slice(-limit) as unknown as T;
     }
 
     // ── T3 / Настройки и правила Key Activity ───────────────────────────────────
