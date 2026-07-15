@@ -165,6 +165,46 @@ CREATE TABLE IF NOT EXISTS algo_orderstats (
     PRIMARY KEY (secid, ts, market)
 );";
 
+/// Историческая свеча для бэктестера (фаза 11): OHLCV плюс опциональные поля
+/// ALGOPACK (VWAP, дисбаланс потока, открытый интерес, индекс концентрации).
+/// Источник и тайм-фрейм — часть ключа, чтобы датасеты Finam и MOEX не
+/// смешивались; идемпотентный upsert по (source, secid, tf, ts). Опциональные
+/// поля хранятся как `NULL`, если источник их не отдаёт (см.
+/// [`domain::history::HistoryBar`]).
+pub const DDL_HISTORY_BARS: &str = "\
+CREATE TABLE IF NOT EXISTS history_bars (
+    source   TEXT NOT NULL,       -- код источника: finam|moex_algo
+    secid    TEXT NOT NULL,
+    tf       TEXT NOT NULL,       -- m1|m5|m15|h1|d1
+    ts       BIGINT NOT NULL,     -- начало бара, UNIX-секунды UTC
+    open     DOUBLE NOT NULL,
+    high     DOUBLE NOT NULL,
+    low      DOUBLE NOT NULL,
+    close    DOUBLE NOT NULL,
+    volume   DOUBLE NOT NULL,
+    vwap     DOUBLE,              -- опц. поля ALGOPACK (NULL, если недоступны)
+    disb     DOUBLE,
+    oi       DOUBLE,
+    hi2      DOUBLE,
+    PRIMARY KEY (source, secid, tf, ts)
+);";
+
+/// Каталог локальных датасетов истории (фаза 11): по одной строке на ключ
+/// (source, secid, tf) с покрытым диапазоном, числом баров и временем
+/// обновления. Переживает перезапуск (в отличие от каталога в памяти) — см.
+/// [`domain::history::DatasetMeta`]. Идемпотентный upsert по ключу.
+pub const DDL_HISTORY_DATASETS: &str = "\
+CREATE TABLE IF NOT EXISTS history_datasets (
+    source      TEXT NOT NULL,
+    secid       TEXT NOT NULL,
+    tf          TEXT NOT NULL,
+    range_from  BIGINT NOT NULL,  -- нижняя граница покрытия, UNIX-секунды UTC
+    range_till  BIGINT NOT NULL,  -- верхняя граница (полуоткрыто [from, till))
+    bars        BIGINT NOT NULL,  -- число баров в датасете
+    updated_ts  BIGINT NOT NULL,  -- время последнего обновления
+    PRIMARY KEY (source, secid, tf)
+);";
+
 /// Однострочная таблица версии схемы — основа идемпотентных миграций.
 pub const DDL_SCHEMA_VERSION: &str = "\
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -178,11 +218,13 @@ CREATE TABLE IF NOT EXISTS schema_version (
 /// симулятора исполнения).
 /// v3 — датасеты MOEX ALGOPACK: `algo_tradestats`/`algo_futoi`/`algo_hi2`/
 /// `algo_obstats`/`algo_orderstats` (фаза 10.5).
-pub const SCHEMA_VERSION: i32 = 3;
+/// v4 — история для бэктестера: `history_bars` (ключ source+secid+tf+ts) и
+/// каталог `history_datasets` (фаза 11.2).
+pub const SCHEMA_VERSION: i32 = 4;
 
 /// Полный набор DDL таблиц данных в порядке применения. Версия схемы
 /// (`schema_version`) применяется отдельно миграцией.
-pub const ALL_DDL: [&str; 10] = [
+pub const ALL_DDL: [&str; 12] = [
     DDL_INSTRUMENTS,
     DDL_BARS,
     DDL_TURNOVER_SNAPSHOTS,
@@ -193,6 +235,8 @@ pub const ALL_DDL: [&str; 10] = [
     DDL_ALGO_HI2,
     DDL_ALGO_OBSTATS,
     DDL_ALGO_ORDERSTATS,
+    DDL_HISTORY_BARS,
+    DDL_HISTORY_DATASETS,
 ];
 
 #[cfg(test)]
@@ -201,12 +245,20 @@ mod tests {
 
     #[test]
     fn ddl_is_present_and_keyed() {
-        assert_eq!(ALL_DDL.len(), 10);
+        assert_eq!(ALL_DDL.len(), 12);
         for ddl in ALL_DDL {
             assert!(ddl.contains("CREATE TABLE IF NOT EXISTS"));
         }
         assert!(DDL_BARS.contains("PRIMARY KEY (symbol, timeframe, ts)"));
         assert!(DDL_TRADES.contains("buyer_initiated"));
+    }
+
+    #[test]
+    fn history_ddl_keys_are_source_secid_tf() {
+        assert!(DDL_HISTORY_BARS.contains("PRIMARY KEY (source, secid, tf, ts)"));
+        assert!(DDL_HISTORY_DATASETS.contains("PRIMARY KEY (source, secid, tf)"));
+        // Опциональные поля ALGOPACK допускают NULL (без NOT NULL).
+        assert!(DDL_HISTORY_BARS.contains("vwap     DOUBLE,"));
     }
 
     #[test]
