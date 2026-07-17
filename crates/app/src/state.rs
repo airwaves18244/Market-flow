@@ -559,6 +559,37 @@ impl AppState {
         self.write(|s| s.insert_algo_hi2(market, points))
     }
 
+    /// Записать статистику стакана заявок (`obstats`) для рынка `market`.
+    /// Точки домена конвертируются в «сырые» записи хранилища (см.
+    /// [`storage::store::AlgoObstatsRecord::from_point`] — доменный тип
+    /// `obstats` ещё не выделен, SPEC `10.2.4`).
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_obstats(
+        &self,
+        market: &str,
+        points: &[domain::algo::ObstatsPoint],
+    ) -> Result<usize, StorageError> {
+        let records: Vec<storage::store::AlgoObstatsRecord> = points
+            .iter()
+            .map(|p| storage::store::AlgoObstatsRecord::from_point(market, p))
+            .collect();
+        self.write(|s| s.insert_algo_obstats(&records))
+    }
+
+    /// Записать статистику заявок (`orderstats`) для рынка `market`.
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_orderstats(
+        &self,
+        market: &str,
+        points: &[domain::algo::OrderstatsPoint],
+    ) -> Result<usize, StorageError> {
+        let records: Vec<storage::store::AlgoOrderstatsRecord> = points
+            .iter()
+            .map(|p| storage::store::AlgoOrderstatsRecord::from_point(market, p))
+            .collect();
+        self.write(|s| s.insert_algo_orderstats(&records))
+    }
+
     // ── Фаза 11 — Историзация: каталог локальных датасетов ────────────────────
 
     /// Список локальных датасетов истории (метаданные).
