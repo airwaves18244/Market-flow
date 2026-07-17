@@ -217,6 +217,12 @@ fn response_to_result(method: Method, resp: HttpResponse) -> Result<serde_json::
 /// Один `reqwest::Client` переиспользуется между вызовами (внутри — пул
 /// соединений). Тайм-аут запроса конфигурируется, по умолчанию —
 /// [`DEFAULT_TIMEOUT`].
+///
+/// `Clone` — дешёвый (`reqwest::Client` внутри держит `Arc` на пул
+/// соединений/конфигурацию TLS), поэтому один построенный транспорт можно
+/// закэшировать на время сессии приложения и раздавать клоны вызывающим
+/// сторонам вместо пересборки клиента на каждый вызов (см. `app::llm`).
+#[derive(Clone)]
 pub struct ReqwestTransport {
     client: reqwest::Client,
 }

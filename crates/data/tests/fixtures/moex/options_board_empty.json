@@ -1,10 +1,10 @@
 {
   "securities": {
-    "columns": ["secid", "assetcode", "strike", "optiontype", "lasttradedate"],
+    "columns": ["SECID", "BOARDID", "SHORTNAME", "PREVSETTLEPRICE", "LASTTRADEDATE", "ASSETCODE", "OPTIONTYPE", "STRIKE", "CENTRALSTRIKE", "UNDERLYINGASSET", "UNDERLYINGTYPE", "UNDERLYINGSETTLEPRICE"],
     "data": []
   },
   "marketdata": {
-    "columns": ["secid", "bid", "offer", "last", "iv", "openposition", "theorprice"],
+    "columns": ["SECID", "BOARDID", "BID", "OFFER", "LAST", "SETTLEPRICE", "OPENPOSITION", "SYSTIME", "TRADE_SESSION_DATE"],
     "data": []
   }
 }

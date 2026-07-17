@@ -1,9 +1,14 @@
 # Фикстуры MOEX ALGOPACK (ISS JSON)
 
-**Статус: unverified — требуют сверки живым ключом `MOEX_ALGO_API`.**
+**Статус ALGOPACK-файлов: unverified — требуют сверки живым ключом
+`MOEX_ALGO_API`.** Живой смоук T14 (2026-07-17): egress к `apim.moex.com`
+открыт, эндпоинт подтверждён (`GET /iss/datashop/algopack/eq/tradestats/SBER.json`
+без ключа → `401 {"message":"Unauthorized"}` — URL и JSON-обёртка ошибок
+живые), но ключа `MOEX_ALGO_API` в окружении нет, поэтому форма успешного
+ответа по-прежнему не сверена. Файлы `options_board*.json` (публичный ISS)
+сверены живым ответом — см. раздел «Опционная доска».
 
-Egress к `apim.moex.com` в этой среде закрыт, поэтому все файлы в этом
-каталоге синтетические. Структура собрана по публичной документации ISS
+ALGOPACK-файлы синтетические. Структура собрана по публичной документации ISS
 (`iss.moex.com/iss/reference/`) и по описанию датасетов ALGOPACK в открытой
 документации `moexalgo`/data.moex.com, но **точные имена колонок, регистр,
 имя блока-обёртки и параметры запроса не подтверждены живым ответом API**.
@@ -67,67 +72,43 @@ Egress к `apim.moex.com` в этой среде закрыт, поэтому в
    написаны против формы файлов в этом каталоге и не изменятся в логике,
    только в данных.
 
-## Опционная доска (`options.rs`, фаза 12.4) — `(unverified)`, отдельный контракт
+## Опционная доска (`options.rs`, фаза 12.4) — **сверено живым ответом (T14, 2026-07-17)**
 
 В отличие от файлов выше (ALGOPACK, `apim.moex.com`, Bearer-токен), опционная
-доска читается с **публичного** ISS `iss.moex.com` (не требует авторизации,
-см. `S.3.1`: `apim.moex.com`/`iss.moex.com`/`data.moex.com` — три разных хоста
-в egress-allowlist). Egress к `iss.moex.com` в этой среде тоже закрыт, поэтому
-`options_board*.json` — синтетические фикстуры по общей документации ISS
-(`iss.moex.com/iss/reference/`), со своим набором допущений:
+доска читается с **публичного** ISS `iss.moex.com` (не требует авторизации).
+`options_board*.json` приведены к форме живого ответа. Итоги сверки:
 
-- **Ресурс.** `engines/futures/markets/options/securities.json` (движок
-  `futures`, рынок `options` — опционы MOEX торгуются на срочном рынке,
-  привязаны к базовому фьючерсу). `?iss.only=securities,marketdata` — по
-  общей практике ISS: карточки инструментов (`securities`) и рыночные данные
-  (`marketdata`) в одном ответе, отдельными блоками.
-- **Блоки.** `securities` — статические поля инструмента (`SECID`,
-  `ASSETCODE` — код базового актива, `STRIKE`, `OPTIONTYPE` — `C`/`P` (без
-  учёта регистра), `LASTTRADEDATE` — дата экспирации серии); `marketdata` —
-  котировки (`BID`, `OFFER`, `LAST`, `IV`, `OPENPOSITION` — открытый интерес,
-  `THEORPRICE` — теоретическая цена НКЦ). Точный набор колонок и их
-  фактическое присутствие в реальном ответе не подтверждены.
-- **Фильтрация по базовому активу.** Выполняется **на стороне клиента**
-  (`parse_options_board` сравнивает `ASSETCODE` с искомым `underlying` без
-  учёта регистра) — сервер может отдавать весь рынок опционов сразу; какие
-  query-параметры ISS принимает для серверной фильтрации по инструменту/
-  базовому активу, не проверено, а клиентская фильтрация работает независимо
-  от этого.
-- **Пагинация.** Курсор `securities.cursor` (`INDEX`/`TOTAL`/`PAGESIZE`, та
-  же форма, что и у `IssCursor` из `parse.rs`) ведёт постраничный сбор;
-  `marketdata` на каждой странице просто присоединяется без своего курсора
-  (допущение: `marketdata` разбита на страницы синхронно с `securities`).
-- **Форвард базового актива.** `MoexIss::underlying_forward` запрашивает
-  `engines/futures/markets/forts/securities/{underlying}.json?iss.only=marketdata`
-  и берёт `LAST`, иначе `SETTLEPRICE`, из первой строки `marketdata`. Это
-  best-effort: недоступность (сеть/пустой ответ) не проваливает загрузку
-  доски — `OptionsBoardSnapshot::forward` остаётся `None`, и вызывающая
-  сторона (`app::api::option_board`) подставляет форвард из входа
-  (`forward_hint`).
-- **`options_board.json`.** Один базовый актив `RIH5` (4 валидных страйка:
-  50000 call/put, 55000 call, 45000 call) + одна строка другого актива
-  `SiH5` (проверяет фильтрацию) + одна строка без страйка (`null`, проверяет
-  мягкое отбрасывание невалидных строк). Внутри `RIH5`: пут 50000 — без
-  `bid`/`ask`/`OI` (неликвид, должен отбрасываться маппингом в точки
-  улыбки); колл 55000 — без `IV`, но с `THEORPRICE` (проверяет вычисление
-  IV через `domain::options::implied_vol`); остальные — с готовым `IV` в
-  доске.
+- **Ресурс.** `engines/futures/markets/options/securities.json?iss.only=securities,marketdata&iss.meta=off`
+  — подтверждён: блоки `securities` и `marketdata` в одном ответе, строки
+  выровнены по `SECID`, колонки ЗАГЛАВНЫМИ.
+- **Колонки `securities`** (29 в живом ответе; в фикстурах — значимое
+  подмножество): `SECID`, `BOARDID` (`ROPD`), `SHORTNAME`,
+  `PREVSETTLEPRICE`, `LASTTRADEDATE` (`YYYY-MM-DD` — дата экспирации),
+  `ASSETCODE` (код актива, напр. `AFLT`), `OPTIONTYPE` (`C`/`P`), `STRIKE`,
+  `CENTRALSTRIKE`, `UNDERLYINGASSET` (**SECID фьючерса**, напр. `AFU6`),
+  `UNDERLYINGTYPE` (`F`), `UNDERLYINGSETTLEPRICE`.
+- **Колонки `marketdata`** (33 в живом ответе): `BID`, `OFFER`, `LAST`,
+  `SETTLEPRICE`, `OPENPOSITION`, `SYSTIME`, `TRADE_SESSION_DATE`, ...
+  **`IV` и `THEORPRICE` в живом ответе ОТСУТСТВУЮТ** — IV решается из цены
+  (`theor_price` → mid `bid`/`ask` → `last`; первые два пункта — задел на
+  случай появления расчёта биржи, живой путь — mid).
+- **Серверная фильтрация.** Параметр `assets=<код актива>` работает
+  (`assets=AFLT` → 138 строк вместо 34 420 / ~19 МБ всего рынка); варианты
+  `assetcode=`/`asset_code=` игнорируются. Клиент шлёт `assets=` и сохраняет
+  клиентскую фильтрацию по `ASSETCODE` как страховку.
+- **Пагинация.** Полный ответ (34 тыс. строк) приходит **одной страницей без
+  блока `securities.cursor`** — `IssCursor::find` возвращает `None`, клиент
+  не пагинирует; поддержка курсора оставлена защитным клапаном.
+- **Форвард.** `forts/securities/{SECID}.json` работает **только по SECID
+  фьючерса** из `UNDERLYINGASSET` (`AFU6` → строка с `LAST`/`SETTLEPRICE`);
+  по коду актива (`AFLT`) — 0 строк. Порядок в `options_board_snapshot`:
+  `LAST`/`SETTLEPRICE` с forts по `UNDERLYINGASSET`, иначе
+  `UNDERLYINGSETTLEPRICE` из самой доски, иначе `None` (тогда `app`
+  подставляет `forward_hint`).
+- **`options_board.json`.** Актив `RTS` (фьючерс `RIH5`; 4 валидных строки:
+  50000 call/put, 55000 call, 45000 call) + строка другого актива `Si`
+  (проверяет фильтрацию) + строка без страйка (`null`, мягкое отбрасывание).
+  Пут 50000 — без `bid`/`ask`/OI (неликвид, отбрасывается маппингом в точки
+  улыбки).
 - **`options_board_empty.json`.** Пустые `securities`/`marketdata` — доска
   без данных не должна ронять парсер/маппинг.
-
-### Как перепроверить живым доступом
-
-1. Открыть без авторизации (публичный ресурс, ключ не нужен):
-   ```
-   curl "https://iss.moex.com/iss/engines/futures/markets/options/securities.json?iss.only=securities,marketdata&iss.meta=off"
-   ```
-2. Сверить: реальные имена блоков и колонок (регистр не важен — доступ по
-   имени без учёта регистра), формат `OPTIONTYPE`/дат экспирации, наличие и
-   форму курсора, синхронность страниц `securities`/`marketdata`, а также
-   принимает ли ресурс серверную фильтрацию по базовому активу (тогда
-   клиентскую фильтрацию можно оставить как страховку, а не единственный
-   механизм).
-3. Проверить форвард: `curl "https://iss.moex.com/iss/engines/futures/markets/forts/securities/<SECID>.json?iss.only=marketdata&iss.meta=off"`.
-4. Обновить `options_board*.json` и, если понадобится, имена колонок/блоков
-   в `options.rs` (`parse_options_board`/`MoexIss`) — тесты написаны против
-   формы файлов в этом каталоге и не изменятся в логике, только в данных.

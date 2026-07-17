@@ -3,6 +3,7 @@
   import Panel from "./Panel.svelte";
   import EquityCurveChart from "./EquityCurveChart.svelte";
   import { ipc } from "../ipc";
+  import { fmtRu } from "../format";
   import type {
     BacktestReportDto,
     InstrumentDto,
@@ -65,7 +66,6 @@
     }
   });
 
-  const fmt = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
   const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
   const pf = (n: number) => (Number.isFinite(n) ? n.toFixed(2) : "∞");
 </script>
@@ -127,7 +127,7 @@
     <Panel title="Метрики">
       <div class="metrics">
         <div class="metric" class:up={report.metrics.netPnl >= 0} class:down={report.metrics.netPnl < 0}>
-          <span>Чистый P&L</span><b>{fmt(report.metrics.netPnl)}</b>
+          <span>Чистый P&L</span><b>{fmtRu(report.metrics.netPnl)}</b>
         </div>
         <div class="metric"><span>Доходность</span><b>{pct(report.metrics.returnPct)}</b></div>
         <div class="metric"><span>Сделок</span><b>{report.metrics.trades}</b></div>
@@ -135,8 +135,8 @@
         <div class="metric"><span>Profit factor</span><b>{pf(report.metrics.profitFactor)}</b></div>
         <div class="metric"><span>Макс. просадка</span><b>{pct(report.metrics.maxDrawdown)}</b></div>
         <div class="metric"><span>Sharpe</span><b>{report.metrics.sharpe.toFixed(2)}</b></div>
-        <div class="metric"><span>Ср. прибыль</span><b>{fmt(report.metrics.avgWin)}</b></div>
-        <div class="metric"><span>Ср. убыток</span><b>{fmt(report.metrics.avgLoss)}</b></div>
+        <div class="metric"><span>Ср. прибыль</span><b>{fmtRu(report.metrics.avgWin)}</b></div>
+        <div class="metric"><span>Ср. убыток</span><b>{fmtRu(report.metrics.avgLoss)}</b></div>
       </div>
     </Panel>
 
@@ -150,9 +150,9 @@
             <tr>
               <td>{new Date(t.ts * 1000).toLocaleDateString("ru-RU")}</td>
               <td class:up={t.side === "buy"} class:down={t.side === "sell"}>{t.side === "buy" ? "Покупка" : "Продажа"}</td>
-              <td class="num">{fmt(t.qty)}</td>
-              <td class="num">{fmt(t.price)}</td>
-              <td class="num" class:up={t.realizedPnl > 0} class:down={t.realizedPnl < 0}>{t.realizedPnl ? fmt(t.realizedPnl) : "—"}</td>
+              <td class="num">{fmtRu(t.qty)}</td>
+              <td class="num">{fmtRu(t.price)}</td>
+              <td class="num" class:up={t.realizedPnl > 0} class:down={t.realizedPnl < 0}>{t.realizedPnl ? fmtRu(t.realizedPnl) : "—"}</td>
             </tr>
           {/each}
         </tbody>

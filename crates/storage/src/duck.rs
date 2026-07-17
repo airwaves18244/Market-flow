@@ -29,6 +29,48 @@ fn db(e: impl std::fmt::Display) -> StorageError {
     StorageError::Db(e.to_string())
 }
 
+/// Общий шаблон записи среза строк одним запросом в транзакции: подготовить
+/// `sql` один раз, прогнать по нему `rows` (`exec_one` сама решает, как
+/// связать конкретную строку с плейсхолдерами — обычно `params![...]`),
+/// закоммитить. Возвращает число обработанных строк (`rows.len()`) —
+/// семантика `INSERT`/`INSERT OR REPLACE`, как и раньше.
+///
+/// Раньше этот шаблон (транзакция → `prepare` → цикл `execute` → `commit`)
+/// был продублирован почти во всех `insert_*`-методах [`Store`] на DuckDB —
+/// отличались только SQL и то, как строка превращается в параметры.
+fn insert_rows<T>(
+    conn: &mut Connection,
+    sql: &str,
+    rows: &[T],
+    mut exec_one: impl FnMut(&mut duckdb::Statement<'_>, &T) -> duckdb::Result<usize>,
+) -> Result<usize, StorageError> {
+    let tx = conn.transaction().map_err(db)?;
+    {
+        let mut stmt = tx.prepare(sql).map_err(db)?;
+        for item in rows {
+            exec_one(&mut stmt, item).map_err(db)?;
+        }
+    }
+    tx.commit().map_err(db)?;
+    Ok(rows.len())
+}
+
+/// Общий шаблон чтения среза строк одним запросом: подготовить `sql`,
+/// прогнать `params`, смэппить каждую строку `map_row`, собрать в `Vec`.
+///
+/// Раньше — тот же дубль, что и у [`insert_rows`], в каждом read-методе
+/// [`Store`] на DuckDB (`prepare` → `query_map` → `collect`).
+fn query_rows<T, P: duckdb::Params>(
+    conn: &Connection,
+    sql: &str,
+    params: P,
+    map_row: impl FnMut(&duckdb::Row<'_>) -> duckdb::Result<T>,
+) -> Result<Vec<T>, StorageError> {
+    let mut stmt = conn.prepare(sql).map_err(db)?;
+    let rows = stmt.query_map(params, map_row).map_err(db)?;
+    rows.collect::<Result<_, _>>().map_err(db)
+}
+
 impl DuckStore {
     /// Открыть (или создать) файловую БД по пути.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, StorageError> {
@@ -76,16 +118,13 @@ impl Store for DuckStore {
 
     fn upsert_instruments(&mut self, items: &[Instrument]) -> Result<usize, StorageError> {
         let now = unix_now();
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO instruments \
-                     (symbol, ticker, name, asset_class, sector, lot_size, isin, updated_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for it in items {
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO instruments \
+             (symbol, ticker, name, asset_class, sector, lot_size, isin, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            items,
+            |stmt, it| {
                 stmt.execute(params![
                     it.symbol,
                     it.ticker,
@@ -96,23 +135,17 @@ impl Store for DuckStore {
                     it.isin,
                     now,
                 ])
-                .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(items.len())
+            },
+        )
     }
 
     fn instruments(&self) -> Result<Vec<Instrument>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT symbol, ticker, name, asset_class, sector, lot_size, isin \
-                 FROM instruments",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map([], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT symbol, ticker, name, asset_class, sector, lot_size, isin \
+             FROM instruments",
+            [],
+            |row| {
                 let asset_class: String = row.get(3)?;
                 let lot_size: i32 = row.get(5)?;
                 Ok(Instrument {
@@ -124,9 +157,8 @@ impl Store for DuckStore {
                     lot_size: lot_size as u32,
                     isin: row.get(6)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn insert_bars(
@@ -135,16 +167,13 @@ impl Store for DuckStore {
         tf: TimeFrame,
         bars: &[Bar],
     ) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO bars \
-                     (symbol, timeframe, ts, open, high, low, close, volume) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for b in bars {
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO bars \
+             (symbol, timeframe, ts, open, high, low, close, volume) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            bars,
+            |stmt, b| {
                 stmt.execute(params![
                     symbol,
                     tf.code(),
@@ -155,11 +184,8 @@ impl Store for DuckStore {
                     b.close,
                     b.volume,
                 ])
-                .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(bars.len())
+            },
+        )
     }
 
     fn bars(
@@ -169,16 +195,13 @@ impl Store for DuckStore {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<Bar>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT ts, open, high, low, close, volume FROM bars \
-                 WHERE symbol = ? AND timeframe = ? AND ts BETWEEN ? AND ? \
-                 ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(params![symbol, tf.code(), from_ts, to_ts], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT ts, open, high, low, close, volume FROM bars \
+             WHERE symbol = ? AND timeframe = ? AND ts BETWEEN ? AND ? \
+             ORDER BY ts",
+            params![symbol, tf.code(), from_ts, to_ts],
+            |row| {
                 Ok(Bar {
                     ts: row.get(0)?,
                     open: row.get(1)?,
@@ -187,9 +210,8 @@ impl Store for DuckStore {
                     close: row.get(4)?,
                     volume: row.get(5)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn last_bar_ts(&self, symbol: &str, tf: TimeFrame) -> Result<Option<i64>, StorageError> {
@@ -247,77 +269,54 @@ impl Store for DuckStore {
     }
 
     fn insert_trades(&mut self, symbol: &str, trades: &[Trade]) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT INTO trades (symbol, ts, price, size, buyer_initiated) \
-                     VALUES (?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for t in trades {
-                stmt.execute(params![symbol, t.ts, t.price, t.size, t.buyer_initiated])
-                    .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(trades.len())
+        insert_rows(
+            &mut self.conn,
+            "INSERT INTO trades (symbol, ts, price, size, buyer_initiated) \
+             VALUES (?, ?, ?, ?, ?)",
+            trades,
+            |stmt, t| stmt.execute(params![symbol, t.ts, t.price, t.size, t.buyer_initiated]),
+        )
     }
 
     fn trades(&self, symbol: &str, from_ts: i64, to_ts: i64) -> Result<Vec<Trade>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT ts, price, size, buyer_initiated FROM trades \
-                 WHERE symbol = ? AND ts BETWEEN ? AND ? ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(params![symbol, from_ts, to_ts], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT ts, price, size, buyer_initiated FROM trades \
+             WHERE symbol = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            params![symbol, from_ts, to_ts],
+            |row| {
                 Ok(Trade {
                     ts: row.get(0)?,
                     price: row.get(1)?,
                     size: row.get(2)?,
                     buyer_initiated: row.get(3)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn upsert_sector_map(&mut self, entries: &[SectorEntry]) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO sector_map (key, sector, is_isin) \
-                     VALUES (?, ?, ?)",
-                )
-                .map_err(db)?;
-            for e in entries {
-                stmt.execute(params![e.key, e.sector, e.is_isin])
-                    .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(entries.len())
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO sector_map (key, sector, is_isin) VALUES (?, ?, ?)",
+            entries,
+            |stmt, e| stmt.execute(params![e.key, e.sector, e.is_isin]),
+        )
     }
 
     fn sector_map(&self) -> Result<Vec<SectorEntry>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT key, sector, is_isin FROM sector_map")
-            .map_err(db)?;
-        let rows = stmt
-            .query_map([], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT key, sector, is_isin FROM sector_map",
+            [],
+            |row| {
                 Ok(SectorEntry {
                     key: row.get(0)?,
                     sector: row.get(1)?,
                     is_isin: row.get(2)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn insert_algo_tradestats(
@@ -325,18 +324,15 @@ impl Store for DuckStore {
         market: &str,
         candles: &[SuperCandle],
     ) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO algo_tradestats \
-                     (secid, ts, market, pr_open, pr_high, pr_low, pr_close, pr_std, \
-                      vol, val, trades, pr_vwap, pr_change, vol_b, vol_s, val_b, val_s, \
-                      trades_b, trades_s, disb, pr_vwap_b, pr_vwap_s) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for c in candles {
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO algo_tradestats \
+             (secid, ts, market, pr_open, pr_high, pr_low, pr_close, pr_std, \
+              vol, val, trades, pr_vwap, pr_change, vol_b, vol_s, val_b, val_s, \
+              trades_b, trades_s, disb, pr_vwap_b, pr_vwap_s) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            candles,
+            |stmt, c| {
                 stmt.execute(params![
                     c.secid,
                     c.ts,
@@ -361,11 +357,8 @@ impl Store for DuckStore {
                     c.pr_vwap_b,
                     c.pr_vwap_s,
                 ])
-                .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(candles.len())
+            },
+        )
     }
 
     fn algo_tradestats(
@@ -375,18 +368,15 @@ impl Store for DuckStore {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<SuperCandle>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT secid, ts, pr_open, pr_high, pr_low, pr_close, pr_std, vol, val, \
-                 trades, pr_vwap, pr_change, vol_b, vol_s, val_b, val_s, trades_b, trades_s, \
-                 disb, pr_vwap_b, pr_vwap_s \
-                 FROM algo_tradestats \
-                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(params![market, secid, from_ts, to_ts], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT secid, ts, pr_open, pr_high, pr_low, pr_close, pr_std, vol, val, \
+             trades, pr_vwap, pr_change, vol_b, vol_s, val_b, val_s, trades_b, trades_s, \
+             disb, pr_vwap_b, pr_vwap_s \
+             FROM algo_tradestats \
+             WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            params![market, secid, from_ts, to_ts],
+            |row| {
                 Ok(SuperCandle {
                     secid: row.get(0)?,
                     ts: row.get(1)?,
@@ -410,9 +400,8 @@ impl Store for DuckStore {
                     pr_vwap_b: row.get(19)?,
                     pr_vwap_s: row.get(20)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn insert_algo_futoi(
@@ -420,17 +409,14 @@ impl Store for DuckStore {
         market: &str,
         points: &[FutoiPoint],
     ) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO algo_futoi \
-                     (secid, ts, market, clgroup, pos, pos_long, pos_short, \
-                      pos_long_num, pos_short_num) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for p in points {
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO algo_futoi \
+             (secid, ts, market, clgroup, pos, pos_long, pos_short, \
+              pos_long_num, pos_short_num) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            points,
+            |stmt, p| {
                 stmt.execute(params![
                     p.secid,
                     p.ts,
@@ -442,11 +428,8 @@ impl Store for DuckStore {
                     p.pos_long_num,
                     p.pos_short_num,
                 ])
-                .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(points.len())
+            },
+        )
     }
 
     fn algo_futoi(
@@ -456,17 +439,14 @@ impl Store for DuckStore {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<FutoiPoint>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT secid, ts, clgroup, pos, pos_long, pos_short, \
-                 pos_long_num, pos_short_num \
-                 FROM algo_futoi \
-                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(params![market, secid, from_ts, to_ts], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT secid, ts, clgroup, pos, pos_long, pos_short, \
+             pos_long_num, pos_short_num \
+             FROM algo_futoi \
+             WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            params![market, secid, from_ts, to_ts],
+            |row| {
                 let clgroup: String = row.get(2)?;
                 Ok(FutoiPoint {
                     secid: row.get(0)?,
@@ -478,9 +458,8 @@ impl Store for DuckStore {
                     pos_long_num: row.get(6)?,
                     pos_short_num: row.get(7)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn insert_algo_hi2(
@@ -488,21 +467,13 @@ impl Store for DuckStore {
         market: &str,
         points: &[Hi2Point],
     ) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO algo_hi2 (secid, ts, market, concentration) \
-                     VALUES (?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for p in points {
-                stmt.execute(params![p.secid, p.ts, market, p.concentration])
-                    .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(points.len())
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO algo_hi2 (secid, ts, market, concentration) \
+             VALUES (?, ?, ?, ?)",
+            points,
+            |stmt, p| stmt.execute(params![p.secid, p.ts, market, p.concentration]),
+        )
     }
 
     fn algo_hi2(
@@ -512,40 +483,51 @@ impl Store for DuckStore {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<Hi2Point>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT secid, ts, concentration FROM algo_hi2 \
-                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(params![market, secid, from_ts, to_ts], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT secid, ts, concentration FROM algo_hi2 \
+             WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            params![market, secid, from_ts, to_ts],
+            |row| {
                 Ok(Hi2Point {
                     secid: row.get(0)?,
                     ts: row.get(1)?,
                     concentration: row.get(2)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
+    }
+
+    fn algo_hi2_latest(&self, market: &str, secid: &str) -> Result<Option<Hi2Point>, StorageError> {
+        Ok(query_rows(
+            &self.conn,
+            "SELECT secid, ts, concentration FROM algo_hi2 \
+             WHERE market = ? AND secid = ? ORDER BY ts DESC LIMIT 1",
+            params![market, secid],
+            |row| {
+                Ok(Hi2Point {
+                    secid: row.get(0)?,
+                    ts: row.get(1)?,
+                    concentration: row.get(2)?,
+                })
+            },
+        )?
+        .into_iter()
+        .next())
     }
 
     fn insert_algo_obstats(
         &mut self,
         records: &[AlgoObstatsRecord],
     ) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO algo_obstats \
-                     (secid, ts, market, spread_bbo, spread_lv10, levels_b, levels_s, \
-                      vol_b, vol_s, val_b, val_s, imbalance_vol_bbo, imbalance_val_bbo) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for r in records {
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO algo_obstats \
+             (secid, ts, market, spread_bbo, spread_lv10, levels_b, levels_s, \
+              vol_b, vol_s, val_b, val_s, imbalance_vol_bbo, imbalance_val_bbo) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            records,
+            |stmt, r| {
                 stmt.execute(params![
                     r.secid,
                     r.ts,
@@ -561,11 +543,8 @@ impl Store for DuckStore {
                     r.imbalance_vol_bbo,
                     r.imbalance_val_bbo,
                 ])
-                .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(records.len())
+            },
+        )
     }
 
     fn algo_obstats(
@@ -575,17 +554,14 @@ impl Store for DuckStore {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<AlgoObstatsRecord>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT secid, ts, market, spread_bbo, spread_lv10, levels_b, levels_s, \
-                 vol_b, vol_s, val_b, val_s, imbalance_vol_bbo, imbalance_val_bbo \
-                 FROM algo_obstats \
-                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(params![market, secid, from_ts, to_ts], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT secid, ts, market, spread_bbo, spread_lv10, levels_b, levels_s, \
+             vol_b, vol_s, val_b, val_s, imbalance_vol_bbo, imbalance_val_bbo \
+             FROM algo_obstats \
+             WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            params![market, secid, from_ts, to_ts],
+            |row| {
                 Ok(AlgoObstatsRecord {
                     secid: row.get(0)?,
                     ts: row.get(1)?,
@@ -601,27 +577,23 @@ impl Store for DuckStore {
                     imbalance_vol_bbo: row.get(11)?,
                     imbalance_val_bbo: row.get(12)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn insert_algo_orderstats(
         &mut self,
         records: &[AlgoOrderstatsRecord],
     ) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO algo_orderstats \
-                     (secid, ts, market, put_orders_b, put_orders_s, put_val_b, put_val_s, \
-                      put_vol_b, put_vol_s, cancel_orders_b, cancel_orders_s, \
-                      cancel_val_b, cancel_val_s, cancel_vol_b, cancel_vol_s) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for r in records {
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO algo_orderstats \
+             (secid, ts, market, put_orders_b, put_orders_s, put_val_b, put_val_s, \
+              put_vol_b, put_vol_s, cancel_orders_b, cancel_orders_s, \
+              cancel_val_b, cancel_val_s, cancel_vol_b, cancel_vol_s) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            records,
+            |stmt, r| {
                 stmt.execute(params![
                     r.secid,
                     r.ts,
@@ -639,11 +611,8 @@ impl Store for DuckStore {
                     r.cancel_vol_b,
                     r.cancel_vol_s,
                 ])
-                .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(records.len())
+            },
+        )
     }
 
     fn algo_orderstats(
@@ -653,18 +622,15 @@ impl Store for DuckStore {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<AlgoOrderstatsRecord>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT secid, ts, market, put_orders_b, put_orders_s, put_val_b, put_val_s, \
-                 put_vol_b, put_vol_s, cancel_orders_b, cancel_orders_s, \
-                 cancel_val_b, cancel_val_s, cancel_vol_b, cancel_vol_s \
-                 FROM algo_orderstats \
-                 WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(params![market, secid, from_ts, to_ts], |row| {
+        query_rows(
+            &self.conn,
+            "SELECT secid, ts, market, put_orders_b, put_orders_s, put_val_b, put_val_s, \
+             put_vol_b, put_vol_s, cancel_orders_b, cancel_orders_s, \
+             cancel_val_b, cancel_val_s, cancel_vol_b, cancel_vol_s \
+             FROM algo_orderstats \
+             WHERE market = ? AND secid = ? AND ts BETWEEN ? AND ? ORDER BY ts",
+            params![market, secid, from_ts, to_ts],
+            |row| {
                 Ok(AlgoOrderstatsRecord {
                     secid: row.get(0)?,
                     ts: row.get(1)?,
@@ -682,23 +648,19 @@ impl Store for DuckStore {
                     cancel_vol_b: row.get(13)?,
                     cancel_vol_s: row.get(14)?,
                 })
-            })
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+            },
+        )
     }
 
     fn insert_history_bars(&mut self, bars: &[HistoryBar]) -> Result<usize, StorageError> {
-        let tx = self.conn.transaction().map_err(db)?;
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT OR REPLACE INTO history_bars \
-                     (source, secid, tf, ts, open, high, low, close, volume, \
-                      vwap, disb, oi, hi2) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .map_err(db)?;
-            for b in bars {
+        insert_rows(
+            &mut self.conn,
+            "INSERT OR REPLACE INTO history_bars \
+             (source, secid, tf, ts, open, high, low, close, volume, \
+              vwap, disb, oi, hi2) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            bars,
+            |stmt, b| {
                 stmt.execute(params![
                     b.source.code(),
                     b.secid,
@@ -714,11 +676,8 @@ impl Store for DuckStore {
                     b.oi,
                     b.hi2,
                 ])
-                .map_err(db)?;
-            }
-        }
-        tx.commit().map_err(db)?;
-        Ok(bars.len())
+            },
+        )
     }
 
     fn history_bars(
@@ -729,40 +688,33 @@ impl Store for DuckStore {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<HistoryBar>, StorageError> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT source, secid, tf, ts, open, high, low, close, volume, \
-                 vwap, disb, oi, hi2 FROM history_bars \
-                 WHERE source = ? AND secid = ? AND tf = ? AND ts BETWEEN ? AND ? \
-                 ORDER BY ts",
-            )
-            .map_err(db)?;
-        let rows = stmt
-            .query_map(
-                params![source.code(), secid, tf.code(), from_ts, to_ts],
-                |row| {
-                    let source_code: String = row.get(0)?;
-                    let tf_code: String = row.get(2)?;
-                    Ok(HistoryBar {
-                        source: DataSource::from_code(&source_code).unwrap_or(DataSource::Finam),
-                        secid: row.get(1)?,
-                        tf: TimeFrame::from_code(&tf_code).unwrap_or(TimeFrame::M5),
-                        ts: row.get(3)?,
-                        open: row.get(4)?,
-                        high: row.get(5)?,
-                        low: row.get(6)?,
-                        close: row.get(7)?,
-                        volume: row.get(8)?,
-                        vwap: row.get(9)?,
-                        disb: row.get(10)?,
-                        oi: row.get(11)?,
-                        hi2: row.get(12)?,
-                    })
-                },
-            )
-            .map_err(db)?;
-        rows.collect::<Result<_, _>>().map_err(db)
+        query_rows(
+            &self.conn,
+            "SELECT source, secid, tf, ts, open, high, low, close, volume, \
+             vwap, disb, oi, hi2 FROM history_bars \
+             WHERE source = ? AND secid = ? AND tf = ? AND ts BETWEEN ? AND ? \
+             ORDER BY ts",
+            params![source.code(), secid, tf.code(), from_ts, to_ts],
+            |row| {
+                let source_code: String = row.get(0)?;
+                let tf_code: String = row.get(2)?;
+                Ok(HistoryBar {
+                    source: DataSource::from_code(&source_code).unwrap_or(DataSource::Finam),
+                    secid: row.get(1)?,
+                    tf: TimeFrame::from_code(&tf_code).unwrap_or(TimeFrame::M5),
+                    ts: row.get(3)?,
+                    open: row.get(4)?,
+                    high: row.get(5)?,
+                    low: row.get(6)?,
+                    close: row.get(7)?,
+                    volume: row.get(8)?,
+                    vwap: row.get(9)?,
+                    disb: row.get(10)?,
+                    oi: row.get(11)?,
+                    hi2: row.get(12)?,
+                })
+            },
+        )
     }
 
     fn last_history_bar_ts(
@@ -1197,6 +1149,24 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert!((got[0].concentration - 0.9).abs() < 1e-9);
         assert!(s.algo_hi2("stock", "GAZP", 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn algo_hi2_latest_returns_last_point_without_full_range() {
+        let mut s = store();
+        let p = |ts: i64, c: f64| Hi2Point {
+            ts,
+            secid: "SBER".into(),
+            concentration: c,
+        };
+        assert_eq!(s.algo_hi2_latest("stock", "SBER").unwrap(), None);
+
+        s.insert_algo_hi2("stock", &[p(1, 0.2), p(3, 0.4), p(2, 0.3)])
+            .unwrap();
+        let latest = s.algo_hi2_latest("stock", "SBER").unwrap().unwrap();
+        assert_eq!(latest.ts, 3);
+        assert!((latest.concentration - 0.4).abs() < 1e-9);
+        assert_eq!(s.algo_hi2_latest("stock", "GAZP").unwrap(), None);
     }
 
     #[test]

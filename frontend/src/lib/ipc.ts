@@ -210,6 +210,10 @@ export const ipc = {
     invoke<FutoiDto[]>("algo_futoi", { market, secid, fromTs, toTs }),
   algoHi2: (market: AlgoMarket, secid: string, fromTs: number, toTs: number) =>
     invoke<Hi2Dto[]>("algo_hi2", { market, secid, fromTs, toTs }),
+  // Батч «последние точки HI2» по списку тикеров: сортировка по концентрации
+  // и топ-`limit` — на стороне ядра (без полной истории ×N тикеров).
+  algoHi2Ranking: (market: AlgoMarket, secids: string[], limit: number) =>
+    invoke<Hi2Dto[]>("algo_hi2_ranking", { market, secids, limit }),
   algoMegaAlerts: (
     market: AlgoMarket,
     secids: string[],

@@ -17,7 +17,8 @@
   `app` (`moex,llm,ingest`) — 116; `storage --features duckdb` — 62
   (вкл. миграции v2→v3→v4 и Parquet-roundtrip);
 - фронт: `svelte-check` 0 ошибок · `vitest` **41 тест** · `vite build` ок;
-- IPC-контракт согласован end-to-end: **одни и те же 49 команд** в
+- IPC-контракт согласован end-to-end: **одни и те же 50 команд** (после
+  полировки T16 добавлена `algo_hi2_ranking`) в
   `frontend/src/lib/ipc.ts` и регистрации `crates/app/src/tauri_app.rs`,
   все покрыты моком `mock.ts`;
 - модули `data`: + **`http`, `moex` (ALGOPACK + ISS-доска опционов), `llm`
@@ -34,12 +35,26 @@
   `live-trading` (заглушка), **`http`, `moex`, `llm`** (data),
   **`moex`, `llm`** (app).
 
-⚠️ **(unverified)**: контракты ISS/ALGOPACK (имена блоков/колонок, пагинация,
-параметры) и точные коэффициенты биржевой улыбки MOEX построены по публичной
-документации на синтетических фикстурах — живой доступ к
-`apim.moex.com`/`iss.moex.com`/`fs.moex.com` закрыт egress-allowlist'ом.
-Процедура сверки живым ключом — `crates/data/tests/fixtures/moex/README.md`
-(задача T14).
+**Живой смоук T14 (2026-07-17, egress открыт по P1):**
+
+- ✅ **Finam gRPC** — сквозной прогон `live_check` живым секретом: auth-обмен,
+  `Assets` (4565 инструментов MISX), `Bars` (D1), `LastQuote`. Попутно
+  исправлен эндпоинт: `trade-api.finam.ru` теперь отвечает
+  `301 → tradeapi.finam.ru`, gRPC редиректы не следует — константа
+  `finam_proto::ENDPOINT` обновлена на `tradeapi.finam.ru:443`.
+- ✅ **Опционная доска ISS** — контракт сверен живым ответом и фикстуры
+  приведены к нему: колонки заглавными, в `marketdata` нет `IV`/`THEORPRICE`
+  (IV решается из mid bid/ask), серверная фильтрация `assets=<код>`,
+  ответ одной страницей без курсора, форвард — по SECID фьючерса из
+  `UNDERLYINGASSET` (по коду актива forts пуст) с фолбэком на
+  `UNDERLYINGSETTLEPRICE`. Детали — `crates/data/tests/fixtures/moex/README.md`.
+- ⚠️ **(unverified) ALGOPACK** — эндпоинт `apim.moex.com` живой (без ключа —
+  `401 Unauthorized`), но `MOEX_ALGO_API` в окружении не задан: форма
+  успешного ответа датасетов (`tradestats`/`futoi`/`hi2`/`obstats`/
+  `orderstats`/свечи) не сверена, фикстуры остаются синтетическими.
+- ⚠️ **LLM** — egress к `openrouter.ai` закрыт (403 от прокси), живой вызов
+  не выполнен; коэффициенты биржевой улыбки MOEX дословно не сверены
+  (первоисточники вне egress).
 
 ---
 
@@ -79,7 +94,7 @@
 - [x] Боевой режим `app --features live`: авторизация → справочник → цикл
       ингеста; секрет через резолвер; live smoke `example live_check`.
 - [~] Боевой прогон с живыми данными — код готов, упирается в egress-политику
-      окружения (`trade-api.finam.ru:443` в allowlist).
+      окружения (`tradeapi.finam.ru:443` в allowlist).
 
 ## Фаза 2 — Аналитика (`domain`) ✅
 
@@ -383,11 +398,13 @@
 - [x] `12.3.4` Профиль риска по диапазону; юнит-покрытие.
 
 ### 12.4 — Данные опционной доски (`data`, MOEX ISS)
-- [x] `12.4.1` Загрузка доски (серии, страйки, bid/ask/last, IV, OI, теорцена)
-      через публичный ISS (`data::moex::options`, `MoexIss`); фикстуры
-      `(unverified)`, best-effort форвард с forts.
-- [x] `12.4.2` Базовый актив/форвард; маппинг доски → точки улыбки (IV из
-      доски или через IV-решатель, вес = OI, фильтрация неликвида).
+- [x] `12.4.1` Загрузка доски (серии, страйки, bid/ask/last, OI) через
+      публичный ISS (`data::moex::options`, `MoexIss`); контракт сверен живым
+      ответом (T14): серверный фильтр `assets=`, колонки заглавными, `IV`/
+      `THEORPRICE` в живом `marketdata` отсутствуют.
+- [x] `12.4.2` Базовый актив/форвард (forts по `UNDERLYINGASSET`, фолбэк
+      `UNDERLYINGSETTLEPRICE`); маппинг доски → точки улыбки (IV через
+      IV-решатель из mid bid/ask, вес = OI, фильтрация неликвида).
 - [x] `12.4.3` Трейт `OptionsSource` + `FakeOptionsSource`.
 
 ### 12.5 — Storage
@@ -418,7 +435,7 @@
 ### 12.9 — Тесты/доки
 - [x] `12.9.1` `domain`: ценообразование/греки/IV/калибровка/стратегии.
 - [x] `12.9.2` `app`: обработчики опционов в тестах; `data`: парсер доски на
-      фикстурах `(unverified)`.
+      фикстурах, сверенных живым ответом ISS (T14).
 - [~] `12.9.3` Docs финализированы; остаток — дословная сверка коэффициентов
       по методике при появлении egress (T14).
 

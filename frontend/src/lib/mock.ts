@@ -956,6 +956,12 @@ function algoCandles(secid: string): TradestatsDto[] {
       prVwapB: vwap,
       prVwapS: vwap,
       buyPressure: vol > 0 ? volB / vol : 0.5,
+      // Тот же детерминированный флаг, что раздувает объём этой свечи выше
+      // (строка `anomalous` выше) — раньше он не попадал в DTO, и фронт
+      // пересчитывал собственную эвристику по медиане, которая могла
+      // разойтись с этим флагом. Теперь мок отдаёт его напрямую, как и
+      // боевой бэкенд (`api::algo_tradestats`, z-score объёма).
+      isAnomVol: anomalous,
     });
     px = c;
   }
@@ -1272,6 +1278,16 @@ export async function handle<T>(cmd: string, args?: Record<string, unknown>): Pr
     case "algo_hi2": {
       const secid = String(args?.secid ?? "SBER");
       return algoHi2(secid) as unknown as T;
+    }
+    case "algo_hi2_ranking": {
+      const secids = (args?.secids as string[]) ?? [];
+      const limit = Number(args?.limit ?? 10);
+      // Как в ядре: последняя точка на тикер, сортировка по концентрации, топ-limit.
+      return secids
+        .map((s) => algoHi2(s).at(-1))
+        .filter((p): p is Hi2Dto => p !== undefined)
+        .sort((a, b) => b.concentration - a.concentration)
+        .slice(0, limit) as unknown as T;
     }
     case "algo_mega_alerts": {
       const secids = (args?.secids as string[]) ?? [];

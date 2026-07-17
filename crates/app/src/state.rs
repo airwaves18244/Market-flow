@@ -55,6 +55,16 @@ pub struct AppState {
     #[cfg(feature = "llm")]
     #[allow(dead_code)]
     llm_cache: crate::llm::SummaryCache,
+    /// HTTP-транспорт для LLM-провайдера, закэшированный на время сессии
+    /// приложения (фаза 10.4, фича `llm`): раньше `ReqwestTransport::new()`
+    /// (со своим пулом соединений/TLS) пересобирался на каждый вызов
+    /// `summarize_key_activity`. `None` — транспорт не удалось построить при
+    /// старте (см. `ReqwestTransport::new`, практически не случается) —
+    /// в этом случае `summarize_key_activity` грациозно деградирует в
+    /// локальный свод, как и при отсутствии ключа провайдера.
+    #[cfg(feature = "llm")]
+    #[allow(dead_code)]
+    llm_transport: Option<data::ReqwestTransport>,
     /// Реестр фоновых загрузок истории (T10, фаза 11.3): раздаёт `task_id` и
     /// хранит флаги отмены, чтобы `history_cancel(taskId?)` мог остановить одну
     /// загрузку или все. Живёт под фичей `ingest` (async-оркестрация).
@@ -84,6 +94,8 @@ impl AppState {
             settings: Mutex::new(SettingsStore::from_env()),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "llm")]
+            llm_transport: data::ReqwestTransport::new().ok(),
             #[cfg(feature = "ingest")]
             history_tasks: crate::history::HistoryTasks::default(),
         }
@@ -103,6 +115,8 @@ impl AppState {
             settings: Mutex::new(SettingsStore::new(settings_dir)),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "llm")]
+            llm_transport: data::ReqwestTransport::new().ok(),
             #[cfg(feature = "ingest")]
             history_tasks: crate::history::HistoryTasks::default(),
         }
@@ -411,7 +425,14 @@ impl AppState {
         period: Option<&str>,
     ) -> KeyActivitySummaryDto {
         let settings = self.settings_get();
-        api::key_activity_summary_live(&self.llm_cache, &settings, samples, period).await
+        api::key_activity_summary_live(
+            &self.llm_cache,
+            self.llm_transport.as_ref(),
+            &settings,
+            samples,
+            period,
+        )
+        .await
     }
 
     /// Встроенные правила Key Activity (для настроек/справки).
@@ -426,6 +447,10 @@ impl AppState {
     const ALGO_WINDOW: usize = 20;
     /// Порог z-score всплеска концентрации HI2 по умолчанию.
     const ALGO_HI2_THRESHOLD: f64 = 3.0;
+    /// Порог z-score аномального объёма свечи Super Candles по умолчанию —
+    /// совпадает с `MegaThresholds::default().vol_z`, чтобы подсветка
+    /// `isAnomVol` не расходилась по смыслу с `volume_spike` в Mega Alerts.
+    const ALGO_VOL_THRESHOLD: f64 = 3.0;
 
     /// Свечи Super Candles (`tradestats`) инструмента `secid` на рынке `market`.
     pub fn algo_tradestats(
@@ -435,7 +460,17 @@ impl AppState {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<TradestatsDto>, StorageError> {
-        self.read(|s| api::algo_tradestats(s, market, secid, from_ts, to_ts))
+        self.read(|s| {
+            api::algo_tradestats(
+                s,
+                market,
+                secid,
+                from_ts,
+                to_ts,
+                Self::ALGO_WINDOW,
+                Self::ALGO_VOL_THRESHOLD,
+            )
+        })
     }
 
     /// Точки FUTOI инструмента `secid` на рынке `market` (обычно `fo`).
@@ -469,6 +504,18 @@ impl AppState {
                 Self::ALGO_HI2_THRESHOLD,
             )
         })
+    }
+
+    /// Ранжирование `secids` по последней концентрации HI2 (топ-`limit`,
+    /// по убыванию) — эффективный путь для сводных панелей (см.
+    /// [`api::algo_hi2_ranking`]): без полного чтения истории на тикер.
+    pub fn algo_hi2_ranking(
+        &self,
+        market: &str,
+        secids: &[String],
+        limit: usize,
+    ) -> Result<Vec<Hi2Dto>, StorageError> {
+        self.read(|s| api::algo_hi2_ranking(s, market, secids, limit))
     }
 
     /// Mega Alerts (10.2.8) по сохранённым датасетам ALGOPACK для `secids` на
@@ -524,6 +571,37 @@ impl AppState {
         points: &[Hi2Point],
     ) -> Result<usize, StorageError> {
         self.write(|s| s.insert_algo_hi2(market, points))
+    }
+
+    /// Записать статистику стакана заявок (`obstats`) для рынка `market`.
+    /// Точки домена конвертируются в «сырые» записи хранилища (см.
+    /// [`storage::store::AlgoObstatsRecord::from_point`] — доменный тип
+    /// `obstats` ещё не выделен, SPEC `10.2.4`).
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_obstats(
+        &self,
+        market: &str,
+        points: &[domain::algo::ObstatsPoint],
+    ) -> Result<usize, StorageError> {
+        let records: Vec<storage::store::AlgoObstatsRecord> = points
+            .iter()
+            .map(|p| storage::store::AlgoObstatsRecord::from_point(market, p))
+            .collect();
+        self.write(|s| s.insert_algo_obstats(&records))
+    }
+
+    /// Записать статистику заявок (`orderstats`) для рынка `market`.
+    #[cfg(feature = "moex")]
+    pub fn ingest_algo_orderstats(
+        &self,
+        market: &str,
+        points: &[domain::algo::OrderstatsPoint],
+    ) -> Result<usize, StorageError> {
+        let records: Vec<storage::store::AlgoOrderstatsRecord> = points
+            .iter()
+            .map(|p| storage::store::AlgoOrderstatsRecord::from_point(market, p))
+            .collect();
+        self.write(|s| s.insert_algo_orderstats(&records))
     }
 
     // ── Фаза 11 — Историзация: каталог локальных датасетов ────────────────────

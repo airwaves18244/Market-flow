@@ -1530,6 +1530,12 @@ pub struct TradestatsDto {
     pub pr_vwap_s: f64,
     /// Индекс агрессии покупателей (0..1) — [`SuperCandle::buy_pressure`].
     pub buy_pressure: f64,
+    /// `true`, если объём этой свечи — аномальный выброс (z-score объёма
+    /// относительно окна предыдущих свечей ≥ порога, см.
+    /// [`domain::algo::tradestats::anomalous_volume`]). Проставляется в
+    /// [`crate::api::algo_tradestats`] — `From<&SuperCandle>` не видит соседние
+    /// свечи, поэтому по умолчанию здесь `false`.
+    pub is_anom_vol: bool,
 }
 
 impl From<&SuperCandle> for TradestatsDto {
@@ -1557,6 +1563,7 @@ impl From<&SuperCandle> for TradestatsDto {
             pr_vwap_b: c.pr_vwap_b,
             pr_vwap_s: c.pr_vwap_s,
             buy_pressure: c.buy_pressure(),
+            is_anom_vol: false,
         }
     }
 }

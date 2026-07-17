@@ -26,8 +26,8 @@
 //! боевые источники подключает Tauri-слой (`crate::tauri_app`).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use data::history::HistorySource;
 use domain::history::{normalize_ranges, DataSource, HistoryBar, TimeRange};
@@ -35,28 +35,11 @@ use domain::TimeFrame;
 
 use crate::state::AppState;
 
-/// Кооперативный флаг отмены загрузки. Клонируется дёшево (общий
-/// `Arc<AtomicBool>`): одна копия живёт в реестре [`HistoryTasks`], другую
-/// проверяет цикл [`run_load`].
-#[derive(Clone, Default)]
-pub struct CancelFlag(Arc<AtomicBool>);
-
-impl CancelFlag {
-    /// Новый неотменённый флаг.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Пометить загрузку отменённой (идемпотентно).
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::SeqCst);
-    }
-
-    /// Отменена ли загрузка.
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
-    }
-}
+/// Флаг отмены загрузки — общий примитив [`crate::cancel::CancelFlag`]
+/// (раньше был локальным для этого модуля; теперь тем же типом отменяются и
+/// планировщики поллинга — [`crate::ingest::IngestService::run`]/
+/// [`crate::algo_ingest::AlgoIngestService::run`]).
+pub use crate::cancel::CancelFlag;
 
 /// Реестр активных загрузок: `task_id → CancelFlag`. Позволяет отменить
 /// конкретную задачу или все сразу, не завися от конкретного источника.

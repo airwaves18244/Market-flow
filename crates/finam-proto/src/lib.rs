@@ -6,14 +6,16 @@
 //! (кросс-платформенный CI) фича выключена, и крейт остаётся лёгкой заглушкой
 //! без зависимостей: тяжёлые `tonic`/`prost` и build-tooling не подтягиваются.
 //!
-//! Эндпоинт: `https://trade-api.finam.ru:443` (HTTP/2, TLS).
+//! Эндпоинт: `https://tradeapi.finam.ru:443` (HTTP/2, TLS). Прежний хост
+//! `trade-api.finam.ru` отвечает `301 → tradeapi.finam.ru`, а gRPC-клиенты
+//! редиректы не следуют (живой смоук T14, 2026-07-17).
 //! Сервисы: `AuthService`, `AssetsService`, `MarketDataService` (read-only).
 
 /// Базовый адрес gRPC-эндпоинта Finam Trade API.
-pub const ENDPOINT: &str = "https://trade-api.finam.ru:443";
+pub const ENDPOINT: &str = "https://tradeapi.finam.ru:443";
 
 /// Хост gRPC-эндпоинта (для проверки TLS-домена и метрик).
-pub const HOST: &str = "trade-api.finam.ru";
+pub const HOST: &str = "tradeapi.finam.ru";
 
 /// Весь сгенерированный код (один модульный файл с вложенностью пакетов).
 ///

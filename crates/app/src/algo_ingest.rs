@@ -3,12 +3,14 @@
 //! Симметричен [`crate::ingest::IngestService`] (тот же приём: круговой
 //! курсор [`BatchCursor`] по вотчлисту, per-method лимит [`RateLimiter`],
 //! источник абстрактный — [`AlgoSource`] вместо `MarketData`), но опрашивает
-//! три датасета ALGOPACK вместо баров:
+//! пять датасетов ALGOPACK вместо баров:
 //! - `tradestats` (Super Candles) — по каждому тикеру батча;
 //! - `hi2` (индекс концентрации) — сводно по рынку, один запрос на такт (а не
 //!   на тикер — датасет уже покрывает весь рынок за один вызов);
 //! - `futoi` (открытый интерес физ/юр) — по каждому тикеру батча, только для
-//!   рынка `fo` (единственного, где определён этот датасет).
+//!   рынка `fo` (единственного, где определён этот датасет);
+//! - `obstats` (статистика стакана) — по каждому тикеру батча;
+//! - `orderstats` (статистика заявок) — по каждому тикеру батча.
 //!
 //! Один такт ([`AlgoIngestService::tick`]) тестируется детерминированно на
 //! [`data::moex::FakeAlgoSource`], без сети. Боевой источник —
@@ -22,6 +24,7 @@ use data::{DataError, Method, RateLimiter};
 use storage::ingest::BatchCursor;
 use storage::StorageError;
 
+use crate::cancel::CancelFlag;
 use crate::state::AppState;
 
 /// Ошибка такта ингеста ALGOPACK: сбой источника или хранилища.
@@ -91,8 +94,9 @@ impl<S: AlgoSource> AlgoIngestService<S> {
     }
 
     /// Один такт опроса: `hi2` — один раз на такт (сводно по рынку), затем по
-    /// каждому тикеру очередной порции — `tradestats`, а для рынка `fo` ещё и
-    /// `futoi`. Возвращает суммарное число записанных строк по всем датасетам.
+    /// каждому тикеру очередной порции — `tradestats`/`obstats`/`orderstats`,
+    /// а для рынка `fo` ещё и `futoi`. Возвращает суммарное число записанных
+    /// строк по всем датасетам.
     ///
     /// Тикер/датасет, по которому исчерпан лимит метода, пропускается до
     /// следующего такта (а не копит ошибку) — тот же приём, что у
@@ -126,6 +130,34 @@ impl<S: AlgoSource> AlgoIngestService<S> {
                 }
             }
 
+            if self.limiter.try_acquire(Method::MoexObstats).is_ok() {
+                let points = self
+                    .source
+                    .obstats(
+                        self.config.market,
+                        Some(symbol.clone()),
+                        self.config.range.clone(),
+                    )
+                    .await?;
+                if !points.is_empty() {
+                    written += self.state.ingest_algo_obstats(market_code, &points)?;
+                }
+            }
+
+            if self.limiter.try_acquire(Method::MoexOrderstats).is_ok() {
+                let points = self
+                    .source
+                    .orderstats(
+                        self.config.market,
+                        Some(symbol.clone()),
+                        self.config.range.clone(),
+                    )
+                    .await?;
+                if !points.is_empty() {
+                    written += self.state.ingest_algo_orderstats(market_code, &points)?;
+                }
+            }
+
             if self.config.market == Market::Fo
                 && self.limiter.try_acquire(Method::MoexFutoi).is_ok()
             {
@@ -146,10 +178,16 @@ impl<S: AlgoSource> AlgoIngestService<S> {
     ///
     /// Ошибки отдельного такта логируются и не останавливают цикл (сетевые
     /// сбои транзиентны) — как [`crate::ingest::IngestService::run`].
-    pub async fn run(mut self) {
+    /// Завершается по кооперативной отмене (`cancel`), проверяемой на каждом
+    /// пробуждении таймера — см. [`crate::cancel::CancelFlag`].
+    pub async fn run(mut self, cancel: CancelFlag) {
         let mut ticker = tokio::time::interval(self.config.interval);
         loop {
             ticker.tick().await;
+            if cancel.is_cancelled() {
+                tracing::debug!("такт ингеста ALGOPACK остановлен: отмена");
+                break;
+            }
             match self.tick().await {
                 Ok(n) => tracing::debug!(rows = n, "такт ингеста ALGOPACK завершён"),
                 Err(e) => tracing::warn!(error = %e, "такт ингеста ALGOPACK завершился ошибкой"),
@@ -355,5 +393,58 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_eq!(state.algo_hi2("eq", "SBER", 0, 9).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn tick_also_writes_obstats_and_orderstats() {
+        // Раньше эти датасеты только ингестились (`Store::insert_algo_*`
+        // умел их принять), но такт планировщика их не опрашивал вовсе —
+        // проверяем, что `tick` теперь дёргает оба источника по каждому
+        // тикеру батча и пишет результат.
+        use domain::algo::{ObstatsPoint, OrderstatsPoint};
+
+        let state = state_with_migrated_store();
+        let fake = FakeAlgoSource {
+            obstats: Ok(vec![ObstatsPoint {
+                spread_bbo: Some(0.01),
+                ..ObstatsPoint::at(1, "SBER")
+            }]),
+            orderstats: Ok(vec![OrderstatsPoint {
+                put_orders_b: Some(5.0),
+                ..OrderstatsPoint::at(1, "SBER")
+            }]),
+            ..FakeAlgoSource::default()
+        };
+        let mut svc = AlgoIngestService::new(
+            fake,
+            Arc::clone(&state),
+            vec!["SBER".into()],
+            cfg(Market::Eq, 10),
+        );
+
+        let written = svc.tick().await.unwrap();
+        assert_eq!(written, 2); // 1 obstats + 1 orderstats
+    }
+
+    #[tokio::test]
+    async fn run_stops_promptly_once_cancelled() {
+        let state = state_with_migrated_store();
+        let mut fast_cfg = cfg(Market::Eq, 10);
+        fast_cfg.interval = Duration::from_millis(5);
+        let svc = AlgoIngestService::new(
+            FakeAlgoSource::default(),
+            Arc::clone(&state),
+            vec!["SBER".into()],
+            fast_cfg,
+        );
+
+        let cancel = CancelFlag::new();
+        cancel.cancel();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(2), svc.run(cancel)).await;
+        assert!(
+            outcome.is_ok(),
+            "run() должен завершиться сам по отмене, не по таймауту теста"
+        );
     }
 }
