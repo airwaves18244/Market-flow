@@ -10,6 +10,11 @@
 //! данных `domain` → `storage` → `dto`.
 
 mod api;
+// Кооперативная отмена фоновых циклов (`CancelFlag`) — общий примитив для
+// `history`/`ingest`/`algo_ingest`. Без внешних зависимостей (только
+// `std::sync`), поэтому доступен независимо от фич `ingest`/`moex`.
+#[allow(dead_code)]
+mod cancel;
 mod dto;
 mod settings;
 mod state;

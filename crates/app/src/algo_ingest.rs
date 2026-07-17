@@ -24,6 +24,7 @@ use data::{DataError, Method, RateLimiter};
 use storage::ingest::BatchCursor;
 use storage::StorageError;
 
+use crate::cancel::CancelFlag;
 use crate::state::AppState;
 
 /// Ошибка такта ингеста ALGOPACK: сбой источника или хранилища.
@@ -177,10 +178,16 @@ impl<S: AlgoSource> AlgoIngestService<S> {
     ///
     /// Ошибки отдельного такта логируются и не останавливают цикл (сетевые
     /// сбои транзиентны) — как [`crate::ingest::IngestService::run`].
-    pub async fn run(mut self) {
+    /// Завершается по кооперативной отмене (`cancel`), проверяемой на каждом
+    /// пробуждении таймера — см. [`crate::cancel::CancelFlag`].
+    pub async fn run(mut self, cancel: CancelFlag) {
         let mut ticker = tokio::time::interval(self.config.interval);
         loop {
             ticker.tick().await;
+            if cancel.is_cancelled() {
+                tracing::debug!("такт ингеста ALGOPACK остановлен: отмена");
+                break;
+            }
             match self.tick().await {
                 Ok(n) => tracing::debug!(rows = n, "такт ингеста ALGOPACK завершён"),
                 Err(e) => tracing::warn!(error = %e, "такт ингеста ALGOPACK завершился ошибкой"),
@@ -417,5 +424,27 @@ mod tests {
 
         let written = svc.tick().await.unwrap();
         assert_eq!(written, 2); // 1 obstats + 1 orderstats
+    }
+
+    #[tokio::test]
+    async fn run_stops_promptly_once_cancelled() {
+        let state = state_with_migrated_store();
+        let mut fast_cfg = cfg(Market::Eq, 10);
+        fast_cfg.interval = Duration::from_millis(5);
+        let svc = AlgoIngestService::new(
+            FakeAlgoSource::default(),
+            Arc::clone(&state),
+            vec!["SBER".into()],
+            fast_cfg,
+        );
+
+        let cancel = CancelFlag::new();
+        cancel.cancel();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(2), svc.run(cancel)).await;
+        assert!(
+            outcome.is_ok(),
+            "run() должен завершиться сам по отмене, не по таймауту теста"
+        );
     }
 }
