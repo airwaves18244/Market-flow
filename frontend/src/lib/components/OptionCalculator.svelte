@@ -1,6 +1,7 @@
 <script lang="ts">
   import Panel from "./Panel.svelte";
   import { ipc } from "../ipc";
+  import { fmtFixed } from "../format";
   import type { OptionKind, OptionPriceDto, PricingModel } from "../types";
 
   // Калькулятор: цена/греки/IV опциона по модели Блэк-76/Башелье.
@@ -51,7 +52,6 @@
     }
   }
 
-  const fmt = (x: number, d = 4) => x.toFixed(d);
 </script>
 
 <Panel title="Калькулятор">
@@ -85,12 +85,12 @@
     {:else if result}
       <table class="res">
         <tbody>
-          <tr><th>Цена</th><td>{fmt(result.price)}</td></tr>
-          <tr><th>Delta</th><td>{fmt(result.greeks.delta)}</td></tr>
-          <tr><th>Gamma</th><td>{fmt(result.greeks.gamma, 6)}</td></tr>
-          <tr><th>Vega</th><td>{fmt(result.greeks.vega)}</td></tr>
-          <tr><th>Theta</th><td>{fmt(result.greeks.theta)}</td></tr>
-          <tr><th>Rho</th><td>{fmt(result.greeks.rho)}</td></tr>
+          <tr><th>Цена</th><td>{fmtFixed(result.price, 4)}</td></tr>
+          <tr><th>Delta</th><td>{fmtFixed(result.greeks.delta, 4)}</td></tr>
+          <tr><th>Gamma</th><td>{fmtFixed(result.greeks.gamma, 6)}</td></tr>
+          <tr><th>Vega</th><td>{fmtFixed(result.greeks.vega, 4)}</td></tr>
+          <tr><th>Theta</th><td>{fmtFixed(result.greeks.theta, 4)}</td></tr>
+          <tr><th>Rho</th><td>{fmtFixed(result.greeks.rho, 4)}</td></tr>
           {#if iv != null}
             <tr><th>IV (из цены)</th><td>{(iv * 100).toFixed(2)}%</td></tr>
           {/if}

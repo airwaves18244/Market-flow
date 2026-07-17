@@ -2,6 +2,7 @@
   import Panel from "./Panel.svelte";
   import PayoffChart from "./PayoffChart.svelte";
   import { ipc } from "../ipc";
+  import { fmtFixed } from "../format";
   import type { LegKind, LegSide, StrategyEvalDto, StrategyLegInput } from "../types";
 
   // Конструктор стратегий: ноги + шаблоны + диаграмма payoff + греки/безубытки.
@@ -87,7 +88,6 @@
     }
   }
 
-  const fmt = (x: number | null, d = 2) => (x == null ? "∞" : x.toFixed(d));
 </script>
 
 <Panel title="Конструктор стратегий">
@@ -149,17 +149,17 @@
       <div class="chart"><PayoffChart payoff={result.payoff} breakevens={result.breakevens} /></div>
       <div class="summary">
         <span>Безубыток: {result.breakevens.map((b) => b.toFixed(1)).join(", ") || "—"}</span>
-        <span>Макс. прибыль: {fmt(result.maxProfit)}</span>
-        <span>Макс. убыток: {fmt(result.maxLoss)}</span>
-        <span>Дебет: {fmt(result.netCost)}</span>
+        <span>Макс. прибыль: {fmtFixed(result.maxProfit)}</span>
+        <span>Макс. убыток: {fmtFixed(result.maxLoss)}</span>
+        <span>Дебет: {fmtFixed(result.netCost)}</span>
       </div>
       <table class="greeks">
         <tbody>
           <tr>
-            <th>Δ</th><td>{fmt(result.greeks.delta, 3)}</td>
-            <th>Γ</th><td>{fmt(result.greeks.gamma, 5)}</td>
-            <th>Vega</th><td>{fmt(result.greeks.vega, 3)}</td>
-            <th>Θ</th><td>{fmt(result.greeks.theta, 3)}</td>
+            <th>Δ</th><td>{fmtFixed(result.greeks.delta, 3)}</td>
+            <th>Γ</th><td>{fmtFixed(result.greeks.gamma, 5)}</td>
+            <th>Vega</th><td>{fmtFixed(result.greeks.vega, 3)}</td>
+            <th>Θ</th><td>{fmtFixed(result.greeks.theta, 3)}</td>
           </tr>
         </tbody>
       </table>
