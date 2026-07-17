@@ -48,13 +48,22 @@
   ответ одной страницей без курсора, форвард — по SECID фьючерса из
   `UNDERLYINGASSET` (по коду актива forts пуст) с фолбэком на
   `UNDERLYINGSETTLEPRICE`. Детали — `crates/data/tests/fixtures/moex/README.md`.
-- ⚠️ **(unverified) ALGOPACK** — эндпоинт `apim.moex.com` живой (без ключа —
-  `401 Unauthorized`), но `MOEX_ALGO_API` в окружении не задан: форма
-  успешного ответа датасетов (`tradestats`/`futoi`/`hi2`/`obstats`/
-  `orderstats`/свечи) не сверена, фикстуры остаются синтетическими.
-- ⚠️ **LLM** — egress к `openrouter.ai` закрыт (403 от прокси), живой вызов
-  не выполнен; коэффициенты биржевой улыбки MOEX дословно не сверены
-  (первоисточники вне egress).
+- ✅ **ALGOPACK** (дозаезд 2026-07-17, боевой ключ): все 6 датасетов сверены
+  живыми ответами через `example algopack_check` — `tradestats` (202 строки
+  SBER), `orderstats` (204), `obstats` (198), `hi2` (160 точек), `futoi`
+  (1000 точек Si), свечи (18 H1). Найдены и исправлены расхождения:
+  `futoi` живёт на `iss/analyticalproducts/futoi/securities/{ticker}`
+  (колонка `ticker`, `FIZ`/`YUR`; путь `datashop/.../fo/futoi` — 404);
+  `hi2` — длинный формат `metric`/`value` (`hhi_*`, шкала 0..10 000 →
+  нормировка к 0..1, метрика-заголовок `hhi_volume`); свечей в `datashop`
+  нет — живой ресурс `iss/engines/.../candles.json?interval=`; фикстуры
+  приведены к живым формам (`crates/data/tests/fixtures/moex/README.md`).
+- ✅ **LLM** (дозаезд 2026-07-17): живой вызов OpenRouter зелёный; дефолтная
+  модель `anthropic/claude-3.5-sonnet` больше не существует у провайдера
+  (404) — дефолт обновлён на `anthropic/claude-sonnet-5`.
+- ⚠️ Коэффициенты биржевой улыбки MOEX дословно не сверены (первоисточники
+  методики вне egress); единицы `spread_*` живого obstats похожи на б.п. —
+  перепроверить при выводе живого obstats в аналитику Mega.
 
 ---
 
@@ -93,8 +102,8 @@
       такт покрыт тестами на фейке.
 - [x] Боевой режим `app --features live`: авторизация → справочник → цикл
       ингеста; секрет через резолвер; live smoke `example live_check`.
-- [~] Боевой прогон с живыми данными — код готов, упирается в egress-политику
-      окружения (`tradeapi.finam.ru:443` в allowlist).
+- [x] Боевой прогон с живыми данными: `example live_check` живым секретом —
+      auth, Assets (4565 MISX), Bars, LastQuote (T14, 2026-07-17).
 
 ## Фаза 2 — Аналитика (`domain`) ✅
 

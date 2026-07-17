@@ -1,48 +1,70 @@
 {
   "data": {
     "columns": [
-      "secid",
       "tradedate",
       "tradetime",
+      "secid",
       "put_orders_b",
       "put_orders_s",
-      "put_vol_b",
-      "put_vol_s",
       "put_val_b",
       "put_val_s",
+      "put_vol_b",
+      "put_vol_s",
+      "put_vwap_b",
+      "put_vwap_s",
+      "put_vol",
+      "put_val",
+      "put_orders",
       "cancel_orders_b",
       "cancel_orders_s",
-      "cancel_vol_b",
-      "cancel_vol_s",
       "cancel_val_b",
       "cancel_val_s",
-      "systime"
+      "cancel_vol_b",
+      "cancel_vol_s",
+      "cancel_vwap_b",
+      "cancel_vwap_s",
+      "cancel_vol",
+      "cancel_val",
+      "cancel_orders",
+      "SYSTIME"
     ],
     "data": [
       [
-        "SBER", "2024-01-15", "10:00:00",
+        "2024-01-15", "10:00:00", "SBER",
         4210, 3980,
-        612000, 588500,
         162400000.0, 155600000.0,
+        612000, 588500,
+        265.36, 264.41,
+        1200500, 318000000.0, 8190,
         3980, 3760,
-        541000, 519000,
         143500000.0, 137300000.0,
+        541000, 519000,
+        265.25, 264.55,
+        1060000, 280800000.0, 7740,
         "2024-01-15 10:05:01"
       ],
       [
-        "SBER", "2024-01-15", "10:05:00",
+        "2024-01-15", "10:05:00", "SBER",
         3900, 4055,
-        597000, 601200,
         158600000.0, 159400000.0,
+        597000, 601200,
+        265.66, 265.13,
+        1198200, 318000000.0, 7955,
         null, null,
         null, null,
         null, null,
+        null, null,
+        null, null, null,
         "2024-01-15 10:10:02"
       ]
     ]
   },
   "data.cursor": {
     "columns": ["INDEX", "TOTAL", "PAGESIZE"],
-    "data": [[0, 2, 100]]
+    "data": [[0, 2, 1000]]
+  },
+  "data.dates": {
+    "columns": ["from", "till"],
+    "data": [["2020-01-03", "2024-01-15"]]
   }
 }

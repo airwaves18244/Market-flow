@@ -51,6 +51,10 @@ keyring = { version = "3", optional = true, default-features = false, features =
 name = "live_check"
 required-features = ["grpc"]
 
+[[example]]
+name = "algopack_check"
+required-features = ["moex", "llm"]
+
 [features]
 # Боевое хранилище секрета поверх ОС-keyring (нативные платформенные бэкенды).
 keyring = ["dep:keyring"]

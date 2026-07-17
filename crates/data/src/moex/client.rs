@@ -1,11 +1,19 @@
 //! Клиент MOEX ALGOPACK: тонкая обёртка над [`HttpClient`] с Bearer-заголовком,
 //! построением URL и склейкой курсорной пагинации.
 //!
-//! База и пути — по подтверждённому контракту (`SPEC_0-12.md`, `10.0.1`):
-//! `https://apim.moex.com/iss/datashop/algopack/{market}/{dataset}.json`,
-//! per-ticker — `.../{dataset}/{SECID}.json`. Параметры запроса (`from`,
-//! `till`, `start`, `iss.meta=off`) и форма курсора (`(verify)`, `10.0.2`) —
-//! не сверены живым ключом, см. `crates/data/tests/fixtures/moex/README.md`.
+//! База и пути — **сверены живым ключом (T14, 2026-07-17)**, см.
+//! `crates/data/tests/fixtures/moex/README.md`:
+//! - `tradestats`/`orderstats`/`obstats` (per-ticker) и `hi2` (весь рынок):
+//!   `https://apim.moex.com/iss/datashop/algopack/{market}/{dataset}[/{SECID}].json`
+//!   — блок `data` + курсор `data.cursor` (`INDEX`/`TOTAL`/`PAGESIZE`),
+//!   параметры `from`/`till`/`start`/`iss.meta=off` работают;
+//! - `futoi` живёт **вне** `datashop`: ресурс
+//!   `https://apim.moex.com/iss/analyticalproducts/futoi/securities/{ticker}.json`
+//!   (блок `futoi`, инструмент — колонка `ticker`; путь `datashop/.../fo/futoi`
+//!   отвечает 404);
+//! - свечи живут на стандартном ISS-пути
+//!   `https://apim.moex.com/iss/engines/{engine}/markets/{market}/securities/{SECID}/candles.json`
+//!   с параметром `interval` (путь `datashop/.../candles` отвечает 404).
 //!
 //! `Authorization: Bearer <token>` добавляется на каждый запрос; клиент не
 //! логирует и не выводит токен в `Debug` (см. [`MoexAlgo`] — поле `token`
@@ -46,6 +54,15 @@ impl Market {
             Market::Eq => "eq",
             Market::Fo => "fo",
             Market::Fx => "fx",
+        }
+    }
+
+    /// Пара `{engine}/{market}` стандартного ISS-пути (ресурс свечей).
+    fn iss_engine_market(self) -> (&'static str, &'static str) {
+        match self {
+            Market::Eq => ("stock", "shares"),
+            Market::Fo => ("futures", "forts"),
+            Market::Fx => ("currency", "selt"),
         }
     }
 
@@ -147,9 +164,18 @@ impl<T: HttpTransport> MoexAlgo<T> {
         }
     }
 
+    /// Базовый URL ISS без суффикса `datashop/algopack` — для ресурсов вне
+    /// витрины датасетов (`analyticalproducts/futoi`, `engines/.../candles`).
+    fn iss_base_url(&self) -> &str {
+        self.base_url
+            .strip_suffix("/datashop/algopack")
+            .unwrap_or(&self.base_url)
+    }
+
     fn build_url(dataset_url: &str, range: &DateRange, start: Option<i64>) -> String {
         let mut url = dataset_url.to_owned();
-        let mut first = true;
+        // Путь мог прийти уже с параметрами (например `?interval=` у свечей).
+        let mut first = !dataset_url.contains('?');
         push_param(&mut url, &mut first, "iss.meta", "off");
         if let Some(from) = &range.from {
             push_param(&mut url, &mut first, "from", from);
@@ -169,8 +195,9 @@ impl<T: HttpTransport> MoexAlgo<T> {
     /// тогда одностраничный ответ и есть весь результат).
     ///
     /// `block_candidates` — кандидаты имени блока-обёртки ответа (порядок
-    /// имеет значение, см. `parse.rs`/README фикстур — форма блока
-    /// `(unverified)`).
+    /// имеет значение; живая сверка T14: датасеты `datashop` оборачиваются в
+    /// `data`, ресурс `analyticalproducts/futoi` — в `futoi`, свечи — в
+    /// `candles`).
     async fn fetch_paginated(
         &self,
         method: Method,
@@ -266,34 +293,53 @@ impl<T: HttpTransport> MoexAlgo<T> {
         Ok(parse_hi2(&table))
     }
 
-    /// `futoi`: нетто-позиции физ/юр лиц по фьючерсам. Датасет существует
-    /// только на рынке `fo` (см. `10.0.1`), поэтому рынок фиксирован.
+    /// `futoi`: нетто-позиции физ/юр лиц по фьючерсам (только срочный рынок).
+    ///
+    /// Живой контракт (T14, 2026-07-17): ресурс живёт **вне** витрины
+    /// `datashop` — `iss/analyticalproducts/futoi/securities/{ticker}.json`
+    /// (блок `futoi`, тикер — код актива, например `Si`/`RTS`); `None` —
+    /// сводный ресурс `securities.json` по всем активам.
     pub async fn futoi(
         &self,
         ticker: Option<&str>,
         range: DateRange,
     ) -> Result<Vec<FutoiPoint>, DataError> {
-        let url = self.dataset_url(Market::Fo, "futoi", ticker);
+        let url = match ticker {
+            Some(t) => format!(
+                "{}/analyticalproducts/futoi/securities/{t}.json",
+                self.iss_base_url()
+            ),
+            None => format!(
+                "{}/analyticalproducts/futoi/securities.json",
+                self.iss_base_url()
+            ),
+        };
         let table = self
-            .fetch_paginated(Method::MoexFutoi, &url, &range, &["data", "futoi"])
+            .fetch_paginated(Method::MoexFutoi, &url, &range, &["futoi", "data"])
             .await?;
         Ok(parse_futoi(&table))
     }
 
-    /// Свечи (задел под историю, фаза 11): формат ответа не входит в
-    /// подтверждённый контракт `10.0.1` (перечислены только `tradestats`/
-    /// `orderstats`/`obstats`/`hi2`/`futoi`) — метод-заглушка со своим
-    /// парсером, помеченным `(unverified)`, чтобы не блокировать интеграцию
-    /// `data::history` до появления живого ключа.
+    /// Свечи (фид истории, фаза 11) со стандартного ISS-ресурса
+    /// `engines/{engine}/markets/{market}/securities/{SECID}/candles.json` —
+    /// живой контракт (T14, 2026-07-17); путей свечей в `datashop` нет (404).
+    ///
+    /// `interval` — код ISS: `1`/`10`/`60` — минуты, `24` — день, `7` —
+    /// неделя, `31` — месяц.
     pub async fn candles(
         &self,
         market: Market,
         ticker: &str,
+        interval: u32,
         range: DateRange,
     ) -> Result<Vec<super::parse::IssCandle>, DataError> {
-        let url = self.dataset_url(market, "candles", Some(ticker));
+        let (engine, iss_market) = market.iss_engine_market();
+        let url = format!(
+            "{}/engines/{engine}/markets/{iss_market}/securities/{ticker}/candles.json?interval={interval}",
+            self.iss_base_url()
+        );
         let table = self
-            .fetch_paginated(Method::MoexCandles, &url, &range, &["data", "candles"])
+            .fetch_paginated(Method::MoexCandles, &url, &range, &["candles", "data"])
             .await?;
         Ok(super::parse::parse_candles(&table))
     }
@@ -485,14 +531,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn futoi_always_uses_fo_market() {
-        let page = r#"{"data": {"columns": ["secid","tradedate","tradetime","clgroup","pos","pos_long","pos_short","pos_long_num","pos_short_num"], "data": [["RIH5","2024-01-15","18:45:00","fiz",100,60,40,10,8]]}}"#;
+    async fn futoi_uses_analyticalproducts_resource_and_ticker_column() {
+        // Живой контракт: блок `futoi`, инструмент — колонка `ticker`.
+        let page = r#"{"futoi": {"columns": ["sess_id","tradedate","tradetime","ticker","clgroup","pos","pos_long","pos_short","pos_long_num","pos_short_num"], "data": [[7606,"2024-01-15","18:45:00","RTS","FIZ",100,60,-40,10,8]]}}"#;
         let (transport, shared) = FakeTransport::new(vec![page]);
-        let c = client(transport);
-        let out = c.futoi(Some("RIH5"), DateRange::all()).await.unwrap();
+        let c = MoexAlgo::with_base_url(
+            transport,
+            "https://example.invalid/iss/datashop/algopack",
+            "tkn",
+        );
+        let out = c.futoi(Some("RTS"), DateRange::all()).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].secid, "RTS");
+        let urls = shared.captured_urls.lock().unwrap().clone();
+        // Ресурс живёт вне `datashop/algopack` — суффикс срезается.
+        assert!(urls[0].starts_with(
+            "https://example.invalid/iss/analyticalproducts/futoi/securities/RTS.json"
+        ));
+    }
+
+    #[tokio::test]
+    async fn candles_use_engines_resource_with_interval() {
+        let page = r#"{"candles": {"columns": ["open","close","high","low","value","volume","begin","end"], "data": [[100,101,102,99,1000,10,"2026-07-16 07:00:00","2026-07-16 07:59:59"]]}}"#;
+        let (transport, shared) = FakeTransport::new(vec![page]);
+        let c = MoexAlgo::with_base_url(
+            transport,
+            "https://example.invalid/iss/datashop/algopack",
+            "tkn",
+        );
+        let out = c
+            .candles(
+                Market::Eq,
+                "SBER",
+                60,
+                DateRange::new("2026-07-16", "2026-07-16"),
+            )
+            .await
+            .unwrap();
         assert_eq!(out.len(), 1);
         let urls = shared.captured_urls.lock().unwrap().clone();
-        assert!(urls[0].starts_with("https://example.invalid/algopack/fo/futoi/RIH5.json"));
+        assert!(urls[0].starts_with(
+            "https://example.invalid/iss/engines/stock/markets/shares/securities/SBER/candles.json?interval=60"
+        ));
+        // `?interval=` уже в пути — остальные параметры добавляются через `&`.
+        assert!(urls[0].contains("&iss.meta=off"));
+        assert!(urls[0].contains("&from=2026-07-16"));
     }
 
     #[tokio::test]

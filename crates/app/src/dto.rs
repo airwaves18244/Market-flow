@@ -1278,7 +1278,7 @@ impl Default for SettingsDto {
             .collect(),
 
             llm_provider: "openrouter".to_string(),
-            llm_model: "anthropic/claude-3.5-sonnet".to_string(),
+            llm_model: "anthropic/claude-sonnet-5".to_string(),
             llm_has_key: false,
             llm_token_limit: 2000,
             llm_auto: true,

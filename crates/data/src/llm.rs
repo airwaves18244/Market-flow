@@ -25,8 +25,8 @@ pub struct LlmRequest {
     pub system: Option<String>,
     /// Пользовательский промпт (собирается в `domain::keyactivity::prompt`).
     pub prompt: String,
-    /// Модель провайдера (например, `anthropic/claude-3.5-sonnet` для
-    /// OpenRouter или `claude-3-5-sonnet-latest` для Anthropic напрямую).
+    /// Модель провайдера (например, `anthropic/claude-sonnet-5` для
+    /// OpenRouter или `claude-sonnet-5` для Anthropic напрямую).
     pub model: String,
     /// Верхняя граница токенов ответа.
     pub max_tokens: u32,
