@@ -235,6 +235,16 @@ pub trait Store {
         to_ts: i64,
     ) -> Result<Vec<Hi2Point>, StorageError>;
 
+    /// Последняя (по `ts`) точка HI2 инструмента `secid` на рынке `market`;
+    /// `None`, если по ключу нет ни одной точки.
+    ///
+    /// Отдельный метод, а не `algo_hi2(..).last()` — реализации читают только
+    /// последнюю строку по ключу, не поднимая всю историю: панели вроде
+    /// ранжирования по концентрации (T11, `MoexAlgoTab`) опрашивают вотчлист
+    /// из десятка тикеров, и раньше каждый такой запрос тянул полный диапазон
+    /// ради последней точки.
+    fn algo_hi2_latest(&self, market: &str, secid: &str) -> Result<Option<Hi2Point>, StorageError>;
+
     /// Вставить/обновить записи OBSTATS (`algo_obstats`). Идемпотентно по
     /// ключу (secid, ts, market). Возвращает число строк.
     fn insert_algo_obstats(&mut self, records: &[AlgoObstatsRecord])

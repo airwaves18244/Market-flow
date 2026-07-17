@@ -498,6 +498,24 @@ impl Store for DuckStore {
         )
     }
 
+    fn algo_hi2_latest(&self, market: &str, secid: &str) -> Result<Option<Hi2Point>, StorageError> {
+        Ok(query_rows(
+            &self.conn,
+            "SELECT secid, ts, concentration FROM algo_hi2 \
+             WHERE market = ? AND secid = ? ORDER BY ts DESC LIMIT 1",
+            params![market, secid],
+            |row| {
+                Ok(Hi2Point {
+                    secid: row.get(0)?,
+                    ts: row.get(1)?,
+                    concentration: row.get(2)?,
+                })
+            },
+        )?
+        .into_iter()
+        .next())
+    }
+
     fn insert_algo_obstats(
         &mut self,
         records: &[AlgoObstatsRecord],
@@ -1131,6 +1149,24 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert!((got[0].concentration - 0.9).abs() < 1e-9);
         assert!(s.algo_hi2("stock", "GAZP", 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn algo_hi2_latest_returns_last_point_without_full_range() {
+        let mut s = store();
+        let p = |ts: i64, c: f64| Hi2Point {
+            ts,
+            secid: "SBER".into(),
+            concentration: c,
+        };
+        assert_eq!(s.algo_hi2_latest("stock", "SBER").unwrap(), None);
+
+        s.insert_algo_hi2("stock", &[p(1, 0.2), p(3, 0.4), p(2, 0.3)])
+            .unwrap();
+        let latest = s.algo_hi2_latest("stock", "SBER").unwrap().unwrap();
+        assert_eq!(latest.ts, 3);
+        assert!((latest.concentration - 0.4).abs() < 1e-9);
+        assert_eq!(s.algo_hi2_latest("stock", "GAZP").unwrap(), None);
     }
 
     #[test]

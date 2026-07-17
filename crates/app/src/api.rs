@@ -1260,6 +1260,33 @@ pub fn algo_hi2(
         .collect())
 }
 
+/// Ранжирование инструментов `secids` по последней (по `ts`) концентрации HI2
+/// на рынке `market`: топ-`limit` по убыванию `concentration`.
+///
+/// Питает панели-сводки вроде ранжирования HI2 в `MoexAlgoTab` (вотчлист из
+/// ~10 тикеров) — раньше такая панель на каждый тикер поднимала полный
+/// диапазон `algo_hi2` ради последней точки серии (`points.at(-1)`), т.е.
+/// N полных чтений истории вместо N чтений последней строки. Здесь —
+/// [`Store::algo_hi2_latest`] на тикер, без окна всплеска (флаг `spike`
+/// содержательного смысла для одиночной точки не имеет, всегда `false`;
+/// оконный расчёт остаётся за [`algo_hi2`] для конкретного инструмента).
+pub fn algo_hi2_ranking(
+    store: &dyn Store,
+    market: &str,
+    secids: &[String],
+    limit: usize,
+) -> Result<Vec<Hi2Dto>, StorageError> {
+    let mut out = Vec::with_capacity(secids.len());
+    for secid in secids {
+        if let Some(p) = store.algo_hi2_latest(market, secid)? {
+            out.push(Hi2Dto::from(&p));
+        }
+    }
+    out.sort_by(|a, b| b.concentration.total_cmp(&a.concentration));
+    out.truncate(limit);
+    Ok(out)
+}
+
 /// Прогнать движок Mega Alerts (10.2.8) по сохранённым датасетам ALGOPACK
 /// (`tradestats`/`hi2`/`obstats`/`futoi`) для каждого инструмента из `secids`
 /// в окне `[from_ts, to_ts]`.

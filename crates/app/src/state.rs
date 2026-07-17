@@ -471,6 +471,18 @@ impl AppState {
         })
     }
 
+    /// Ранжирование `secids` по последней концентрации HI2 (топ-`limit`,
+    /// по убыванию) — эффективный путь для сводных панелей (см.
+    /// [`api::algo_hi2_ranking`]): без полного чтения истории на тикер.
+    pub fn algo_hi2_ranking(
+        &self,
+        market: &str,
+        secids: &[String],
+        limit: usize,
+    ) -> Result<Vec<Hi2Dto>, StorageError> {
+        self.read(|s| api::algo_hi2_ranking(s, market, secids, limit))
+    }
+
     /// Mega Alerts (10.2.8) по сохранённым датасетам ALGOPACK для `secids` на
     /// рынке `market` в окне `[from_ts, to_ts]`. `thresholds` — `None` для
     /// порогов по умолчанию.
