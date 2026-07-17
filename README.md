@@ -144,6 +144,59 @@ FINAM_API_SECRET=… cargo run -p app --features live,keyring -- --store-secret
 cargo run -p app --features live,keyring
 ```
 
+## Сборка установщика (Windows)
+
+Готовит установочные пакеты MSI и NSIS из `crates/app` (Tauri v2). Сама сборка
+выполняется на десктопе под Windows — в контейнере/CI без десктопного
+окружения `cargo tauri build` не запускается.
+
+**Предусловия:**
+
+- Rust (stable) с таргетом Windows (MSVC) и `cargo`.
+- Node.js + npm (см. `frontend/package.json` для версии).
+- Tauri CLI v2: `cargo install tauri-cli --version "^2"` (даёт команду
+  `cargo tauri`).
+- WebView2 Runtime — обычно уже стоит в Windows 10/11; инсталлятор NSIS по
+  умолчанию (`bundle.windows.webviewInstallMode.type = downloadBootstrapper`)
+  сам скачает и поставит его при отсутствии, отдельно ставить не нужно.
+- Для MSI дополнительно нужен WiX Toolset (Tauri CLI подтягивает его
+  автоматически при первой сборке `msi`-таргета, доступ в интернет
+  требуется один раз).
+
+**Команды** (из корня репозитория):
+
+```bash
+# Один раз: зависимости фронта (beforeBuildCommand дальше сам вызовет
+# npm run build через frontendDist ../../frontend/dist)
+npm --prefix frontend ci
+
+# Инсталляторы MSI + NSIS: bundle.active=true, targets=["msi","nsis"] и
+# build.features=["tauri"] уже прописаны в crates/app/tauri.conf.json,
+# поэтому tauri-cli сама соберёт бинарь с нужной фичей и упакует его.
+cd crates/app
+cargo tauri build
+```
+
+`cargo tauri build` автоматически находит `tauri.conf.json` рядом с
+`Cargo.toml` бинарной крейты (`crates/app`), запускает `beforeBuildCommand`
+(`npm --prefix ../../frontend run build`) и собирает `market-terminal` с
+фичей `tauri` (см. `build.features` в конфиге).
+
+**Артефакты:** после успешной сборки инсталляторы лежат в
+`target/release/bundle/msi/*.msi` и `target/release/bundle/nsis/*.exe`.
+
+**Иконки:** полный набор (`32x32.png`, `128x128.png`, `128x128@2x.png`,
+`icon.ico`, `icon.icns`, `icon.png`, `Square*Logo.png`) уже сгенерирован и
+лежит в `crates/app/icons/`, путь прописан в `bundle.icon`
+в `crates/app/tauri.conf.json`.
+
+**Подпись (code signing):** не настроена. MSI/NSIS будут собираться
+неподписанными — при первом запуске Windows SmartScreen покажет
+предупреждение «Неизвестный издатель». Настройка сертификата
+(`bundle.windows.certificateThumbprint`/`digestAlgorithm`/`timestampUrl`
+или переменные окружения `TAURI_SIGNING_PRIVATE_KEY*` для обновлений)
+выходит за рамки текущей задачи и оставлена на потом.
+
 ## Finam Trade API
 
 - gRPC (+ REST-gateway): `https://tradeapi.finam.ru:443` (HTTP/2, TLS).
