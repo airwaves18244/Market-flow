@@ -55,6 +55,16 @@ pub struct AppState {
     #[cfg(feature = "llm")]
     #[allow(dead_code)]
     llm_cache: crate::llm::SummaryCache,
+    /// HTTP-транспорт для LLM-провайдера, закэшированный на время сессии
+    /// приложения (фаза 10.4, фича `llm`): раньше `ReqwestTransport::new()`
+    /// (со своим пулом соединений/TLS) пересобирался на каждый вызов
+    /// `summarize_key_activity`. `None` — транспорт не удалось построить при
+    /// старте (см. `ReqwestTransport::new`, практически не случается) —
+    /// в этом случае `summarize_key_activity` грациозно деградирует в
+    /// локальный свод, как и при отсутствии ключа провайдера.
+    #[cfg(feature = "llm")]
+    #[allow(dead_code)]
+    llm_transport: Option<data::ReqwestTransport>,
     /// Реестр фоновых загрузок истории (T10, фаза 11.3): раздаёт `task_id` и
     /// хранит флаги отмены, чтобы `history_cancel(taskId?)` мог остановить одну
     /// загрузку или все. Живёт под фичей `ingest` (async-оркестрация).
@@ -84,6 +94,8 @@ impl AppState {
             settings: Mutex::new(SettingsStore::from_env()),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "llm")]
+            llm_transport: data::ReqwestTransport::new().ok(),
             #[cfg(feature = "ingest")]
             history_tasks: crate::history::HistoryTasks::default(),
         }
@@ -103,6 +115,8 @@ impl AppState {
             settings: Mutex::new(SettingsStore::new(settings_dir)),
             #[cfg(feature = "llm")]
             llm_cache: crate::llm::SummaryCache::new(),
+            #[cfg(feature = "llm")]
+            llm_transport: data::ReqwestTransport::new().ok(),
             #[cfg(feature = "ingest")]
             history_tasks: crate::history::HistoryTasks::default(),
         }
@@ -411,7 +425,14 @@ impl AppState {
         period: Option<&str>,
     ) -> KeyActivitySummaryDto {
         let settings = self.settings_get();
-        api::key_activity_summary_live(&self.llm_cache, &settings, samples, period).await
+        api::key_activity_summary_live(
+            &self.llm_cache,
+            self.llm_transport.as_ref(),
+            &settings,
+            samples,
+            period,
+        )
+        .await
     }
 
     /// Встроенные правила Key Activity (для настроек/справки).

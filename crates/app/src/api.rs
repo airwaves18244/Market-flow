@@ -1036,10 +1036,13 @@ pub fn key_activity_summary(
 /// свод, что и [`key_activity_summary`] (`source: "local"`, `fallback: true`).
 /// `cache` — сессионный кэш готовых резюме (см. [`crate::llm::SummaryCache`]):
 /// повторный вызов с тем же входом/моделью/провайдером не дёргает провайдера.
+/// `transport` — HTTP-транспорт, закэшированный на `AppState` (см.
+/// [`crate::llm::summarize_key_activity`]): не пересобирается на каждый вызов.
 #[cfg(feature = "llm")]
 #[allow(dead_code)]
 pub async fn key_activity_summary_live(
     cache: &crate::llm::SummaryCache,
+    transport: Option<&data::ReqwestTransport>,
     settings: &SettingsDto,
     samples: &[KeyActivitySampleInput],
     period: Option<&str>,
@@ -1048,7 +1051,7 @@ pub async fn key_activity_summary_live(
     let domain_samples: Vec<Sample> = samples.iter().map(Sample::from).collect();
     let rows = ka_evaluate(&default_rules(), &domain_samples);
 
-    match crate::llm::summarize_key_activity(cache, settings, &rows, p).await {
+    match crate::llm::summarize_key_activity(cache, transport, settings, &rows, p).await {
         Some(text) => KeyActivitySummaryDto {
             text,
             period: p.label().to_string(),
