@@ -128,17 +128,15 @@
   }
 
   async function loadHi2Ranking(seq = ++reqSeq) {
-    const results = await Promise.all(
-      universe.map(async (t) => {
-        const pts = await ipc.algoHi2(market, t.ticker, FROM_TS, TO_TS);
-        return pts.at(-1) ?? null;
-      }),
+    // Батч «последние точки» одним вызовом вместо полной истории ×N тикеров
+    // (сортировка и топ-10 — на стороне ядра).
+    const ranking = await ipc.algoHi2Ranking(
+      market,
+      universe.map((t) => t.ticker),
+      10,
     );
     if (seq !== reqSeq) return;
-    hi2Rank = results
-      .filter((r): r is Hi2Dto => r !== null)
-      .sort((a, b) => b.concentration - a.concentration)
-      .slice(0, 10);
+    hi2Rank = ranking;
   }
 
   async function loadMegaAlerts(seq = ++reqSeq) {

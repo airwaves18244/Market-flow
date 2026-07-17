@@ -17,7 +17,8 @@
   `app` (`moex,llm,ingest`) — 116; `storage --features duckdb` — 62
   (вкл. миграции v2→v3→v4 и Parquet-roundtrip);
 - фронт: `svelte-check` 0 ошибок · `vitest` **41 тест** · `vite build` ок;
-- IPC-контракт согласован end-to-end: **одни и те же 49 команд** в
+- IPC-контракт согласован end-to-end: **одни и те же 50 команд** (после
+  полировки T16 добавлена `algo_hi2_ranking`) в
   `frontend/src/lib/ipc.ts` и регистрации `crates/app/src/tauri_app.rs`,
   все покрыты моком `mock.ts`;
 - модули `data`: + **`http`, `moex` (ALGOPACK + ISS-доска опционов), `llm`
