@@ -1,76 +1,72 @@
 # Фикстуры MOEX ALGOPACK (ISS JSON)
 
-**Статус ALGOPACK-файлов: unverified — требуют сверки живым ключом
-`MOEX_ALGO_API`.** Живой смоук T14 (2026-07-17): egress к `apim.moex.com`
-открыт, эндпоинт подтверждён (`GET /iss/datashop/algopack/eq/tradestats/SBER.json`
-без ключа → `401 {"message":"Unauthorized"}` — URL и JSON-обёртка ошибок
-живые), но ключа `MOEX_ALGO_API` в окружении нет, поэтому форма успешного
-ответа по-прежнему не сверена. Файлы `options_board*.json` (публичный ISS)
-сверены живым ответом — см. раздел «Опционная доска».
+**Статус: сверено живым ключом `MOEX_ALGO_API` (T14, 2026-07-17).**
+Все файлы приведены к форме живых ответов; смоук — `example algopack_check`
+(`cargo run -p data --features "moex,llm" --example algopack_check`):
+tradestats/orderstats/obstats/hi2/futoi/candles по одному живому запросу
+через боевой клиент. Итоги сверки:
 
-ALGOPACK-файлы синтетические. Структура собрана по публичной документации ISS
+- **Блок и пагинация datashop.** `tradestats`/`orderstats`/`obstats`/`hi2`
+  оборачиваются в блок `data` + курсор `data.cursor`
+  (`INDEX`/`TOTAL`/`PAGESIZE`, PAGESIZE=1000) + блок `data.dates`
+  (доступный период). Параметры `from`/`till`/`start`/`iss.meta=off`
+  работают. Колонки строчными, кроме `SYSTIME`; `SYSTIME` — строка
+  `YYYY-MM-DD HH:MM:SS` (не unix) — время берётся из
+  `tradedate`+`tradetime` (MSK).
+- **`futoi` живёт вне `datashop`**: ресурс
+  `iss/analyticalproducts/futoi/securities/{ticker}.json` (тикер — код
+  актива: `Si`, `RTS`; путь `datashop/.../fo/futoi` — 404). Блок `futoi` +
+  `futoi.dates`, инструмент — колонка **`ticker`** (не `secid`), `clgroup`
+  ЗАГЛАВНЫМИ (`FIZ`/`YUR`), short-позиции отрицательные.
+- **`hi2` — длинный формат**: строка на пару (инструмент, метрика), колонки
+  `metric`/`value`/`reference`; метрики — семейство `hhi_*`
+  (`hhi_volume`, `hhi_buy`, `hhi_sell`, `hhi_agressive[_buy|_sell]`,
+  `hhi_passive[_buy|_sell]`, `hhi_netflow_[buy|sell]`) в шкале `0..10 000`.
+  Парсер берёт `hhi_volume` и нормирует к `0..1`.
+- **Свечей в `datashop` нет** (404): живой ресурс — стандартный ISS
+  `iss/engines/{engine}/markets/{market}/securities/{SECID}/candles.json`
+  с параметром `interval` (`1`/`10`/`60` мин, `24` день, `7` неделя,
+  `31` месяц); блок `candles`, колонки
+  `open/close/high/low/value/volume/begin/end`, время — `begin`
+  (`YYYY-MM-DD HH:MM:SS`, MSK).
+- **Открытый вопрос (единицы)**: живые `spread_bbo`/`spread_lv10`/
+  `spread_1mio` в `obstats` приходят величинами порядка `1.8`/`13.3` —
+  похоже на б.п., а не долю; пороги Mega Alerts трактуют спред как
+  относительную величину — перепроверить при выводе живого obstats в
+  аналитику. Структура собрана по публичной документации ISS
 (`iss.moex.com/iss/reference/`) и по описанию датасетов ALGOPACK в открытой
 документации `moexalgo`/data.moex.com, но **точные имена колонок, регистр,
 имя блока-обёртки и параметры запроса не подтверждены живым ответом API**.
-Парсер (`crates/data/src/moex/parse.rs`) намеренно устойчив к расхождениям:
-
-- **Имя блока.** ISS обычно оборачивает таблицу в блок `data`
-  (`{"data": {"columns": [...], "data": [...]}}`), но у отдельных ресурсов
-  `datashop` блок может называться по датасету (`tradestats`, `futoi`, ...).
-  `IssTable::find`/`IssCursor::find` пробуют кандидатов по порядку
-  (`&["data", "<dataset>"]`) — реальный ключ подтверждается только на живом
-  ответе.
-- **Регистр и имена колонок.** Доступ — по имени без учёта регистра
-  (`RowView::f64/i64/str`). Фикстуры используют строчные имена
-  (`secid`, `pr_close`, ...) по аналогии с нормализованными именами
-  `moexalgo`; сырой ISS-ответ может отдавать `SECID`/`PR_CLOSE` заглавными —
-  парсер это не сломает, но **набор колонок** (какие поля вообще есть) не
-  проверен.
-- **Время.** Строки `tradedate`/`tradetime` предполагаются раздельными
-  (`YYYY-MM-DD`/`HH:MM:SS`), московское время без перевода часов (UTC+3).
-  Конвертация в unix-секунды UTC — `parse::moex_datetime_to_unix`. Если
-  живой ответ отдаёт единое поле (`ts`/`systime` как unix-время), парсер
-  использует его в приоритете (`row_ts` сначала пробует `ts`/`systime`).
-- **Пагинация.** Курсор `<блок>.cursor` с колонками `INDEX`/`TOTAL`/
-  `PAGESIZE` — по общей конвенции ISS (`iss.meta=off` не убирает курсор,
-  так как он не в `metadata`, а отдельный блок). Не подтверждено, что
-  ALGOPACK-ресурсы вообще возвращают курсор при `iss.meta=off` — возможно,
-  для одностраничных ответов блок `.cursor` отсутствует; `IssCursor::find`
-  тогда просто возвращает `None`, и клиент не пагинирует (см.
-  `client.rs::fetch_all`).
-- **Параметры запроса.** `date`/`from`/`till`/`start`/`iss.meta=off` — по
-  общей практике ISS REST; какие именно параметры принимает каждый ресурс
-  `datashop/algopack/*` (и обязательны ли `from`/`till` для `tradestats` per
-  тикеру) — не проверено.
+Парсер (`crates/data/src/moex/parse.rs`) остаётся устойчивым к вариациям
+(имена блоков — кандидатами, колонки — по имени без учёта регистра, время —
+`ts`/`systime` → `tradedate`+`tradetime` → `begin`), поэтому изменения формы
+на стороне биржи деградируют мягко, а не паникой.
 
 ## Файлы
 
-| Файл | Датасет | Рынок | Особенность |
+| Файл | Датасет | Ресурс | Особенность |
 |---|---|---|---|
-| `tradestats_eq.json` | tradestats (Super Candles) | eq | 2 строки, 1 страница |
-| `futoi_fo.json` | futoi | fo (только `fo`) | fiz/yur + неизвестная группа (пропускается парсером) |
-| `hi2_eq.json` | hi2 | eq | 2 строки |
-| `obstats_eq.json` | obstats | eq | вторая строка без `spread_1mio` (`null`) — проверяет мягкий `Option` |
-| `orderstats_eq.json` | orderstats | eq | вторая строка без `cancel_*` (`null`) — проверяет мягкий `Option` |
+| `tradestats_eq.json` | tradestats (Super Candles) | `datashop/algopack/eq` | 2 строки, 1 страница |
+| `futoi_fo.json` | futoi | `analyticalproducts/futoi/securities` | блок `futoi`, колонка `ticker`, `FIZ`/`YUR` + неизвестная группа (пропускается) |
+| `hi2_eq.json` | hi2 (длинный формат) | `datashop/algopack/eq` | `hhi_volume` берётся, прочие `hhi_*` пропускаются |
+| `obstats_eq.json` | obstats | `datashop/algopack/eq` | вторая строка без `spread_1mio` (`null`) — мягкий `Option` |
+| `orderstats_eq.json` | orderstats | `datashop/algopack/eq` | вторая строка без `cancel_*` (`null`) — мягкий `Option` |
+| `candles_eq.json` | свечи | `engines/stock/markets/shares` | время из `begin` (MSK) |
 | `options_board.json` | опционная доска (фаза 12.4) | `engines/futures/markets/options` | см. раздел ниже |
 | `options_board_empty.json` | опционная доска | — | пустые `securities`/`marketdata` (без строк) |
 
 ## Как перепроверить живым ключом
 
-1. Получить `MOEX_ALGO_API` (подписка ALGOPACK на data.moex.com → APIKEY) и
-   положить в `.env` (см. `.env.example`).
-2. Выполнить вручную (или временным скриптом) запрос вида:
-   ```
-   curl -H "Authorization: Bearer $MOEX_ALGO_API" \
-     "https://apim.moex.com/iss/datashop/algopack/eq/tradestats/SBER.json?iss.meta=off"
-   ```
-3. Сверить: имя блока-обёртки, регистр и полный список колонок, формат
-   `tradedate`/`tradetime` (или наличие `ts`), наличие и форму блока
-   `<блок>.cursor`, обязательность `from`/`till`.
-4. Обновить фикстуры и, если понадобится, кандидатов блока в
-   `client.rs`/`parse.rs` (сейчас `&["data", "<dataset>"]`) — тесты парсера
-   написаны против формы файлов в этом каталоге и не изменятся в логике,
-   только в данных.
+`MOEX_ALGO_API` (подписка ALGOPACK на data.moex.com → APIKEY) и
+`OPENROUTER_API_KEY` в `.env` (см. `.env.example`), затем:
+
+```bash
+cargo run -p data --features "moex,llm" --example algopack_check
+```
+
+Смоук дёргает каждый датасет одним живым запросом через боевой клиент и
+один вызов LLM; при расхождении формы — правки в `parse.rs`/`client.rs` и
+обновление файлов этого каталога.
 
 ## Опционная доска (`options.rs`, фаза 12.4) — **сверено живым ответом (T14, 2026-07-17)**
 

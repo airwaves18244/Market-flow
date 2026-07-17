@@ -71,7 +71,7 @@ export const DEFAULTS: Settings = {
   watchlist: { SBER: true, GAZP: true, LKOH: true, GMKN: false, ROSN: true, VTBR: false },
 
   llmProvider: "openrouter",
-  llmModel: "anthropic/claude-3.5-sonnet",
+  llmModel: "anthropic/claude-sonnet-5",
   llmHasKey: false,
   llmTokenLimit: 2000,
   llmAuto: true,

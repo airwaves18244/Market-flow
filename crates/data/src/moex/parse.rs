@@ -242,13 +242,17 @@ pub fn parse_tradestats(table: &IssTable) -> Vec<SuperCandle> {
 }
 
 /// Разобрать таблицу `futoi` в точки FUTOI. Строки без разбираемой группы
-/// клиентов (`clgroup`, ожидается `fiz`/`yur`) пропускаются — учитываем
-/// только физ/юр (как определяет [`ClientGroup`]).
+/// клиентов (`clgroup`, `FIZ`/`YUR` без учёта регистра) пропускаются —
+/// учитываем только физ/юр (как определяет [`ClientGroup`]).
+///
+/// Живой контракт (T14, 2026-07-17): ресурс
+/// `iss/analyticalproducts/futoi/securities/{ticker}` называет инструмент
+/// колонкой `ticker` (не `secid`) — принимаем оба имени.
 pub fn parse_futoi(table: &IssTable) -> Vec<FutoiPoint> {
     table
         .rows_iter()
         .filter_map(|row| {
-            let secid = row.str("secid")?.to_owned();
+            let secid = row.str("secid").or_else(|| row.str("ticker"))?.to_owned();
             let ts = row_ts(&row)?;
             let clgroup = ClientGroup::from_code(row.str("clgroup")?)?;
             Some(FutoiPoint {
@@ -265,14 +269,37 @@ pub fn parse_futoi(table: &IssTable) -> Vec<FutoiPoint> {
         .collect()
 }
 
+/// Метрика длинного формата `hi2`, которую берём как индекс концентрации
+/// инструмента: HHI по объёму торгов (остальные `hhi_*` — разрезы
+/// покупка/продажа/агрессивность — фаза 10 не использует).
+const HI2_HEADLINE_METRIC: &str = "hhi_volume";
+
+/// Живой `hhi_*` отдаётся в классической шкале HHI `0..10_000`
+/// (сумма квадратов долей в процентах); домен ждёт долю `0..1`.
+const HI2_LIVE_SCALE: f64 = 10_000.0;
+
 /// Разобрать таблицу `hi2` в точки индекса концентрации.
+///
+/// Живой контракт (T14, 2026-07-17) — **длинный формат**: строка на пару
+/// (инструмент, метрика) с колонками `metric`/`value`, метрики — семейство
+/// `hhi_*` в шкале `0..10 000`. Берём [`HI2_HEADLINE_METRIC`] и нормируем к
+/// `0..1`. Широкий формат (колонка `hi2`/`concentration`, уже `0..1`)
+/// поддержан как фолбэк для строк без колонки `metric`.
 pub fn parse_hi2(table: &IssTable) -> Vec<Hi2Point> {
     table
         .rows_iter()
         .filter_map(|row| {
             let secid = row.str("secid")?.to_owned();
             let ts = row_ts(&row)?;
-            let concentration = row.f64("hi2").or_else(|| row.f64("concentration"))?;
+            let concentration = match row.str("metric") {
+                Some(metric) => {
+                    if !metric.eq_ignore_ascii_case(HI2_HEADLINE_METRIC) {
+                        return None;
+                    }
+                    row.f64("value")? / HI2_LIVE_SCALE
+                }
+                None => row.f64("hi2").or_else(|| row.f64("concentration"))?,
+            };
             Some(Hi2Point {
                 ts,
                 secid,
@@ -338,7 +365,7 @@ pub fn parse_orderstats(table: &IssTable) -> Vec<OrderstatsPoint> {
         .collect()
 }
 
-/// OHLCV-свеча из задела под историю (`MoexAlgo::candles`, `(unverified)`).
+/// OHLCV-свеча стандартного ISS-ресурса `.../candles` (живой контракт T14).
 /// Не связана с доменной `SuperCandle` — обычная биржевая свеча без
 /// разбивки покупки/продажи.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -351,12 +378,19 @@ pub struct IssCandle {
     pub volume: f64,
 }
 
-/// Разобрать таблицу свечей (`(unverified)`, см. модульную документацию).
+/// Разобрать таблицу свечей. Живой контракт (T14, 2026-07-17): блок
+/// `candles`, колонки `open/close/high/low/value/volume/begin/end`; время —
+/// `begin` строкой `YYYY-MM-DD HH:MM:SS` (MSK). `row_ts` оставлен первым
+/// кандидатом на случай иных ресурсов (`ts`/`tradedate`+`tradetime`).
 pub fn parse_candles(table: &IssTable) -> Vec<IssCandle> {
     table
         .rows_iter()
         .filter_map(|row| {
-            let ts = row_ts(&row)?;
+            let ts = row_ts(&row).or_else(|| {
+                let begin = row.str("begin")?;
+                let (date, time) = begin.split_once(' ').unwrap_or((begin, "00:00:00"));
+                moex_datetime_to_unix(date, time)
+            })?;
             Some(IssCandle {
                 ts,
                 open: row.f64("open").unwrap_or(0.0),
@@ -460,20 +494,58 @@ mod tests {
     #[test]
     fn parse_futoi_from_fixture() {
         let v = fixture("futoi_fo.json");
+        // Живой блок называется `futoi` (не `data`), инструмент — `ticker`.
         let t = IssTable::find(&v, &["data", "futoi"]).unwrap();
         let points = parse_futoi(&t);
-        assert!(!points.is_empty());
+        // 3 строки, но группа `UNKNOWN` пропускается — остаются FIZ/YUR.
+        assert_eq!(points.len(), 2);
+        assert!(points.iter().all(|p| p.secid == "RTS"));
         assert!(points.iter().any(|p| p.clgroup == ClientGroup::Fiz));
         assert!(points.iter().any(|p| p.clgroup == ClientGroup::Yur));
+        // Живые short-позиции отрицательные — знак сохраняется как есть.
+        assert!(points.iter().all(|p| p.pos_short < 0.0));
     }
 
     #[test]
-    fn parse_hi2_from_fixture() {
+    fn parse_hi2_from_fixture_takes_headline_metric_of_long_format() {
         let v = fixture("hi2_eq.json");
         let t = IssTable::find(&v, &["data", "hi2"]).unwrap();
         let points = parse_hi2(&t);
-        assert!(!points.is_empty());
-        assert!(points[0].concentration >= 0.0);
+        // 5 строк длинного формата, но метрика-заголовок (`hhi_volume`) —
+        // только у двух; остальные `hhi_*`-разрезы пропускаются.
+        assert_eq!(points.len(), 2);
+        // Живая шкала 0..10_000 нормируется к доле 0..1.
+        assert!((points[0].concentration - 0.182).abs() < 1e-12);
+        assert!((points[1].concentration - 0.201).abs() < 1e-12);
+    }
+
+    #[test]
+    fn parse_hi2_wide_format_fallback() {
+        // Широкий формат (синтетика до живой сверки) остаётся фолбэком.
+        let v = serde_json::json!({
+            "data": {
+                "columns": ["secid", "tradedate", "tradetime", "hi2"],
+                "data": [["SBER", "2024-01-15", "10:00:00", 0.182]]
+            }
+        });
+        let t = IssTable::find(&v, &["data"]).unwrap();
+        let points = parse_hi2(&t);
+        assert_eq!(points.len(), 1);
+        assert!((points[0].concentration - 0.182).abs() < 1e-12);
+    }
+
+    #[test]
+    fn parse_candles_from_fixture_reads_begin_as_msk() {
+        let v = fixture("candles_eq.json");
+        let t = IssTable::find(&v, &["candles", "data"]).unwrap();
+        let candles = parse_candles(&t);
+        assert_eq!(candles.len(), 2);
+        // `begin` = 2026-07-16 07:00:00 MSK → 04:00:00 UTC.
+        assert_eq!(
+            candles[0].ts,
+            moex_datetime_to_unix("2026-07-16", "07:00:00").unwrap()
+        );
+        assert!(candles[0].open > 0.0 && candles[0].volume > 0.0);
     }
 
     #[test]
