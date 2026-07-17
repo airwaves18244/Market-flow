@@ -18,6 +18,7 @@ use domain::TimeFrame;
 use storage::ingest::BatchCursor;
 use storage::StorageError;
 
+use crate::cancel::CancelFlag;
 use crate::state::AppState;
 
 /// Ошибка такта ингеста: сбой источника или хранилища.
@@ -117,11 +118,17 @@ impl<M: MarketData> IngestService<M> {
     /// Бесконечный цикл планировщика: такт каждые `config.interval`.
     ///
     /// Ошибки отдельного такта логируются и не останавливают цикл (сетевые сбои
-    /// транзиентны). Завершается только при отмене задачи.
-    pub async fn run(mut self) {
+    /// транзиентны). Завершается по кооперативной отмене (`cancel`) — флаг
+    /// проверяется на каждом пробуждении таймера, до и после такта, поэтому
+    /// цикл не начинает и не оставляет недописанный такт после отмены.
+    pub async fn run(mut self, cancel: CancelFlag) {
         let mut ticker = tokio::time::interval(self.config.interval);
         loop {
             ticker.tick().await;
+            if cancel.is_cancelled() {
+                tracing::debug!("такт ингеста остановлен: отмена");
+                break;
+            }
             match self.tick(now_unix()).await {
                 Ok(n) => tracing::debug!(bars = n, "такт ингеста завершён"),
                 Err(e) => tracing::warn!(error = %e, "такт ингеста завершился ошибкой"),
@@ -287,5 +294,29 @@ mod tests {
         let written = svc.tick(1_000_000).await.unwrap();
         assert_eq!(written, 2); // только один символ × 2 бара
         assert_eq!(svc.source.bars_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn run_stops_promptly_once_cancelled() {
+        // Флаг отменён ещё до старта цикла: `run` должен выйти на первом же
+        // пробуждении таймера, не сделав ни одного такта (см. `bars_calls`).
+        let state = state_with_migrated_store();
+        let mut fast_cfg = cfg(10);
+        fast_cfg.interval = Duration::from_millis(5);
+        let svc = IngestService::new(
+            FakeSource::new(),
+            Arc::clone(&state),
+            vec!["SBER@MISX".into()],
+            fast_cfg,
+        );
+
+        let cancel = crate::cancel::CancelFlag::new();
+        cancel.cancel();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(2), svc.run(cancel)).await;
+        assert!(
+            outcome.is_ok(),
+            "run() должен завершиться сам по отмене, не по таймауту теста"
+        );
     }
 }

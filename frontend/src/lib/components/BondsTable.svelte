@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fmtFixed } from "../format";
   import type { BondIssuerDto } from "../types";
 
   let { issuers = [] }: { issuers: BondIssuerDto[] } = $props();
@@ -6,7 +7,7 @@
   // Доходность/дюрация приходят 0, пока нет источника купонов/погашения
   // (см. api::bonds_rollup). Показываем «—» вместо ложного 0.00.
   function fmt(v: number): string {
-    return v > 0 ? v.toFixed(2) : "—";
+    return v > 0 ? fmtFixed(v, 2) : "—";
   }
 </script>
 

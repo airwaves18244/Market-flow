@@ -21,3 +21,4 @@ frontend/.svelte-kit/
 /.idea/
 /.vscode/
 .DS_Store
+.claude/worktrees/

@@ -4,6 +4,7 @@
   import InstrumentList from "./InstrumentList.svelte";
   import DeltaChart from "./DeltaChart.svelte";
   import { ipc } from "../ipc";
+  import { fmtRu } from "../format";
   import type {
     BarPoint,
     FootprintBarDto,
@@ -76,7 +77,6 @@
 
   onMount(load);
 
-  const fmt = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 </script>
 
 <main class="grid">
@@ -104,7 +104,7 @@
           <tr>
             <td><span style="color:{robotMeta[s.kind]?.color ?? '#8b98a9'}">●</span> {robotMeta[s.kind]?.label ?? s.kind}</td>
             <td>{new Date(s.ts * 1000).toLocaleDateString("ru-RU")}</td>
-            <td class="num">{fmt(s.price)}</td>
+            <td class="num">{fmtRu(s.price)}</td>
             <td>{s.note}</td>
           </tr>
         {/each}
@@ -124,10 +124,10 @@
         <tbody>
           {#each [...focusBar.cells].sort((a, b) => b.price - a.price) as c (c.price)}
             <tr>
-              <td class="num">{fmt(c.price)}</td>
-              <td class="num down">{fmt(c.bidVolume)}</td>
-              <td class="num up">{fmt(c.askVolume)}</td>
-              <td class="num" class:up={c.delta > 0} class:down={c.delta < 0}>{fmt(c.delta)}</td>
+              <td class="num">{fmtRu(c.price)}</td>
+              <td class="num down">{fmtRu(c.bidVolume)}</td>
+              <td class="num up">{fmtRu(c.askVolume)}</td>
+              <td class="num" class:up={c.delta > 0} class:down={c.delta < 0}>{fmtRu(c.delta)}</td>
             </tr>
           {/each}
         </tbody>

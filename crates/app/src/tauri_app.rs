@@ -339,6 +339,18 @@ fn algo_hi2(
 }
 
 #[tauri::command]
+fn algo_hi2_ranking(
+    state: State<AppState>,
+    market: String,
+    secids: Vec<String>,
+    limit: usize,
+) -> CmdResult<Vec<Hi2Dto>> {
+    state
+        .algo_hi2_ranking(&market, &secids, limit)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn algo_mega_alerts(
     state: State<AppState>,
     market: String,
@@ -718,6 +730,7 @@ pub fn run() {
             algo_tradestats,
             algo_futoi,
             algo_hi2,
+            algo_hi2_ranking,
             algo_mega_alerts,
             settings_get,
             settings_set,

@@ -11,6 +11,7 @@
 
 pub mod algo;
 pub mod backtest;
+pub mod calendar;
 pub mod delta;
 pub mod history;
 pub mod keyactivity;
