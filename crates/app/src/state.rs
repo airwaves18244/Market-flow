@@ -426,6 +426,10 @@ impl AppState {
     const ALGO_WINDOW: usize = 20;
     /// Порог z-score всплеска концентрации HI2 по умолчанию.
     const ALGO_HI2_THRESHOLD: f64 = 3.0;
+    /// Порог z-score аномального объёма свечи Super Candles по умолчанию —
+    /// совпадает с `MegaThresholds::default().vol_z`, чтобы подсветка
+    /// `isAnomVol` не расходилась по смыслу с `volume_spike` в Mega Alerts.
+    const ALGO_VOL_THRESHOLD: f64 = 3.0;
 
     /// Свечи Super Candles (`tradestats`) инструмента `secid` на рынке `market`.
     pub fn algo_tradestats(
@@ -435,7 +439,17 @@ impl AppState {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<TradestatsDto>, StorageError> {
-        self.read(|s| api::algo_tradestats(s, market, secid, from_ts, to_ts))
+        self.read(|s| {
+            api::algo_tradestats(
+                s,
+                market,
+                secid,
+                from_ts,
+                to_ts,
+                Self::ALGO_WINDOW,
+                Self::ALGO_VOL_THRESHOLD,
+            )
+        })
     }
 
     /// Точки FUTOI инструмента `secid` на рынке `market` (обычно `fo`).

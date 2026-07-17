@@ -3,6 +3,7 @@
   import Panel from "./Panel.svelte";
   import InstrumentList from "./InstrumentList.svelte";
   import { ipc, onFill } from "../ipc";
+  import { fmtRu } from "../format";
   import type {
     AccountDto,
     InstrumentDto,
@@ -108,7 +109,6 @@
     });
   });
 
-  const fmt = (n: number) => n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
   const maxSize = $derived(
     Math.max(1, ...(book?.bids ?? []).map((l) => l.size), ...(book?.asks ?? []).map((l) => l.size)),
   );
@@ -121,18 +121,18 @@
         {#each [...book.asks].reverse() as lvl (lvl.price)}
           <button class="row ask" onclick={() => pickPrice(lvl.price, true)}>
             <span class="depth ask-depth" style="width:{(lvl.size / maxSize) * 100}%"></span>
-            <span class="px">{fmt(lvl.price)}</span>
-            <span class="sz num">{fmt(lvl.size)}</span>
+            <span class="px">{fmtRu(lvl.price)}</span>
+            <span class="sz num">{fmtRu(lvl.size)}</span>
           </button>
         {/each}
         <div class="spread">
-          спред {book.asks[0] && book.bids[0] ? fmt(book.asks[0].price - book.bids[0].price) : "—"}
+          спред {book.asks[0] && book.bids[0] ? fmtRu(book.asks[0].price - book.bids[0].price) : "—"}
         </div>
         {#each book.bids as lvl (lvl.price)}
           <button class="row bid" onclick={() => pickPrice(lvl.price, false)}>
             <span class="depth bid-depth" style="width:{(lvl.size / maxSize) * 100}%"></span>
-            <span class="px">{fmt(lvl.price)}</span>
-            <span class="sz num">{fmt(lvl.size)}</span>
+            <span class="px">{fmtRu(lvl.price)}</span>
+            <span class="sz num">{fmtRu(lvl.size)}</span>
           </button>
         {/each}
       </div>
@@ -178,10 +178,10 @@
   <Panel title="Счёт">
     {#if account}
       <div class="account">
-        <div><span>Наличность</span><b class="num">{fmt(account.cash)}</b></div>
+        <div><span>Наличность</span><b class="num">{fmtRu(account.cash)}</b></div>
         <div>
           <span>Реализ. P&L</span>
-          <b class="num" class:up={account.realizedPnl > 0} class:down={account.realizedPnl < 0}>{fmt(account.realizedPnl)}</b>
+          <b class="num" class:up={account.realizedPnl > 0} class:down={account.realizedPnl < 0}>{fmtRu(account.realizedPnl)}</b>
         </div>
       </div>
     {/if}
@@ -200,8 +200,8 @@
         {#each positions as p (p.symbol)}
           <tr>
             <td>{p.symbol}</td>
-            <td class="num" class:up={p.qty > 0} class:down={p.qty < 0}>{fmt(p.qty)}</td>
-            <td class="num">{fmt(p.avgPrice)}</td>
+            <td class="num" class:up={p.qty > 0} class:down={p.qty < 0}>{fmtRu(p.qty)}</td>
+            <td class="num">{fmtRu(p.avgPrice)}</td>
           </tr>
         {/each}
         {#if positions.length === 0}
@@ -222,8 +222,8 @@
             <td>{o.id}</td>
             <td class:up={o.side === "buy"} class:down={o.side === "sell"}>{o.side === "buy" ? "Покупка" : "Продажа"}</td>
             <td>{o.kind}</td>
-            <td class="num">{fmt(o.qty)}</td>
-            <td class="num">{o.price !== null ? fmt(o.price) : "—"}</td>
+            <td class="num">{fmtRu(o.qty)}</td>
+            <td class="num">{o.price !== null ? fmtRu(o.price) : "—"}</td>
             <td>{o.status}</td>
             <td><button class="cancel" onclick={() => cancel(o.id)}>✕</button></td>
           </tr>
