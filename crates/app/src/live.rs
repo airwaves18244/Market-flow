@@ -8,7 +8,7 @@
 //! фичей `keyring` — из ОС-keyring. Он **не** попадает в репозиторий и логи.
 //!
 //! Требования к окружению:
-//! - доступ к `trade-api.finam.ru:443` (в Claude Code on the web — добавить хост
+//! - доступ к `tradeapi.finam.ru:443` (в Claude Code on the web — добавить хост
 //!   в network egress allowlist окружения);
 //! - валидный `FINAM_API_SECRET` (или секрет в keyring).
 

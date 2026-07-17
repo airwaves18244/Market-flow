@@ -94,7 +94,7 @@ gRPC-клиент Finam за фичей `grpc` реализован полнос
 (нужны egress-доступ и секрет) — см. `ROADMAP.md`/`SPEC_0-12.md`/`TASKS_list.md`.
 
 > **Доступ к API.** Боевой режим требует сетевого доступа к
-> `trade-api.finam.ru:443`. В Claude Code on the web добавьте этот хост в
+> `tradeapi.finam.ru:443`. В Claude Code on the web добавьте этот хост в
 > network egress allowlist окружения, иначе вызовы вернут
 > «Host not in allowlist».
 
@@ -137,7 +137,7 @@ cargo tauri build
 FINAM_API_SECRET=… cargo run -p data --features grpc --example live_check
 
 # Боевой режим: live-подключение и ингест баров вотчлиста в хранилище.
-# Нужен сетевой доступ к trade-api.finam.ru:443 и валидный секрет.
+# Нужен сетевой доступ к tradeapi.finam.ru:443 и валидный секрет.
 FINAM_API_SECRET=… cargo run -p app --features live
 # (опц.) сохранить секрет в ОС-keyring один раз, дальше запускать без env:
 FINAM_API_SECRET=… cargo run -p app --features live,keyring -- --store-secret
@@ -146,7 +146,7 @@ cargo run -p app --features live,keyring
 
 ## Finam Trade API
 
-- gRPC (+ REST-gateway): `https://trade-api.finam.ru:443` (HTTP/2, TLS).
+- gRPC (+ REST-gateway): `https://tradeapi.finam.ru:443` (HTTP/2, TLS).
 - Сервисы: `AuthService`, `AssetsService`, `MarketDataService` (в v1),
   `AccountsService` (не используется).
 - Лимит ~200 запросов/мин на метод; техокно 05:00–06:15 MSK; стрим обрывается

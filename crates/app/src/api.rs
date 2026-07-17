@@ -1933,7 +1933,9 @@ mod tests {
     ) -> data::moex::OptionQuote {
         data::moex::OptionQuote {
             secid: secid.to_owned(),
-            underlying: "RIH5".to_owned(),
+            underlying: "RTS".to_owned(),
+            underlying_secid: Some("RIH5".to_owned()),
+            underlying_settle: None,
             expiration_ts,
             strike,
             kind,

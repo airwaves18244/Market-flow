@@ -6,26 +6,29 @@
 //! Публичные ресурсы ISS securities/marketdata не требуют авторизации, поэтому
 //! [`MoexIss`] не хранит секрет (в отличие от [`super::client::MoexAlgo`]).
 //!
-//! **Статус: `(unverified)`.** Egress к `iss.moex.com` в этой среде закрыт —
-//! точные имена блоков-обёрток (`securities`/`marketdata`), набор колонок,
-//! механизм фильтрации по базовому активу и форма пагинации не сверены живым
-//! ответом. См. `crates/data/tests/fixtures/moex/README.md` (раздел
-//! «Опционная доска») — там же процедура сверки и текущие допущения:
-//! - блоки ответа — `securities` (карточки инструментов) и `marketdata`
-//!   (котировки/IV/OI), совместно в одном ответе `securities.json` при
-//!   `iss.only=securities,marketdata` (общая практика ISS);
-//! - фильтрация по базовому активу (`underlying`) выполняется **на стороне
-//!   клиента** (сравнение колонки `ASSETCODE`/`underlying` без учёта
-//!   регистра) — какие query-параметры ISS принимает для серверной
-//!   фильтрации, не подтверждено, а клиентская фильтрация работает при любом
-//!   их наборе (сервер просто возвращает более широкий набор строк);
-//! - пагинация — курсор `securities.cursor` (как у прочих ресурсов ISS, см.
-//!   [`super::parse::IssCursor`]), `marketdata` собирается по тем же
-//!   страницам без отдельного курсора;
-//! - форвард базового актива — последняя цена (`LAST`, иначе `SETTLEPRICE`)
-//!   фьючерса-андерлаинга с рынка `forts` (`engines/futures/markets/forts`).
-//!   Не найден — не ошибка: [`OptionsBoardSnapshot::forward`] остаётся
-//!   `None`, вызывающая сторона (`app`) подставляет форвард из настроек/входа.
+//! **Статус: сверено живым ответом ISS (T14, 2026-07-17).** Подтверждено и
+//! зафиксировано в фикстурах (`crates/data/tests/fixtures/moex/README.md`,
+//! раздел «Опционная доска»):
+//! - блоки ответа — `securities` и `marketdata` в одном ответе
+//!   `securities.json` при `iss.only=securities,marketdata`; колонки —
+//!   ЗАГЛАВНЫМИ (`SECID`, `ASSETCODE`, ...), доступ по имени без учёта
+//!   регистра это покрывает;
+//! - в живом `marketdata` **нет** колонок `IV`/`THEORPRICE` — IV всегда
+//!   решается из цены (`bid`/`ask` mid, иначе `LAST`); поля
+//!   [`OptionQuote::iv`]/[`OptionQuote::theor_price`] остаются мягкими на
+//!   случай появления расчёта биржи в ответе;
+//! - серверная фильтрация по базовому активу — параметр `assets=<код>`
+//!   (сверено: без него сервер отдаёт весь рынок, ~34 тыс. строк / ~19 МБ);
+//!   клиентская фильтрация по `ASSETCODE` сохранена как страховка;
+//! - без фильтра ответ приходит **одной страницей без курсора** —
+//!   пагинация ([`super::parse::IssCursor`]) остаётся защитным клапаном;
+//! - `ASSETCODE` — код актива (`AFLT`), а SECID фьючерса-андерлаинга — в
+//!   колонке `UNDERLYINGASSET` (`AFU6`): запрос `forts/securities/{secid}`
+//!   работает только по SECID (по коду актива — 0 строк). Форвард:
+//!   `LAST`/`SETTLEPRICE` фьючерса с рынка `forts`, иначе
+//!   `UNDERLYINGSETTLEPRICE` из `securities` доски. Не найден — не ошибка:
+//!   [`OptionsBoardSnapshot::forward`] остаётся `None`, вызывающая сторона
+//!   (`app`) подставляет форвард из настроек/входа.
 
 use std::collections::HashMap;
 
@@ -53,8 +56,14 @@ const MAX_PAGES: u32 = 1000;
 pub struct OptionQuote {
     /// Код инструмента (SECID).
     pub secid: String,
-    /// Код базового актива (обычно фьючерс, ASSETCODE).
+    /// Код базового актива (`ASSETCODE`, например `AFLT`/`RTS`).
     pub underlying: String,
+    /// SECID фьючерса-андерлаинга (`UNDERLYINGASSET`, например `AFU6`) —
+    /// именно по нему работает запрос `forts/securities/{secid}`.
+    pub underlying_secid: Option<String>,
+    /// Расчётная цена андерлаинга из доски (`UNDERLYINGSETTLEPRICE`) —
+    /// фолбэк форварда, когда рынок `forts` недоступен/пуст.
+    pub underlying_settle: Option<f64>,
     /// Дата экспирации серии, unix-секунды UTC (00:00 МСК даты исполнения).
     pub expiration_ts: i64,
     /// Страйк.
@@ -159,6 +168,8 @@ pub fn parse_options_board(
             Some(OptionQuote {
                 secid,
                 underlying: asset.to_owned(),
+                underlying_secid: row.str("underlyingasset").map(str::to_owned),
+                underlying_settle: row.f64("underlyingsettleprice"),
                 expiration_ts,
                 strike,
                 kind,
@@ -306,8 +317,11 @@ impl<T: HttpTransport> MoexIss<T> {
     /// Доска опционов по коду базового актива (без форварда — см.
     /// [`MoexIss::options_board_snapshot`]).
     pub async fn options_board(&self, underlying: &str) -> Result<Vec<OptionQuote>, DataError> {
+        // `assets=<код>` — серверная фильтрация по базовому активу (сверено
+        // живым ответом: без неё сервер отдаёт весь рынок, ~19 МБ); клиентская
+        // фильтрация в `parse_options_board` сохранена как страховка.
         let url = format!(
-            "{}/engines/futures/markets/options/securities.json?iss.only=securities,marketdata&iss.meta=off",
+            "{}/engines/futures/markets/options/securities.json?iss.only=securities,marketdata&iss.meta=off&assets={underlying}",
             self.base_url
         );
         let (securities, marketdata) = self.fetch_board_pages(&url).await?;
@@ -319,8 +333,11 @@ impl<T: HttpTransport> MoexIss<T> {
     }
 
     /// Лучшая попытка определить форвард как последнюю цену фьючерса-
-    /// андерлаинга (рынок `forts`). `Ok(None)`, если данные недоступны —
-    /// не ошибка (см. модульную документацию).
+    /// андерлаинга (рынок `forts`). Передавать нужно **SECID фьючерса**
+    /// (`UNDERLYINGASSET`, например `AFU6`), не код актива (`AFLT`) — по коду
+    /// актива ресурс возвращает 0 строк (сверено живым ответом).
+    /// `Ok(None)`, если данные недоступны — не ошибка (см. модульную
+    /// документацию).
     pub async fn underlying_forward(&self, underlying: &str) -> Result<Option<f64>, DataError> {
         let url = format!(
             "{}/engines/futures/markets/forts/securities/{underlying}.json?iss.only=marketdata&iss.meta=off",
@@ -341,12 +358,21 @@ impl<T: HttpTransport> MoexIss<T> {
     /// Снимок доски: котировки + форвард. Ошибка определения форварда не
     /// проваливает весь вызов (см. [`MoexIss::underlying_forward`]) — только
     /// ошибка загрузки самой доски возвращается вызывающей стороне.
+    ///
+    /// Форвард (по убыванию приоритета): `LAST`/`SETTLEPRICE` фьючерса с
+    /// рынка `forts` по SECID из `UNDERLYINGASSET`; иначе
+    /// `UNDERLYINGSETTLEPRICE` из самой доски; иначе `None`.
     pub async fn options_board_snapshot(
         &self,
         underlying: &str,
     ) -> Result<OptionsBoardSnapshot, DataError> {
         let quotes = self.options_board(underlying).await?;
-        let forward = self.underlying_forward(underlying).await.unwrap_or(None);
+        let futures_secid = quotes.iter().find_map(|q| q.underlying_secid.clone());
+        let forward = match &futures_secid {
+            Some(secid) => self.underlying_forward(secid).await.unwrap_or(None),
+            None => None,
+        };
+        let forward = forward.or_else(|| quotes.iter().find_map(|q| q.underlying_settle));
         Ok(OptionsBoardSnapshot { quotes, forward })
     }
 }
@@ -367,7 +393,9 @@ mod tests {
     fn quote(strike: f64, kind: OptionType) -> OptionQuote {
         OptionQuote {
             secid: format!("Q{strike}"),
-            underlying: "RIH5".to_owned(),
+            underlying: "RTS".to_owned(),
+            underlying_secid: Some("RIH5".to_owned()),
+            underlying_settle: None,
             expiration_ts: 1_000,
             strike,
             kind,
@@ -387,16 +415,25 @@ mod tests {
         let v = fixture("options_board.json");
         let securities = IssTable::find(&v, &["securities"]).unwrap();
         let marketdata = IssTable::find(&v, &["marketdata"]).unwrap();
-        let quotes = parse_options_board(&securities, Some(&marketdata), "RIH5");
+        let quotes = parse_options_board(&securities, Some(&marketdata), "RTS");
 
-        // 4 валидные строки RIH5 (5-я — SiH5, 6-я — без страйка, отбрасываются).
+        // 4 валидные строки RTS (5-я — Si, 6-я — без страйка, отбрасываются).
         assert_eq!(quotes.len(), 4);
-        assert!(quotes.iter().all(|q| q.underlying == "RIH5"));
+        assert!(quotes.iter().all(|q| q.underlying == "RTS"));
+        // SECID фьючерса и расчётная цена андерлаинга — из живого контракта.
+        assert!(quotes
+            .iter()
+            .all(|q| q.underlying_secid.as_deref() == Some("RIH5")));
+        assert!(quotes.iter().all(|q| q.underlying_settle == Some(50_500.0)));
 
-        let itm_call = quotes.iter().find(|q| q.strike == 50_000.0).unwrap();
-        assert_eq!(itm_call.kind, OptionType::Call);
+        let itm_call = quotes
+            .iter()
+            .find(|q| q.strike == 50_000.0 && q.kind == OptionType::Call)
+            .unwrap();
         assert_eq!(itm_call.bid, Some(2500.0));
-        assert_eq!(itm_call.iv, Some(0.32));
+        // Живой marketdata не содержит IV/THEORPRICE — поля мягко пустые.
+        assert_eq!(itm_call.iv, None);
+        assert_eq!(itm_call.theor_price, None);
         assert_eq!(itm_call.oi, Some(1200.0));
 
         // Пут без сделок/OI — присутствует в разборе (парсер мягкий), но
@@ -411,7 +448,7 @@ mod tests {
         let v = fixture("options_board_empty.json");
         let securities = IssTable::find(&v, &["securities"]).unwrap();
         let marketdata = IssTable::find(&v, &["marketdata"]);
-        let quotes = parse_options_board(&securities, marketdata.as_ref(), "RIH5");
+        let quotes = parse_options_board(&securities, marketdata.as_ref(), "RTS");
         assert!(quotes.is_empty());
     }
 
@@ -421,7 +458,7 @@ mod tests {
         let securities = IssTable::find(&v, &["securities"]).unwrap();
         // Без marketdata вовсе — все котировочные поля мягко пустые, но
         // разбор не падает (устойчивость к отсутствию блока).
-        let quotes = parse_options_board(&securities, None, "RIH5");
+        let quotes = parse_options_board(&securities, None, "RTS");
         assert_eq!(quotes.len(), 4);
         assert!(quotes.iter().all(|q| q.bid.is_none() && q.iv.is_none()));
     }
@@ -429,54 +466,81 @@ mod tests {
     // ── Маппинг доски → точки улыбки ─────────────────────────────────────────
 
     #[test]
-    fn board_to_smile_points_drops_illiquid_and_uses_board_iv() {
+    fn board_to_smile_points_drops_illiquid_and_computes_iv_from_mid() {
         let v = fixture("options_board.json");
         let securities = IssTable::find(&v, &["securities"]).unwrap();
         let marketdata = IssTable::find(&v, &["marketdata"]).unwrap();
-        let quotes = parse_options_board(&securities, Some(&marketdata), "RIH5");
-        let expiration_ts = moex_datetime_to_unix("2025-01-16", "00:00:00").unwrap();
-
-        let points = board_to_smile_points(&quotes, expiration_ts, 50_500.0, 0.05, 0.0);
-        // 4 разобранные строки RIH5, но неликвидный пут (нет bid/ask и OI) отброшен.
-        assert_eq!(points.len(), 3);
-
-        // Строка с готовым IV в доске — используется как есть.
-        let itm = points.iter().find(|p| p.strike == 50_000.0).unwrap();
-        assert!((itm.iv - 0.32).abs() < 1e-12);
-        assert!((itm.weight - 1200.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn board_to_smile_points_computes_iv_from_theor_price_when_missing() {
-        let v = fixture("options_board.json");
-        let securities = IssTable::find(&v, &["securities"]).unwrap();
-        let marketdata = IssTable::find(&v, &["marketdata"]).unwrap();
-        let quotes = parse_options_board(&securities, Some(&marketdata), "RIH5");
+        let quotes = parse_options_board(&securities, Some(&marketdata), "RTS");
         let expiration_ts = moex_datetime_to_unix("2025-01-16", "00:00:00").unwrap();
         let forward = 50_500.0;
         let t = 0.05;
 
         let points = board_to_smile_points(&quotes, expiration_ts, forward, t, 0.0);
-        // Строка 55000-call: нет IV в доске, но есть theor_price — решается через IV-солвер.
-        let row = quotes
-            .iter()
-            .find(|q| q.strike == 55_000.0)
-            .expect("55000 call есть в фикстуре");
-        assert!(row.iv.is_none());
-        let theor = row.theor_price.unwrap();
+        // 4 разобранные строки RTS, но неликвидный пут (нет bid/ask и OI) отброшен.
+        assert_eq!(points.len(), 3);
 
-        let point = points.iter().find(|p| p.strike == 55_000.0).unwrap();
+        // Живой marketdata не отдаёт IV — она решается из mid bid/ask.
+        let itm = points.iter().find(|p| p.strike == 50_000.0).unwrap();
         let expected_iv = implied_vol(
-            theor,
+            0.5 * (2_500.0 + 2_600.0),
             forward,
-            55_000.0,
+            50_000.0,
             t,
             0.0,
             OptionType::Call,
             PriceModel::Black76,
         )
         .unwrap();
-        assert!((point.iv - expected_iv).abs() < 1e-9);
+        assert!((itm.iv - expected_iv).abs() < 1e-9);
+        assert!((itm.weight - 1200.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn board_to_smile_points_prefers_board_iv_and_theor_price_when_present() {
+        // Живой ответ ISS этих колонок не отдаёт, но парсер сохраняет мягкую
+        // поддержку `iv`/`theorprice` на случай появления расчёта биржи.
+        let expiration_ts = 1_000;
+        let forward = 100.0;
+        let t = 0.1;
+
+        // Готовый IV из доски используется как есть.
+        let mut with_iv = quote(100.0, OptionType::Call);
+        with_iv.bid = Some(4.0);
+        with_iv.ask = Some(5.0);
+        with_iv.iv = Some(0.32);
+
+        // Без IV, но с теорценой — решается солвером из theor_price
+        // (приоритетнее mid bid/ask).
+        let mut with_theor = quote(110.0, OptionType::Call);
+        with_theor.bid = Some(1.0);
+        with_theor.ask = Some(2.0);
+        with_theor.theor_price = Some(1.4);
+        with_theor.oi = Some(10.0);
+
+        let points = board_to_smile_points(
+            &[with_iv, with_theor.clone()],
+            expiration_ts,
+            forward,
+            t,
+            0.0,
+        );
+        assert_eq!(points.len(), 2);
+
+        let p_iv = points.iter().find(|p| p.strike == 100.0).unwrap();
+        assert!((p_iv.iv - 0.32).abs() < 1e-12);
+
+        let p_theor = points.iter().find(|p| p.strike == 110.0).unwrap();
+        let expected_iv = implied_vol(
+            with_theor.theor_price.unwrap(),
+            forward,
+            110.0,
+            t,
+            0.0,
+            OptionType::Call,
+            PriceModel::Black76,
+        )
+        .unwrap();
+        assert!((p_theor.iv - expected_iv).abs() < 1e-9);
     }
 
     #[test]
@@ -596,6 +660,8 @@ mod tests {
         assert!(urls[0].starts_with(
             "https://example.invalid/iss/engines/futures/markets/options/securities.json?"
         ));
+        // Серверная фильтрация по базовому активу (сверено живым ответом).
+        assert!(urls[0].contains("assets=RIH5"));
     }
 
     #[tokio::test]
@@ -656,13 +722,15 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_keeps_quotes_when_forward_lookup_fails() {
-        // Первая страница (доска) валидна; второй вызов (форвард) — сетевая
-        // ошибка. Снимок не должен проваливаться целиком: форвард — `None`.
+        // Первая страница (доска) валидна; второй вызов (форвард по SECID
+        // фьючерса из UNDERLYINGASSET) — сетевая ошибка. Снимок не должен
+        // проваливаться целиком: форвард — `None` (UNDERLYINGSETTLEPRICE в
+        // этой доске тоже нет).
         let board_page = r#"{
-            "securities": {"columns": ["secid","assetcode","strike","optiontype","lasttradedate"],
-                "data": [["A","RIH5",100,"C","2025-01-16"]]}
+            "securities": {"columns": ["secid","assetcode","strike","optiontype","lasttradedate","underlyingasset"],
+                "data": [["A","RTS",100,"C","2025-01-16","RIH5"]]}
         }"#;
-        let (transport, _shared) = FakeTransport::with_results(vec![
+        let (transport, shared) = FakeTransport::with_results(vec![
             Ok(board_page),
             Err(DataError::Transport("сеть недоступна".into())),
         ]);
@@ -674,8 +742,31 @@ mod tests {
             ),
             "https://example.invalid/iss",
         );
-        let snapshot = c.options_board_snapshot("RIH5").await.unwrap();
+        let snapshot = c.options_board_snapshot("RTS").await.unwrap();
         assert_eq!(snapshot.quotes.len(), 1);
         assert_eq!(snapshot.forward, None);
+
+        // Форвард запрошен по SECID фьючерса (RIH5), а не по коду актива (RTS)
+        // — по коду актива forts возвращает 0 строк (сверено живым ответом).
+        let urls = shared.captured_urls.lock().unwrap().clone();
+        assert_eq!(urls.len(), 2);
+        assert!(urls[1].contains("/forts/securities/RIH5.json"));
+    }
+
+    #[tokio::test]
+    async fn snapshot_falls_back_to_underlying_settle_when_forts_is_empty() {
+        // forts отвечает без строк — форвард берётся из UNDERLYINGSETTLEPRICE
+        // самой доски (живой контракт: колонка есть в securities).
+        let board_page = r#"{
+            "securities": {"columns": ["secid","assetcode","strike","optiontype","lasttradedate","underlyingasset","underlyingsettleprice"],
+                "data": [["A","RTS",100,"C","2025-01-16","RIH5",50500]]}
+        }"#;
+        let empty_forts =
+            r#"{"marketdata": {"columns": ["secid","last","settleprice"], "data": []}}"#;
+        let (transport, _shared) = FakeTransport::new(vec![board_page, empty_forts]);
+        let c = client(transport);
+        let snapshot = c.options_board_snapshot("RTS").await.unwrap();
+        assert_eq!(snapshot.quotes.len(), 1);
+        assert_eq!(snapshot.forward, Some(50_500.0));
     }
 }

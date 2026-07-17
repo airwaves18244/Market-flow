@@ -187,7 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Боевой режим: live-подключение к Finam (нужны egress-доступ к
-    // trade-api.finam.ru:443 и `FINAM_API_SECRET`/keyring).
+    // tradeapi.finam.ru:443 и `FINAM_API_SECRET`/keyring).
     #[cfg(feature = "live")]
     {
         // `market-terminal --store-secret` — сохранить FINAM_API_SECRET в keyring.

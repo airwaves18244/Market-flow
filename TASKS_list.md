@@ -29,7 +29,7 @@
 
 ### P1 — Egress и ключи `S.3.1`
 Добавить в network-allowlist окружения: `apim.moex.com`, `iss.moex.com`,
-`data.moex.com`, `trade-api.finam.ru`, `openrouter.ai` (и/или
+`data.moex.com`, `tradeapi.finam.ru`, `openrouter.ai` (и/или
 `api.openai.com`, `api.anthropic.com`). Убедиться, что в `.env` задан боевой
 `MOEX_ALGO_API` (и ключ LLM-провайдера, если нужен T7). Без P1 блокируются
 T2 и живые прогоны; **всё остальное делается офлайн**.
