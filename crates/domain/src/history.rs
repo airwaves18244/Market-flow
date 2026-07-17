@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::TimeFrame;
+use crate::model::{Bar, TimeFrame};
 
 /// Источник исторических данных.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -94,6 +94,24 @@ impl HistoryBar {
             oi: None,
             hi2: None,
         }
+    }
+
+    /// Минимальная свеча OHLCV из обычного бара стора (`domain::Bar`).
+    ///
+    /// Чистая конверсия без сети/БД: ALGOPACK-поля (VWAP/дисбаланс/OI/HI2)
+    /// остаются `None` — их даёт только источник MOEX ALGOPACK. Раньше эта
+    /// конверсия была продублирована в `app::feed::bar_to_history_bar` и в
+    /// `data::history::FinamHistory::load` — вынесена сюда как единственное
+    /// место, где `Bar` и `HistoryBar` встречаются (оба типа — `domain`).
+    pub fn from_bar(
+        source: DataSource,
+        secid: impl Into<String>,
+        tf: TimeFrame,
+        bar: &Bar,
+    ) -> Self {
+        Self::ohlcv(
+            source, secid, tf, bar.ts, bar.open, bar.high, bar.low, bar.close, bar.volume,
+        )
     }
 
     /// Ключ дедупликации/upsert: (source, secid, tf, ts).

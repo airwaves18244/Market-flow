@@ -10,6 +10,11 @@
 //! данных `domain` → `storage` → `dto`.
 
 mod api;
+// Кооперативная отмена фоновых циклов (`CancelFlag`) — общий примитив для
+// `history`/`ingest`/`algo_ingest`. Без внешних зависимостей (только
+// `std::sync`), поэтому доступен независимо от фич `ingest`/`moex`.
+#[allow(dead_code)]
+mod cancel;
 mod dto;
 mod settings;
 mod state;
@@ -533,12 +538,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let algo_hi = state.algo_hi2("eq", "SBER@MISX", 0, i64::MAX)?;
         let algo_mega =
             state.algo_mega_alerts("eq", &["SBER@MISX".to_string()], 0, i64::MAX, None)?;
+        // Эффективный путь «последняя точка на тикер» для сводных панелей
+        // (см. `api::algo_hi2_ranking`) — тот же контур, что и `algo_hi2`
+        // выше, но без чтения полной истории на тикер.
+        let algo_hi_rank = state.algo_hi2_ranking(
+            "eq",
+            &["SBER@MISX".to_string(), "GAZP@MISX".to_string()],
+            10,
+        )?;
         println!(
             "  algo_tradestats/futoi/hi2/mega_alerts(SBER@MISX): {}/{}/{}/{}",
             algo_ts.len(),
             algo_fu.len(),
             algo_hi.len(),
             algo_mega.len()
+        );
+        println!(
+            "  algo_hi2_ranking(eq, top10): {} тикеров",
+            algo_hi_rank.len()
         );
 
         // Фаза 11 — историзация: каталог датасетов + план дозагрузки.

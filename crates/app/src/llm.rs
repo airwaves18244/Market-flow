@@ -159,13 +159,23 @@ fn cache_key(
 
 /// Вызвать выбранного в `settings` провайдера и вернуть текст резюме.
 ///
+/// `transport` — HTTP-транспорт, закэшированный на время сессии приложения
+/// (см. [`crate::state::AppState`]): раньше `ReqwestTransport::new()`
+/// пересобирался (со своим пулом соединений и TLS-конфигурацией) на каждый
+/// вызов этой функции, теперь клиент строится один раз при старте, а сюда
+/// передаётся дешёвый `clone()`. `None` — транспорт не удалось построить при
+/// старте (практически не случается со стандартными настройками) — как и
+/// раньше, деградируем в локальный свод, не паникуя.
+///
 /// `None` возвращается, когда фича неприменима (неизвестный код провайдера
 /// или ключ нигде не найден) или сам вызов не удался (сеть/тайм-аут/ошибка
 /// формата ответа) — в обоих случаях вызывающая сторона переключается на
-/// локальный текстовый свод. Кэш-хит не требует ключа: если резюме для этого
-/// входа уже получено в этой сессии, повторный вызов провайдера не делается.
+/// локальный текстовый свод. Кэш-хит не требует ключа/транспорта: если резюме
+/// для этого входа уже получено в этой сессии, повторный вызов провайдера не
+/// делается.
 pub async fn summarize_key_activity(
     cache: &SummaryCache,
+    transport: Option<&ReqwestTransport>,
     settings: &SettingsDto,
     rows: &[KeyActivityRow],
     period: Period,
@@ -181,6 +191,7 @@ pub async fn summarize_key_activity(
     }
 
     let api_key = resolve_key(kind)?;
+    let transport = transport?.clone();
     let prompt_text = prompt::build_prompt(rows, period, PROMPT_MAX_CHARS);
     let req = LlmRequest {
         system: None,
@@ -189,7 +200,6 @@ pub async fn summarize_key_activity(
         max_tokens,
     };
 
-    let transport = ReqwestTransport::new().ok()?;
     let http = HttpClient::new(transport);
 
     let call = call_provider(kind, http, api_key, req);
@@ -331,7 +341,7 @@ mod tests {
         let cache = SummaryCache::new();
         let settings = settings_with("bogus-provider", "m1", 1000);
         let rows = vec![row("SBER")];
-        let out = summarize_key_activity(&cache, &settings, &rows, Period::H1).await;
+        let out = summarize_key_activity(&cache, None, &settings, &rows, Period::H1).await;
         assert!(out.is_none());
     }
 
@@ -345,7 +355,7 @@ mod tests {
         let cache = SummaryCache::new();
         let settings = settings_with("anthropic", "m1", 1000);
         let rows = vec![row("SBER")];
-        let out = summarize_key_activity(&cache, &settings, &rows, Period::H1).await;
+        let out = summarize_key_activity(&cache, None, &settings, &rows, Period::H1).await;
         assert!(out.is_none());
 
         if let Some(v) = prev {
@@ -373,7 +383,7 @@ mod tests {
         let prev = std::env::var("ANTHROPIC_API_KEY").ok();
         std::env::remove_var("ANTHROPIC_API_KEY");
 
-        let out = summarize_key_activity(&cache, &settings, &rows, Period::H1).await;
+        let out = summarize_key_activity(&cache, None, &settings, &rows, Period::H1).await;
         assert_eq!(out.as_deref(), Some("закэшированный текст"));
 
         if let Some(v) = prev {

@@ -17,6 +17,7 @@ use std::sync::Arc;
 use data::{AuthManager, FinamMarketData, GrpcAuthTransport, MarketData, MemSecretStore};
 use storage::{MemStore, Store};
 
+use crate::cancel::CancelFlag;
 use crate::ingest::{IngestConfig, IngestService};
 use crate::state::AppState;
 
@@ -98,7 +99,12 @@ pub async fn run(mic: &str) -> Result<(), Box<dyn std::error::Error>> {
     let symbols: Vec<String> = instruments.iter().map(|i| i.symbol.clone()).collect();
     tracing::info!(symbols = symbols.len(), "live: запуск планировщика ингеста");
     let svc = IngestService::new(md, Arc::clone(&state), symbols, IngestConfig::default());
-    svc.run().await;
+    // CLI-вход пока не даёт способа отменить извне (нет обработчика сигнала) —
+    // цикл крутится до убийства процесса, как и раньше. Флаг заведён здесь,
+    // чтобы `IngestService::run` был единообразно отменяем со своим ALGOPACK-
+    // аналогом ([`run_algo`]); подключение к Ctrl+C/Tauri-lifecycle — отдельная
+    // задача интеграции.
+    svc.run(CancelFlag::new()).await;
     Ok(())
 }
 
@@ -164,6 +170,8 @@ pub async fn run_algo(
         "live: запуск планировщика ингеста ALGOPACK"
     );
     let svc = crate::algo_ingest::AlgoIngestService::new(client, state, symbols, config);
-    svc.run().await;
+    // См. комментарий в `run` — CLI-вход пока не подключает отмену к
+    // внешнему сигналу, но `AlgoIngestService::run` уже умеет её принимать.
+    svc.run(CancelFlag::new()).await;
     Ok(())
 }

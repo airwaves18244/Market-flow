@@ -10,7 +10,7 @@
 //! (`data::MarketData`) и асинхронный планировщик живут выше, в `app`. Сюда
 //! приходят уже доменные типы.
 
-use domain::algo::{FutoiPoint, Hi2Point, SuperCandle};
+use domain::algo::{FutoiPoint, Hi2Point, ObstatsPoint, OrderstatsPoint, SuperCandle};
 use domain::history::{missing_ranges, Catalog, DataSource, DatasetMeta, HistoryBar, TimeRange};
 use domain::{Bar, Instrument, TimeFrame, Trade};
 use serde::{Deserialize, Serialize};
@@ -81,6 +81,31 @@ pub struct AlgoObstatsRecord {
     pub imbalance_val_bbo: f64,
 }
 
+impl AlgoObstatsRecord {
+    /// Построить запись хранилища из доменной точки `obstats` (все поля —
+    /// мягкий `Option`, см. [`ObstatsPoint`]): отсутствующая метрика
+    /// схлопывается в `0.0`, как и у других алгопак-датасетов, где домен пока
+    /// не выделен (`tradestats`/`futoi`/`hi2` уже обязательны, `obstats`/
+    /// `orderstats` — нет, форма колонок ISS не сверена по живому ответу).
+    pub fn from_point(market: &str, p: &ObstatsPoint) -> Self {
+        Self {
+            secid: p.secid.clone(),
+            ts: p.ts,
+            market: market.to_string(),
+            spread_bbo: p.spread_bbo.unwrap_or(0.0),
+            spread_lv10: p.spread_lv10.unwrap_or(0.0),
+            levels_b: p.levels_b.unwrap_or(0.0),
+            levels_s: p.levels_s.unwrap_or(0.0),
+            vol_b: p.vol_b.unwrap_or(0.0),
+            vol_s: p.vol_s.unwrap_or(0.0),
+            val_b: p.val_b.unwrap_or(0.0),
+            val_s: p.val_s.unwrap_or(0.0),
+            imbalance_vol_bbo: p.volume_imbalance().unwrap_or(0.0),
+            imbalance_val_bbo: p.value_imbalance().unwrap_or(0.0),
+        }
+    }
+}
+
 /// Запись датасета ALGOPACK `orderstats` (статистика заявок): постановка и
 /// снятие заявок с разбивкой на покупку/продажу.
 ///
@@ -112,6 +137,31 @@ pub struct AlgoOrderstatsRecord {
     /// Объём снятых заявок.
     pub cancel_vol_b: f64,
     pub cancel_vol_s: f64,
+}
+
+impl AlgoOrderstatsRecord {
+    /// Построить запись хранилища из доменной точки `orderstats` (мягкий
+    /// `Option`, см. [`OrderstatsPoint`]) — отсутствующая метрика в `0.0`, как
+    /// у [`AlgoObstatsRecord::from_point`].
+    pub fn from_point(market: &str, p: &OrderstatsPoint) -> Self {
+        Self {
+            secid: p.secid.clone(),
+            ts: p.ts,
+            market: market.to_string(),
+            put_orders_b: p.put_orders_b.unwrap_or(0.0),
+            put_orders_s: p.put_orders_s.unwrap_or(0.0),
+            put_val_b: p.put_val_b.unwrap_or(0.0),
+            put_val_s: p.put_val_s.unwrap_or(0.0),
+            put_vol_b: p.put_vol_b.unwrap_or(0.0),
+            put_vol_s: p.put_vol_s.unwrap_or(0.0),
+            cancel_orders_b: p.cancel_orders_b.unwrap_or(0.0),
+            cancel_orders_s: p.cancel_orders_s.unwrap_or(0.0),
+            cancel_val_b: p.cancel_val_b.unwrap_or(0.0),
+            cancel_val_s: p.cancel_val_s.unwrap_or(0.0),
+            cancel_vol_b: p.cancel_vol_b.unwrap_or(0.0),
+            cancel_vol_s: p.cancel_vol_s.unwrap_or(0.0),
+        }
+    }
 }
 
 /// Персистентный слой: ингест рыночных данных и аналитические запросы.
@@ -234,6 +284,16 @@ pub trait Store {
         from_ts: i64,
         to_ts: i64,
     ) -> Result<Vec<Hi2Point>, StorageError>;
+
+    /// Последняя (по `ts`) точка HI2 инструмента `secid` на рынке `market`;
+    /// `None`, если по ключу нет ни одной точки.
+    ///
+    /// Отдельный метод, а не `algo_hi2(..).last()` — реализации читают только
+    /// последнюю строку по ключу, не поднимая всю историю: панели вроде
+    /// ранжирования по концентрации (T11, `MoexAlgoTab`) опрашивают вотчлист
+    /// из десятка тикеров, и раньше каждый такой запрос тянул полный диапазон
+    /// ради последней точки.
+    fn algo_hi2_latest(&self, market: &str, secid: &str) -> Result<Option<Hi2Point>, StorageError>;
 
     /// Вставить/обновить записи OBSTATS (`algo_obstats`). Идемпотентно по
     /// ключу (secid, ts, market). Возвращает число строк.

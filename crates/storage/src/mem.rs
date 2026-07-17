@@ -267,6 +267,14 @@ impl Store for MemStore {
             .collect())
     }
 
+    fn algo_hi2_latest(&self, market: &str, secid: &str) -> Result<Option<Hi2Point>, StorageError> {
+        Ok(self
+            .algo_hi2
+            .get(&(market.to_string(), secid.to_string()))
+            .and_then(|m| m.values().next_back())
+            .cloned())
+    }
+
     fn insert_algo_obstats(
         &mut self,
         records: &[AlgoObstatsRecord],
@@ -677,6 +685,27 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert!((got[0].concentration - 0.9).abs() < 1e-12);
         assert!(s.algo_hi2("stock", "GAZP", 0, 9).unwrap().is_empty());
+    }
+
+    #[test]
+    fn algo_hi2_latest_returns_last_point_without_full_range() {
+        let mut s = MemStore::new();
+        let p = |ts: i64, c: f64| Hi2Point {
+            ts,
+            secid: "SBER".into(),
+            concentration: c,
+        };
+        assert_eq!(s.algo_hi2_latest("stock", "SBER").unwrap(), None);
+
+        s.insert_algo_hi2("stock", &[p(1, 0.2), p(3, 0.4), p(2, 0.3)])
+            .unwrap();
+        let latest = s.algo_hi2_latest("stock", "SBER").unwrap().unwrap();
+        assert_eq!(latest.ts, 3);
+        assert!((latest.concentration - 0.4).abs() < 1e-12);
+
+        // Изоляция по рынку/тикеру — как и у algo_hi2.
+        assert_eq!(s.algo_hi2_latest("stock", "GAZP").unwrap(), None);
+        assert_eq!(s.algo_hi2_latest("fo", "SBER").unwrap(), None);
     }
 
     fn obstats(ts: i64, secid: &str, market: &str, spread: f64) -> AlgoObstatsRecord {
