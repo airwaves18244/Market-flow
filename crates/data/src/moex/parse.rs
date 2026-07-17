@@ -190,7 +190,7 @@ fn row_ts(row: &RowView<'_>) -> Option<i64> {
 
 /// Перевести `YYYY-MM-DD` + `HH:MM:SS` московского времени (UTC+3, без
 /// перевода часов) в unix-секунды UTC. Без внешней библиотеки дат — по
-/// алгоритму Ховарда Хинанта (`days_from_civil`).
+/// алгоритму Ховарда Хинанта ([`domain::calendar::days_from_civil`]).
 pub fn moex_datetime_to_unix(date: &str, time: &str) -> Option<i64> {
     const MSK_OFFSET_SECS: i64 = 3 * 3600;
     let mut dp = date.splitn(3, '-');
@@ -201,21 +201,8 @@ pub fn moex_datetime_to_unix(date: &str, time: &str) -> Option<i64> {
     let hh: i64 = tp.next()?.parse().ok()?;
     let mm: i64 = tp.next()?.parse().ok()?;
     let ss: i64 = tp.next().unwrap_or("0").trim().parse().ok()?;
-    let days = days_from_civil(y, m, d);
+    let days = domain::calendar::days_from_civil(y, m, d);
     Some(days * 86_400 + hh * 3600 + mm * 60 + ss - MSK_OFFSET_SECS)
-}
-
-/// Дни от эпохи (1970-01-01) для григорианской даты. Алгоритм Ховарда
-/// Хинанта (`days_from_civil`) — корректен для всего пролептического
-/// григорианского календаря, без внешних зависимостей.
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400; // [0, 399]
-    let mp = (i64::from(m) + 9) % 12; // [0, 11]
-    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era * 146_097 + doe - 719_468
 }
 
 /// Разобрать таблицу `tradestats` в Super Candles (`domain::algo::tradestats`).

@@ -82,18 +82,17 @@ impl FeedSource for StoreFeedSource<'_> {
 
 /// Конверсия обычного бара стора в расширенную историческую свечу.
 ///
-/// Чистая функция без сети/БД: ALGOPACK-поля (VWAP/дисбаланс/OI/HI2)
-/// остаются `None` — их даёт только источник MOEX ALGOPACK, а не текущий
-/// `Store::bars`.
+/// Тонкая обёртка над [`domain::history::HistoryBar::from_bar`] — единственным
+/// местом этой конверсии (раньше была продублирована здесь и в
+/// `data::history::FinamHistory::load`). Оставлена как отдельная функция ради
+/// стабильного имени вызова в `StoreFeedSource`/тестах фида.
 pub fn bar_to_history_bar(
     bar: &Bar,
     source: DataSource,
     ticker: &str,
     tf: TimeFrame,
 ) -> HistoryBar {
-    HistoryBar::ohlcv(
-        source, ticker, tf, bar.ts, bar.open, bar.high, bar.low, bar.close, bar.volume,
-    )
+    HistoryBar::from_bar(source, ticker, tf, bar)
 }
 
 /// Запрос одной ленты фида: тикер, тайм-фрейм и диапазон.
