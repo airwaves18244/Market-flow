@@ -1199,23 +1199,35 @@ pub fn history_preview(
 
 use domain::algo::hi2::concentration_spikes;
 use domain::algo::mega_alerts::{MegaAlertEngine, MegaObservation, MegaThresholds};
-use domain::algo::tradestats::volume_zscore;
+use domain::algo::tradestats::{anomalous_volume, volume_zscore};
 
 use crate::dto::{FutoiDto, Hi2Dto, MegaAlertDto, TradestatsDto};
 
 /// Свечи Super Candles (датасет `tradestats`) инструмента `secid` на рынке
-/// `market` в `[from_ts, to_ts]`.
+/// `market` в `[from_ts, to_ts]`, с проставленным флагом `isAnomVol` —
+/// аномальный объём свечи (z-score объёма относительно окна предыдущих
+/// `window` свечей ≥ `vol_threshold`, [`anomalous_volume`]). Тот же детектор,
+/// что и `volume_spike` в Mega Alerts, — так подсветка в UI Супер-свечей
+/// не расходится по смыслу с остальным ALGO-модулем.
 pub fn algo_tradestats(
     store: &dyn Store,
     market: &str,
     secid: &str,
     from_ts: i64,
     to_ts: i64,
+    window: usize,
+    vol_threshold: f64,
 ) -> Result<Vec<TradestatsDto>, StorageError> {
-    Ok(store
-        .algo_tradestats(market, secid, from_ts, to_ts)?
+    let candles = store.algo_tradestats(market, secid, from_ts, to_ts)?;
+    let anomalies = anomalous_volume(&candles, window, vol_threshold);
+    Ok(candles
         .iter()
-        .map(TradestatsDto::from)
+        .enumerate()
+        .map(|(i, c)| {
+            let mut dto = TradestatsDto::from(c);
+            dto.is_anom_vol = anomalies.contains(&i);
+            dto
+        })
         .collect())
 }
 
@@ -2341,10 +2353,23 @@ mod tests {
     #[test]
     fn algo_tradestats_maps_rows_and_buy_pressure() {
         let store = algo_seeded();
-        let rows = algo_tradestats(&store, "stock", "SBER", 0, 9_999).unwrap();
+        let rows = algo_tradestats(&store, "stock", "SBER", 0, 9_999, 5, 3.0).unwrap();
         assert_eq!(rows.len(), 5);
         assert_eq!(rows[0].secid, "SBER");
         assert!(rows[4].buy_pressure > 0.9); // disb=0.9 → почти все покупки
+    }
+
+    #[test]
+    fn algo_tradestats_flags_anom_vol_from_backend_zscore() {
+        let store = algo_seeded();
+        // Та же серия, что и в `algo_seeded`: объём последней свечи (500)
+        // резко выше остальных (95-105) — z-score относительно окна из
+        // предыдущих свечей должен превысить порог. Окно = 4 (< 5 свечей),
+        // иначе для последнего индекса истории не хватит (`idx >= window`).
+        let rows = algo_tradestats(&store, "stock", "SBER", 0, 9_999, 4, 3.0).unwrap();
+        assert!(rows[4].is_anom_vol, "всплеск объёма должен быть помечен");
+        assert!(!rows[0].is_anom_vol);
+        assert!(!rows[1].is_anom_vol);
     }
 
     #[test]

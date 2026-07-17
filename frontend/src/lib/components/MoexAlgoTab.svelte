@@ -9,6 +9,7 @@
   import { ipc, inTauri } from "../ipc";
   import { loadSettings } from "../settings";
   import { algoTickers } from "../mock";
+  import { fmtRuFixed, fmtInt } from "../format";
   import type {
     AlgoMarket,
     FutoiDto,
@@ -175,19 +176,6 @@
   // ── Производные представления для остальных модулей ────────────────────────
   const scRows = $derived([...candles].slice(-14).reverse());
 
-  // Медиана объёма считается один раз на смену `candles`, а не на каждую строку
-  // таблицы (раньше copy+sort выполнялись для каждого бара). `null` — если
-  // выборки мало для оценки (меньше 5 баров).
-  const volMedian = $derived.by((): number | null => {
-    if (candles.length < 5) return null;
-    const sorted = candles.map((x) => x.vol).sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)];
-  });
-
-  function isAnomalous(c: TradestatsDto): boolean {
-    return volMedian !== null && volMedian > 0 && c.vol > volMedian * 2.2;
-  }
-
   interface FutoiRow {
     time: string;
     group: "Физлица" | "Юрлица";
@@ -252,17 +240,17 @@
   function megaValueLabel(a: MegaAlertDto): string {
     switch (a.kind) {
       case "volume_spike":
-        return "×" + fmt(a.value);
+        return "×" + fmtRuFixed(a.value);
       case "buy_imbalance":
-        return "+" + fmt(a.value, 2);
+        return "+" + fmtRuFixed(a.value, 2);
       case "sell_imbalance":
-        return "−" + fmt(Math.abs(a.value), 2);
+        return "−" + fmtRuFixed(Math.abs(a.value), 2);
       case "spread_widening":
-        return "+" + fmt(a.value * 10_000) + " бп";
+        return "+" + fmtRuFixed(a.value * 10_000) + " бп";
       case "oi_jump":
         return (a.value >= 0 ? "+" : "−") + fmtInt(Math.abs(a.value) / 1000) + "k";
       default:
-        return fmt(a.value, 2);
+        return fmtRuFixed(a.value, 2);
     }
   }
 
@@ -280,10 +268,6 @@
       : level === "moderate"
         ? "#f5a623"
         : "var(--up)";
-
-  const fmt = (n: number, d = 2) =>
-    Number(n).toLocaleString("ru-RU", { minimumFractionDigits: d, maximumFractionDigits: d });
-  const fmtInt = (n: number) => Math.round(n).toLocaleString("ru-RU");
 </script>
 
 <div class="algo">
@@ -356,14 +340,14 @@
             </thead>
             <tbody>
               {#each scRows as b (b.ts)}
-                <tr class:anom={isAnomalous(b)}>
+                <tr class:anom={b.isAnomVol}>
                   <td class="dim">{timeLabel(b.ts)}</td>
-                  <td class="num">{fmt(b.prOpen)}</td><td class="num">{fmt(b.prHigh)}</td>
-                  <td class="num">{fmt(b.prLow)}</td><td class="num">{fmt(b.prClose)}</td>
-                  <td class="num vwap">{fmt(b.prVwap)}</td><td class="num">{fmtInt(b.vol)}</td>
+                  <td class="num">{fmtRuFixed(b.prOpen)}</td><td class="num">{fmtRuFixed(b.prHigh)}</td>
+                  <td class="num">{fmtRuFixed(b.prLow)}</td><td class="num">{fmtRuFixed(b.prClose)}</td>
+                  <td class="num vwap">{fmtRuFixed(b.prVwap)}</td><td class="num">{fmtInt(b.vol)}</td>
                   <td class="num">{fmtInt(b.trades)}</td>
                   <td class="num" class:up={b.disb >= 0} class:down={b.disb < 0}>
-                    {(b.disb >= 0 ? "+" : "") + fmt(b.disb, 2)}
+                    {(b.disb >= 0 ? "+" : "") + fmtRuFixed(b.disb, 2)}
                   </td>
                 </tr>
               {/each}
@@ -411,7 +395,7 @@
                   <td class="num" class:up={r.net >= 0} class:down={r.net < 0}>
                     {(r.net >= 0 ? "+" : "−") + fmtInt(Math.abs(r.net))}
                   </td>
-                  <td class="num">{fmt(r.sharePct, 1)}%</td>
+                  <td class="num">{fmtRuFixed(r.sharePct, 1)}%</td>
                   <td class="num" class:up={r.doi >= 0} class:down={r.doi < 0}>
                     {(r.doi >= 0 ? "+" : "−") + fmtInt(Math.abs(r.doi))}
                   </td>
@@ -439,7 +423,7 @@
               {#each hi2Rank as r (r.secid)}
                 <tr>
                   <td class="tk">{r.secid}</td>
-                  <td class="num">{fmt(r.concentration, 3)}</td>
+                  <td class="num">{fmtRuFixed(r.concentration, 3)}</td>
                   <td style:color={hi2Color(r.level)}>{hi2LevelLabel(r.level)}</td>
                   <td class="ctr">{r.spike ? "⚠" : ""}</td>
                 </tr>

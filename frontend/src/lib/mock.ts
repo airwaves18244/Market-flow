@@ -956,6 +956,12 @@ function algoCandles(secid: string): TradestatsDto[] {
       prVwapB: vwap,
       prVwapS: vwap,
       buyPressure: vol > 0 ? volB / vol : 0.5,
+      // Тот же детерминированный флаг, что раздувает объём этой свечи выше
+      // (строка `anomalous` выше) — раньше он не попадал в DTO, и фронт
+      // пересчитывал собственную эвристику по медиане, которая могла
+      // разойтись с этим флагом. Теперь мок отдаёт его напрямую, как и
+      // боевой бэкенд (`api::algo_tradestats`, z-score объёма).
+      isAnomVol: anomalous,
     });
     px = c;
   }
