@@ -22,3 +22,6 @@ frontend/.svelte-kit/
 /.vscode/
 .DS_Store
 .claude/worktrees/
+
+# Tauri: авто-генерация схем capabilities (cargo tauri build)
+crates/app/gen/

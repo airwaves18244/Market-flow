@@ -191,16 +191,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "market terminal запускается"
     );
 
-    // Боевой режим: live-подключение к Finam (нужны egress-доступ к
-    // tradeapi.finam.ru:443 и `FINAM_API_SECRET`/keyring).
-    #[cfg(feature = "live")]
+    // `market-terminal --store-secret` — сохранить FINAM_API_SECRET в ОС-keyring
+    // (одноразовая настройка). Доступно и в GUI-сборке (`tauri`+`live`+`keyring`):
+    // это ранний выход до запуска интерфейса.
+    #[cfg(all(feature = "live", feature = "keyring"))]
+    if std::env::args().any(|a| a == "--store-secret") {
+        live::store_secret_from_env()?;
+        return Ok(());
+    }
+
+    // Боевой headless-режим: live-подключение к Finam + бесконечный цикл ингеста
+    // (нужны egress-доступ к tradeapi.finam.ru:443 и `FINAM_API_SECRET`/keyring).
+    // Только в сборке БЕЗ Tauri-UI: в GUI-сборке (`tauri`+`live`) Finam-загрузка
+    // идёт по запросу из интерфейса (команда `history_load`), а не консольным
+    // циклом — иначе окно не откроется вовсе.
+    #[cfg(all(feature = "live", not(feature = "tauri")))]
     {
-        // `market-terminal --store-secret` — сохранить FINAM_API_SECRET в keyring.
-        #[cfg(feature = "keyring")]
-        if std::env::args().any(|a| a == "--store-secret") {
-            live::store_secret_from_env()?;
-            return Ok(());
-        }
         let mic = std::env::var("FINAM_MIC").unwrap_or_else(|_| "MISX".to_owned());
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()

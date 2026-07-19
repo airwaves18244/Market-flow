@@ -7,8 +7,13 @@
     "frontendDist": "../../frontend/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm --prefix ../../frontend run dev",
-    "beforeBuildCommand": "npm --prefix ../../frontend run build",
-    "features": ["tauri"]
+    "beforeBuildCommand": "npm --prefix ../frontend run build || npm --prefix ../../frontend run build",
+    "features": [
+      "tauri",
+      "live",
+      "moex",
+      "keyring"
+    ]
   },
   "app": {
     "windows": [
@@ -27,7 +32,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis"],
+    "targets": [
+      "msi",
+      "nsis"
+    ],
     "publisher": "Market Terminal",
     "category": "Finance",
     "shortDescription": "Аналитический терминал рыночных данных (Finam Trade API)",
@@ -45,7 +53,10 @@
         "type": "downloadBootstrapper"
       },
       "nsis": {
-        "languages": ["Russian", "English"]
+        "languages": [
+          "Russian",
+          "English"
+        ]
       }
     }
   }
