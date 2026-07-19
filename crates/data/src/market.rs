@@ -467,30 +467,78 @@ pub(crate) fn map_order_book(ob: &finam_proto::marketdata::OrderBook) -> OrderBo
 /// смысл «стакан = снимок» во всём коде; полноценная инкрементальная сборка
 /// книги по дельтам — предмет отдельной задачи, если Finam будет слать именно
 /// дельты, а не периодические снимки.
-pub(crate) fn map_stream_order_book(ob: &finam_proto::marketdata::StreamOrderBook) -> OrderBook {
-    use finam_proto::marketdata::stream_order_book::row::Side as RowSide;
+/// Агрегатор дельтового стрима стакана (`SubscribeOrderBook`).
+///
+/// Строки `StreamOrderBook.Row` несут по-уровневые команды
+/// (`ACTION_ADD`/`ACTION_UPDATE`/`ACTION_REMOVE`), а не полный снимок:
+/// трактовка каждого сообщения как снимка теряла невключённые уровни и
+/// «воскрешала» удалённые. Агрегатор поддерживает книгу между сообщениями
+/// (первое сообщение после подписки — полный стакан командами ADD) и после
+/// каждого возвращает целый актуальный стакан.
+///
+/// Ключ уровня — битовое представление цены (`f64::to_bits`): у положительных
+/// f64 порядок битов совпадает с числовым, что даёт сортированный `BTreeMap`
+/// без Ord-обёртки (цены котировок неотрицательны). Живёт по одному на
+/// подписку (один символ), поэтому `symbol` сообщения не проверяется.
+pub(crate) struct OrderBookAggregator {
+    bids: std::collections::BTreeMap<u64, BookLevel>,
+    asks: std::collections::BTreeMap<u64, BookLevel>,
+    ts: i64,
+}
 
-    let mut bids = Vec::new();
-    let mut asks = Vec::new();
-    let mut ts = 0i64;
-    for row in &ob.rows {
-        ts = ts.max(ts_to_secs(row.timestamp.as_ref()));
-        let price = decimal_to_f64(row.price.as_ref());
-        match row.side.as_ref() {
-            Some(RowSide::BuySize(size)) => bids.push(BookLevel {
-                price,
-                size: decimal_to_f64(Some(size)),
-            }),
-            Some(RowSide::SellSize(size)) => asks.push(BookLevel {
-                price,
-                size: decimal_to_f64(Some(size)),
-            }),
-            None => {}
+impl OrderBookAggregator {
+    pub(crate) fn new() -> Self {
+        Self {
+            bids: std::collections::BTreeMap::new(),
+            asks: std::collections::BTreeMap::new(),
+            ts: 0,
         }
     }
-    bids.sort_by(|a, b| b.price.total_cmp(&a.price));
-    asks.sort_by(|a, b| a.price.total_cmp(&b.price));
-    OrderBook { ts, bids, asks }
+
+    /// Применить сообщение стрима и вернуть актуальный стакан целиком.
+    pub(crate) fn apply(&mut self, ob: &finam_proto::marketdata::StreamOrderBook) -> OrderBook {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side as RowSide};
+
+        for row in &ob.rows {
+            self.ts = self.ts.max(ts_to_secs(row.timestamp.as_ref()));
+            let price = decimal_to_f64(row.price.as_ref());
+            let key = price.to_bits();
+            let remove = row.action == Action::Remove as i32;
+            match row.side.as_ref() {
+                Some(RowSide::BuySize(_)) if remove => {
+                    self.bids.remove(&key);
+                }
+                Some(RowSide::SellSize(_)) if remove => {
+                    self.asks.remove(&key);
+                }
+                Some(RowSide::BuySize(size)) => {
+                    let size = decimal_to_f64(Some(size));
+                    self.bids.insert(key, BookLevel { price, size });
+                }
+                Some(RowSide::SellSize(size)) => {
+                    let size = decimal_to_f64(Some(size));
+                    self.asks.insert(key, BookLevel { price, size });
+                }
+                // REMOVE без стороны (oneof пуст) — теоретический случай:
+                // сторона неизвестна, чистим уровень с обеих.
+                None if remove => {
+                    self.bids.remove(&key);
+                    self.asks.remove(&key);
+                }
+                None => {}
+            }
+        }
+        self.snapshot()
+    }
+
+    fn snapshot(&self) -> OrderBook {
+        OrderBook {
+            ts: self.ts,
+            // Покупки — от лучшей (максимальной) цены, продажи — от минимальной.
+            bids: self.bids.values().rev().copied().collect(),
+            asks: self.asks.values().copied().collect(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -670,37 +718,94 @@ mod tests {
         assert_eq!(dom.spread(), Some(1.0)); // 101.0 - 100.0
     }
 
-    #[test]
-    fn map_stream_order_book_splits_and_sorts_sides() {
-        use finam_proto::marketdata::stream_order_book::{row::Side as RowSide, Row};
-        use finam_proto::marketdata::StreamOrderBook;
-
-        let row = |price: &str, side: RowSide, ts: i64| Row {
+    /// Хелперы дельтового стакана: строка стрима с командой.
+    fn ob_row(
+        price: &str,
+        side: finam_proto::marketdata::stream_order_book::row::Side,
+        action: finam_proto::marketdata::stream_order_book::row::Action,
+        ts: i64,
+    ) -> finam_proto::marketdata::stream_order_book::Row {
+        finam_proto::marketdata::stream_order_book::Row {
             price: dec(price),
             side: Some(side),
-            action: 0,
+            action: action as i32,
             mpid: String::new(),
             timestamp: Some(secs_to_ts(ts)),
-        };
-        let ob = StreamOrderBook {
+        }
+    }
+
+    fn ob_msg(
+        rows: Vec<finam_proto::marketdata::stream_order_book::Row>,
+    ) -> finam_proto::marketdata::StreamOrderBook {
+        finam_proto::marketdata::StreamOrderBook {
             symbol: "SBER@MISX".into(),
-            rows: vec![
-                row("100.0", RowSide::BuySize(Decimal { value: "5".into() }), 10),
-                row(
-                    "101.0",
-                    RowSide::SellSize(Decimal { value: "7".into() }),
-                    12,
-                ),
-                row("99.5", RowSide::BuySize(Decimal { value: "3".into() }), 11),
-            ],
-        };
-        let dom = map_stream_order_book(&ob);
-        assert_eq!(dom.ts, 12);
+            rows,
+        }
+    }
+
+    #[test]
+    fn order_book_aggregator_builds_sorted_book_from_adds() {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side};
+
+        let mut agg = OrderBookAggregator::new();
+        let book = agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "5".into() }), Action::Add, 10),
+            ob_row("101.0", Side::SellSize(Decimal { value: "7".into() }), Action::Add, 12),
+            ob_row("99.5", Side::BuySize(Decimal { value: "3".into() }), Action::Add, 11),
+        ]));
+        assert_eq!(book.ts, 12);
+        // Покупки — от лучшей (максимальной) цены, продажи — от минимальной.
         assert_eq!(
-            dom.bids.iter().map(|l| l.price).collect::<Vec<_>>(),
+            book.bids.iter().map(|l| l.price).collect::<Vec<_>>(),
             [100.0, 99.5]
         );
-        assert_eq!(dom.asks.iter().map(|l| l.price).collect::<Vec<_>>(), [101.0]);
+        assert_eq!(book.asks.iter().map(|l| l.price).collect::<Vec<_>>(), [101.0]);
+    }
+
+    #[test]
+    fn order_book_aggregator_applies_deltas_across_messages() {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side};
+
+        let mut agg = OrderBookAggregator::new();
+        // Первое сообщение — полный стакан командами ADD.
+        agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "5".into() }), Action::Add, 10),
+            ob_row("99.5", Side::BuySize(Decimal { value: "3".into() }), Action::Add, 10),
+            ob_row("101.0", Side::SellSize(Decimal { value: "7".into() }), Action::Add, 10),
+        ]));
+        // Дельта: обновить размер на 100.0, удалить 99.5 — книга должна
+        // сохранить невключённый уровень 101.0 (снимковая трактовка его теряла).
+        let book = agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "9".into() }), Action::Update, 20),
+            ob_row("99.5", Side::BuySize(Decimal { value: "0".into() }), Action::Remove, 20),
+        ]));
+        assert_eq!(book.ts, 20);
+        assert_eq!(book.bids.len(), 1);
+        assert_eq!(book.bids[0].price, 100.0);
+        assert_eq!(book.bids[0].size, 9.0);
+        // Уровень продаж пережил дельту, в которой не упоминался.
+        assert_eq!(book.asks.iter().map(|l| l.price).collect::<Vec<_>>(), [101.0]);
+    }
+
+    #[test]
+    fn order_book_aggregator_remove_only_touches_own_side() {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side};
+
+        let mut agg = OrderBookAggregator::new();
+        // Одинаковая цена на обеих сторонах (кросс в теории невозможен, но
+        // агрегатор не должен перепутать стороны при REMOVE).
+        agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "5".into() }), Action::Add, 10),
+            ob_row("100.0", Side::SellSize(Decimal { value: "7".into() }), Action::Add, 10),
+        ]));
+        let book = agg.apply(&ob_msg(vec![ob_row(
+            "100.0",
+            Side::BuySize(Decimal { value: "0".into() }),
+            Action::Remove,
+            11,
+        )]));
+        assert!(book.bids.is_empty());
+        assert_eq!(book.asks.iter().map(|l| l.price).collect::<Vec<_>>(), [100.0]);
     }
 
     // --- R-1: таймауты канала/запроса ---

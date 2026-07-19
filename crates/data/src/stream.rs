@@ -14,9 +14,7 @@ use std::time::Duration;
 
 use domain::{Bar, OrderBook, Quote, TimeFrame, Trade};
 
-use crate::market::{
-    map_bar, map_quote, map_stream_order_book, map_trade, status_to_error, FinamMarketData,
-};
+use crate::market::{map_bar, map_quote, map_trade, status_to_error, FinamMarketData};
 use crate::{AuthTransport, Backoff, DataError, SecretStore};
 
 use finam_proto::marketdata::{
@@ -112,18 +110,23 @@ impl TradeStream {
 /// Хэндл стрима стакана (`SubscribeOrderBook`).
 pub struct OrderBookStream {
     inner: tonic::Streaming<SubscribeOrderBookResponse>,
+    /// Стрим стакана — дельтовый (по-уровневые команды ADD/UPDATE/REMOVE),
+    /// поэтому книга накапливается агрегатором между сообщениями. Новый стрим
+    /// после переподключения начинает с чистой книги — сервер шлёт полный
+    /// стакан первым сообщением.
+    agg: crate::market::OrderBookAggregator,
 }
 
 impl OrderBookStream {
-    /// Следующая порция снимков стакана. `Ok(None)` — стрим завершён (нужно
-    /// переподключение). Одно сообщение стрима может нести несколько снимков
-    /// (`repeated StreamOrderBook`); каждый трактуется как самодостаточный
-    /// снимок сторон (см. [`map_stream_order_book`]) — потребитель обычно берёт
-    /// последний как актуальный стакан.
+    /// Следующая порция состояний стакана. `Ok(None)` — стрим завершён (нужно
+    /// переподключение). Одно сообщение стрима может нести несколько пачек
+    /// дельт (`repeated StreamOrderBook`); каждая применяется к накопленной
+    /// книге, наружу отдаётся полный стакан после каждой — потребитель обычно
+    /// берёт последний как актуальный.
     pub async fn next(&mut self) -> Result<Option<Vec<OrderBook>>, DataError> {
         match self.inner.message().await.map_err(status_to_error)? {
             Some(msg) => Ok(Some(
-                msg.order_book.iter().map(map_stream_order_book).collect(),
+                msg.order_book.iter().map(|ob| self.agg.apply(ob)).collect(),
             )),
             None => Ok(None),
         }
@@ -207,7 +210,10 @@ where
             .await
             .map_err(status_to_error)?
             .into_inner();
-        Ok(OrderBookStream { inner })
+        Ok(OrderBookStream {
+            inner,
+            agg: crate::market::OrderBookAggregator::new(),
+        })
     }
 
     /// Подписаться на агрегированные свечи по инструменту.
