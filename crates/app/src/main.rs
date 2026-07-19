@@ -219,6 +219,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "tauri")]
     {
         tauri_app::run();
+        // `return` нужен для прочих конфигураций сборки (smoke-ветка ниже).
+        #[allow(clippy::needless_return)]
         return Ok(());
     }
 

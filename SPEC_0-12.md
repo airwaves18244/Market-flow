@@ -100,10 +100,15 @@
 - [x] Бэкфилл: `plan_backfill` + `chunk_range`.
 - [x] Асинхронный цикл опроса `app::ingest::IngestService` (фича `ingest`);
       такт покрыт тестами на фейке.
-- [x] Боевой режим `app --features live`: авторизация → справочник → цикл
-      ингеста; секрет через резолвер; live smoke `example live_check`.
+- [x] Боевой режим `app --features live` (headless): авторизация → справочник
+      → цикл ингеста; секрет через резолвер; live smoke `example live_check`.
+      До 2026-07-19 отметка покрывала ТОЛЬКО headless-путь — GUI-сборка
+      ингест не запускала (терминал оставался пустым).
 - [x] Боевой прогон с живыми данными: `example live_check` живым секретом —
       auth, Assets (4565 MISX), Bars, LastQuote (T14, 2026-07-17).
+- [x] GUI-интеграция ингеста (2026-07-19): `tauri_app::run()` спавнит
+      `live::run_ingest_into` поверх состояния окна (тот же `Store`, что
+      читают `instruments`/`bars`); без секрета — грациозная деградация.
 
 ## Фаза 2 — Аналитика (`domain`) ✅
 
@@ -153,6 +158,12 @@
 - [x] Replay: `app::replay::ReplaySource` (`MarketData` из сохранённых баров).
 - [x] Панели `TimeSales`/`OrderBook`/`AlertsPanel`; события `trade:tick`/
       `orderbook:tick`; команда `alerts_scan`.
+      До 2026-07-19 отметка покрывала транспорт/панели/эмиттеры по
+      отдельности — стрим-задачи в GUI никто не запускал, эмиттеры были
+      мёртвым кодом, а `latest_trades`/`order_book` отдавали пустышки.
+- [x] GUI-интеграция стримов (2026-07-19): стрим-задачи `subscribe_*` →
+      снимки ленты/стакана в `AppState` (первичный ответ
+      `latest_trades`/`order_book`) → `emit_trade`/`emit_order_book`.
 
 ## Фаза 8 — Полировка и сборка 🟡
 

@@ -518,7 +518,10 @@ async fn history_load(
             DataSource::MoexAlgo => {
                 #[cfg(feature = "moex")]
                 {
-                    match std::env::var("MOEX_ALGOPACK_TOKEN") {
+                    // R-8: токен ALGOPACK берём единым резолвером (env → .env, с
+                    // trim), а не голым std::env::var — иначе `.env`-конфиг и
+                    // случайные пробелы игнорировались бы.
+                    match crate::algo_ingest::load_algo_token() {
                         Ok(token) => match data::ReqwestTransport::new() {
                             Ok(transport) => {
                                 let client = data::MoexAlgo::new(transport, token);
@@ -531,7 +534,7 @@ async fn history_load(
                             }
                             Err(e) => Err(e.to_string()),
                         },
-                        Err(_) => Err("токен ALGOPACK не задан (MOEX_ALGOPACK_TOKEN)".to_owned()),
+                        Err(e) => Err(e),
                     }
                 }
                 #[cfg(not(feature = "moex"))]
@@ -624,32 +627,39 @@ fn account(state: State<AppState>) -> CmdResult<AccountDto> {
     Ok(state.account())
 }
 
-/// Отправить во фронт исполнение симулятора (канал `fill:tick`). Точка
-/// интеграции для live-стрима: эмиттеры `emit_trade`/`emit_order_book` сначала
-/// прокидывают тик в `state.trade_session()`, а полученные исполнения — сюда.
-#[allow(dead_code)]
+/// Отправить во фронт исполнение симулятора (канал `fill:tick`). Живые стримы
+/// сделок/стакана (см. [`spawn_live_streams`]) прокидывают тик в
+/// `state.ingest_live_trades`/`ingest_live_book`, а полученные исполнения — сюда.
+/// Без фичи `live` стримов нет, поэтому там глушим dead_code.
+#[cfg_attr(not(feature = "live"), allow(dead_code))]
 pub fn emit_fill(app: &tauri::AppHandle, fill: &FillEventDto) -> CmdResult<()> {
     app.emit("fill:tick", fill).map_err(|e| e.to_string())
 }
 
-/// Лента сделок (Time&Sales). В store-backed сборке тиковые сделки не
-/// сохраняются, поэтому первичный ответ пуст — живые сделки приходят событием
-/// `trade:tick` (см. [`emit_trade`]) из live-стрима `subscribe_trades`.
-/// Команда сохраняет единый IPC-контракт для фронта.
+/// Лента сделок (Time&Sales) — первичный снимок (GAP-5): последние сделки из
+/// кольцевого буфера [`AppState`], наполняемого live-стримом `subscribe_trades`.
+/// Свежие — первыми, усечение по `limit`. Дальше фронт слушает событие
+/// `trade:tick` (см. [`emit_trade`]). До первого live-тика ответ пуст.
 #[tauri::command]
-fn latest_trades(_symbol: String, _limit: Option<usize>) -> CmdResult<Vec<TradeDto>> {
-    Ok(Vec::new())
+fn latest_trades(
+    state: State<AppState>,
+    symbol: String,
+    limit: Option<usize>,
+) -> CmdResult<Vec<TradeDto>> {
+    Ok(state.latest_trades_snapshot(&symbol, limit))
 }
 
-/// Снимок стакана (DOM). Аналогично [`latest_trades`]: первичный ответ пуст,
-/// живые обновления приходят событием `orderbook:tick` (см. [`emit_order_book`]).
+/// Снимок стакана (DOM) — первичный снимок (GAP-5): последний стакан из
+/// [`AppState`], наполняемого live-стримом `subscribe_order_book`, усечённый до
+/// `depth` уровней. Дальше фронт слушает событие `orderbook:tick` (см.
+/// [`emit_order_book`]). До первого live-обновления ответ пуст.
 #[tauri::command]
-fn order_book(_symbol: String, _depth: Option<usize>) -> CmdResult<OrderBookDto> {
-    Ok(OrderBookDto {
-        ts: 0,
-        bids: Vec::new(),
-        asks: Vec::new(),
-    })
+fn order_book(
+    state: State<AppState>,
+    symbol: String,
+    depth: Option<usize>,
+) -> CmdResult<OrderBookDto> {
+    Ok(state.order_book_snapshot(&symbol, depth))
 }
 
 /// Отправить во фронт событие live-обновления оборота (канал `turnover:tick`).
@@ -660,15 +670,17 @@ pub fn emit_turnover_tick(app: &tauri::AppHandle, point: &TurnoverPoint) -> CmdR
 }
 
 /// Отправить во фронт сделку для ленты Time&Sales (канал `trade:tick`).
-/// Точка интеграции для live-стрима `subscribe_trades` (Фаза 7).
-#[allow(dead_code)]
+/// Дёргается live-стримом `subscribe_trades` (см. [`spawn_live_streams`]).
+/// Без фичи `live` стримов нет — глушим dead_code.
+#[cfg_attr(not(feature = "live"), allow(dead_code))]
 pub fn emit_trade(app: &tauri::AppHandle, trade: &TradeDto) -> CmdResult<()> {
     app.emit("trade:tick", trade).map_err(|e| e.to_string())
 }
 
 /// Отправить во фронт снимок стакана для DOM (канал `orderbook:tick`).
-/// Точка интеграции для live-стрима `subscribe_order_book` (Фаза 7).
-#[allow(dead_code)]
+/// Дёргается live-стримом `subscribe_order_book` (см. [`spawn_live_streams`]).
+/// Без фичи `live` стримов нет — глушим dead_code.
+#[cfg_attr(not(feature = "live"), allow(dead_code))]
 pub fn emit_order_book(app: &tauri::AppHandle, book: &OrderBookDto) -> CmdResult<()> {
     app.emit("orderbook:tick", book).map_err(|e| e.to_string())
 }
@@ -680,8 +692,15 @@ fn build_state() -> AppState {
 
     #[cfg(feature = "duckdb")]
     {
-        let mut store =
-            storage::DuckStore::open("market.duckdb").expect("не удалось открыть БД DuckDB");
+        // БД кладём в стандартную конфиг-директорию ОС (та же, где settings.json):
+        // рабочий каталог установленного приложения (Program Files) недоступен
+        // на запись без прав администратора, а относительный путь зависел бы от
+        // того, откуда запущен exe.
+        let dir = crate::settings::default_config_dir();
+        std::fs::create_dir_all(&dir).expect("не удалось создать директорию данных");
+        let db_path = dir.join("market.duckdb");
+        let mut store = storage::DuckStore::open(&db_path)
+            .unwrap_or_else(|e| panic!("не удалось открыть БД DuckDB {}: {e}", db_path.display()));
         store.migrate().expect("миграция DuckDB не удалась");
         AppState::new(store)
     }
@@ -693,10 +712,323 @@ fn build_state() -> AppState {
     }
 }
 
+/// Спавн боевого Finam-ингеста в состояние, которым владеет окно (GAP-1/GAP-2).
+///
+/// Наполняет ТОТ ЖЕ `Store`, что читают команды (`instruments`/`bars` — вкладка
+/// «Обзор»): состояние достаётся из `AppHandle` уже внутри фоновой задачи — тот
+/// же паттерн, что у [`history_load`] (`State<'_>` из setup в 'static-спавн не
+/// переносим). Секрет и MIC читаются заранее; если секрета нет — НЕ падаем:
+/// пишем `warn` и оставляем терминал работать на пустом хранилище (грациозная
+/// деградация). MIC — из переменной окружения `FINAM_MIC` (дефолт `MISX`).
+#[cfg(all(feature = "tauri", feature = "live"))]
+fn spawn_live_ingest(app: tauri::AppHandle) {
+    // Fail-fast: без секрета крутить задачу незачем — сразу деградируем.
+    if let Err(e) = crate::live::load_secret() {
+        tracing::warn!(
+            error = %e,
+            "live-ингест не запущен: API-секрет не задан — терминал работает на пустом хранилище"
+        );
+        return;
+    }
+    let mic = finam_mic();
+
+    tracing::info!(mic = %mic, "live-ингест: запуск боевой задачи в общий стор");
+    tauri::async_runtime::spawn(async move {
+        // Состояние берём из AppHandle (владелец — Tauri), а не создаём своё —
+        // так ингест пишет в стор окна. `&AppState` живёт всё время задачи,
+        // потому что `app` перемещён в задачу; синхронный `Mutex` стора через
+        // `.await` не держим (`IngestService::tick` берёт лок точечно).
+        let cancel = crate::cancel::CancelFlag::new();
+        let state = app.state::<AppState>();
+        let state: &AppState = state.inner();
+        if let Err(e) = crate::live::run_ingest_into(state, &mic, cancel).await {
+            tracing::warn!(error = %e, "live-ингест завершился ошибкой");
+        }
+    });
+}
+
+/// Биржа (MIC) для боевого справочника/стримов: переменная окружения
+/// `FINAM_MIC`, дефолт `MISX` (основной рынок MOEX). Общий помощник для ингеста
+/// и стримов, чтобы обе задачи смотрели на одну биржу.
+#[cfg(all(feature = "tauri", feature = "live"))]
+fn finam_mic() -> String {
+    std::env::var("FINAM_MIC")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "MISX".to_owned())
+}
+
+/// Конкретный тип боевого источника рыночных данных для стрим-задач (канал
+/// ленивый, авторизация по секрету из окружения/keyring).
+#[cfg(all(feature = "tauri", feature = "live"))]
+type LiveMarketData = data::FinamMarketData<data::GrpcAuthTransport, data::MemSecretStore>;
+
+/// Максимум инструментов, на стакан/ленту которых подписываемся одновременно.
+///
+/// Каждый символ порождает ДВЕ долгоживущие подписки (`subscribe_trades` +
+/// `subscribe_order_book`). Явного лимита на число открытых стрим-подписок в
+/// Finam-клиенте нет ([`data::RateLimiter`] лимитирует РАЗОВЫЕ запросы —
+/// ~200/мин на метод, стримы под него не попадают), но плодить десятки стримов
+/// на весь справочник неразумно: стримим ограниченный поднабор вотчлиста.
+/// Значение с запасом под DOM/ленту нескольких активных инструментов «Обзора».
+#[cfg(all(feature = "tauri", feature = "live"))]
+const MAX_STREAM_SYMBOLS: usize = 8;
+
+/// Вотчлист для стримов: включённые тикеры из настроек, приведённые к символам
+/// биржи `mic` (`{TICKER}@{MIC}`), ограниченные [`MAX_STREAM_SYMBOLS`].
+///
+/// Отдельного «выбранного инструмента» в настройках нет — есть карта вотчлиста
+/// (тикер → включён), которую ведёт вкладка настроек. Берём её включённое
+/// подмножество: это и есть интересующие пользователя инструменты. Пустой
+/// вотчлист → пусто (стримы не поднимаем).
+#[cfg(all(feature = "tauri", feature = "live"))]
+fn stream_watchlist(state: &AppState, mic: &str) -> Vec<String> {
+    let settings = state.settings_get();
+    settings
+        .watchlist
+        .into_iter()
+        .filter(|(_, on)| *on)
+        .map(|(ticker, _)| format!("{ticker}@{mic}"))
+        .take(MAX_STREAM_SYMBOLS)
+        .collect()
+}
+
+/// Доля джиттера `[0, 1)` для пауз переподключения — без внешней зависимости на
+/// генератор случайных чисел: младшие наносекунды системных часов. Точность не
+/// важна, джиттер лишь разводит одновременные переподключения разных стримов.
+#[cfg(all(feature = "tauri", feature = "live"))]
+fn jitter_fraction() -> f64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    (nanos % 1_000) as f64 / 1_000.0
+}
+
+/// Стрим-задача ленты сделок одного инструмента (GAP-3).
+///
+/// Бесконечный цикл с переподключением ([`data::StreamReconnect`]): стрим Finam
+/// обрывается ~раз в 24 ч, поэтому подписку переоткрываем с экспоненциальной
+/// паузой (сбрасывается после успешных данных). Ошибки не паникуют — логируются
+/// и ведут к переподключению. Задача умирает вместе с процессом (Tauri убьёт
+/// runtime при закрытии окна). На каждую пачку сделок: буфер+симулятор в
+/// [`AppState::ingest_live_trades`], затем события `trade:tick`/`fill:tick`.
+#[cfg(all(feature = "tauri", feature = "live"))]
+async fn run_trade_stream(md: std::sync::Arc<LiveMarketData>, app: tauri::AppHandle, symbol: String) {
+    let mut reconnect = data::StreamReconnect::default();
+    loop {
+        match md.subscribe_trades(&symbol).await {
+            Ok(mut stream) => {
+                reconnect.reset();
+                loop {
+                    match stream.next().await {
+                        Ok(Some(trades)) => {
+                            if trades.is_empty() {
+                                continue;
+                            }
+                            // Лок стора не держим через .await: снимок/симулятор
+                            // обновляются синхронно, потом эмитим уже без лока.
+                            let (dtos, fills) = {
+                                let state = app.state::<AppState>();
+                                state.inner().ingest_live_trades(&symbol, &trades)
+                            };
+                            for t in &dtos {
+                                let _ = emit_trade(&app, t);
+                            }
+                            for f in &fills {
+                                let _ = emit_fill(&app, f);
+                            }
+                        }
+                        Ok(None) => break, // стрим закрыт — переподключаемся
+                        Err(e) => {
+                            tracing::warn!(symbol = %symbol, error = %e, "стрим сделок: ошибка чтения");
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(symbol = %symbol, error = %e, "стрим сделок: подписка не удалась");
+            }
+        }
+        tokio::time::sleep(reconnect.next_delay(jitter_fraction())).await;
+    }
+}
+
+/// Стрим-задача стакана (DOM) одного инструмента (GAP-3). Устройство — как у
+/// [`run_trade_stream`]. Одно сообщение стрима может нести несколько снимков;
+/// берём последний как актуальный стакан, обновляем снимок/симулятор и эмитим
+/// `orderbook:tick`/`fill:tick`.
+#[cfg(all(feature = "tauri", feature = "live"))]
+async fn run_order_book_stream(
+    md: std::sync::Arc<LiveMarketData>,
+    app: tauri::AppHandle,
+    symbol: String,
+) {
+    let mut reconnect = data::StreamReconnect::default();
+    loop {
+        match md.subscribe_order_book(&symbol).await {
+            Ok(mut stream) => {
+                reconnect.reset();
+                loop {
+                    match stream.next().await {
+                        Ok(Some(books)) => {
+                            let Some(book) = books.into_iter().next_back() else {
+                                continue;
+                            };
+                            let (dto, fills) = {
+                                let state = app.state::<AppState>();
+                                state.inner().ingest_live_book(&symbol, book)
+                            };
+                            let _ = emit_order_book(&app, &dto);
+                            for f in &fills {
+                                let _ = emit_fill(&app, f);
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(e) => {
+                            tracing::warn!(symbol = %symbol, error = %e, "стрим стакана: ошибка чтения");
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(symbol = %symbol, error = %e, "стрим стакана: подписка не удалась");
+            }
+        }
+        tokio::time::sleep(reconnect.next_delay(jitter_fraction())).await;
+    }
+}
+
+/// Поднять live-стримы сделок и стакана поверх состояния окна (GAP-3).
+///
+/// Отдельная от [`spawn_live_ingest`] задача: ингест тянет БАРЫ (медленный
+/// поллинг в стор для вкладки «Обзор»/бэктестов), а здесь — тиковые сделки и
+/// стакан в снимки [`AppState`] и push-события фронта. Строит собственное
+/// подключение к Finam (канал ленивый — дёшево), берёт вотчлист из настроек и
+/// на каждый символ спавнит по стрим-задаче. Нет секрета/подключения/вотчлиста
+/// — не падаем: пишем `warn` и живём без live-тиков (грациозная деградация).
+#[cfg(all(feature = "tauri", feature = "live"))]
+fn spawn_live_streams(app: tauri::AppHandle, mic: String) {
+    tauri::async_runtime::spawn(async move {
+        let secret = match crate::live::load_secret() {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "live-стримы не запущены: нет API-секрета");
+                return;
+            }
+        };
+        let auth = data::AuthManager::new(
+            data::GrpcAuthTransport::new(),
+            data::MemSecretStore::with_secret(secret),
+        );
+        let md = match data::FinamMarketData::connect(auth) {
+            Ok(m) => std::sync::Arc::new(m),
+            Err(e) => {
+                tracing::warn!(error = %e, "live-стримы: не удалось подключиться к Finam");
+                return;
+            }
+        };
+        let symbols = {
+            let state = app.state::<AppState>();
+            stream_watchlist(state.inner(), &mic)
+        };
+        if symbols.is_empty() {
+            tracing::warn!("live-стримы: вотчлист пуст — подписки не подняты");
+            return;
+        }
+        tracing::info!(count = symbols.len(), "live-стримы: запуск подписок сделок/стакана");
+        for symbol in symbols {
+            tauri::async_runtime::spawn(run_trade_stream(
+                std::sync::Arc::clone(&md),
+                app.clone(),
+                symbol.clone(),
+            ));
+            tauri::async_runtime::spawn(run_order_book_stream(
+                std::sync::Arc::clone(&md),
+                app.clone(),
+                symbol,
+            ));
+        }
+    });
+}
+
+/// Вотчлист для ALGOPACK-ингеста: включённые тикеры из настроек как «голые»
+/// `secid` (ALGOPACK адресует инструменты по тикеру без суффикса биржи, в
+/// отличие от Finam `{TICKER}@{MIC}`). Пустой вотчлист допустим — планировщик
+/// всё равно тянет сводный по рынку `hi2`.
+#[cfg(all(feature = "tauri", feature = "moex"))]
+fn algo_watchlist(state: &AppState) -> Vec<String> {
+    state
+        .settings_get()
+        .watchlist
+        .into_iter()
+        .filter(|(_, on)| *on)
+        .map(|(ticker, _)| ticker)
+        .collect()
+}
+
+/// Спавн боевого ALGOPACK-ингеста в состояние, которым владеет окно (GAP-6).
+///
+/// По образцу [`spawn_live_ingest`]: состояние достаётся из `AppHandle` уже
+/// внутри задачи (тот же стор, что читают команды `algo_*`), обмен строится
+/// общим ядром [`crate::algo_ingest::run_algo_ingest_into`]. Токен проверяем
+/// заранее для fail-fast; без него НЕ падаем — пишем `warn` и живём без
+/// ALGOPACK-ингеста (грациозная деградация, как у live-ингеста). Независим от
+/// фичи `live` (свой токен/хост `apim.moex.com`), поэтому под фичей `moex`.
+#[cfg(all(feature = "tauri", feature = "moex"))]
+fn spawn_algo_ingest(app: tauri::AppHandle) {
+    // Fail-fast: без токена крутить задачу незачем — сразу деградируем.
+    if let Err(e) = crate::algo_ingest::load_algo_token() {
+        tracing::warn!(
+            error = %e,
+            "ALGOPACK-ингест не запущен: токен не задан — терминал работает без ALGOPACK"
+        );
+        return;
+    }
+    tracing::info!("ALGOPACK-ингест: запуск боевой задачи в общий стор");
+    tauri::async_runtime::spawn(async move {
+        let cancel = crate::cancel::CancelFlag::new();
+        let state = app.state::<AppState>();
+        let state: &AppState = state.inner();
+        let symbols = algo_watchlist(state);
+        let config = crate::algo_ingest::AlgoIngestConfig::default();
+        if let Err(e) =
+            crate::algo_ingest::run_algo_ingest_into(state, symbols, config, cancel).await
+        {
+            tracing::warn!(error = %e, "ALGOPACK-ингест завершился ошибкой");
+        }
+    });
+}
+
 /// Запустить десктопное приложение Tauri.
 pub fn run() {
     tauri::Builder::default()
         .manage(build_state())
+        .setup(|app| {
+            // GAP-1/GAP-2: после `manage(state)` поднимаем боевой ингест в тот же
+            // AppState. Только под фичей `live`; без неё сборка терминала цела.
+            #[cfg(feature = "live")]
+            {
+                spawn_live_ingest(app.handle().clone());
+                // GAP-3: тиковые сделки/стакан в снимки состояния и push-события
+                // фронта (`trade:tick`/`orderbook:tick`/`fill:tick`).
+                spawn_live_streams(app.handle().clone(), finam_mic());
+            }
+            // GAP-6: боевой ALGOPACK-ингест в тот же AppState. Независим от
+            // `live` (свой токен/хост), поэтому отдельный блок под фичей `moex`.
+            #[cfg(feature = "moex")]
+            {
+                spawn_algo_ingest(app.handle().clone());
+            }
+            #[cfg(not(any(feature = "live", feature = "moex")))]
+            {
+                let _ = app;
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             instruments,
             bars,

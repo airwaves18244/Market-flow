@@ -12,13 +12,16 @@
 
 use std::time::Duration;
 
-use domain::{Bar, Quote, TimeFrame, Trade};
+use domain::{Bar, OrderBook, Quote, TimeFrame, Trade};
 
-use crate::market::{map_bar, map_quote, map_trade, status_to_error, FinamMarketData};
+use crate::market::{
+    map_bar, map_quote, map_stream_order_book, map_trade, status_to_error, FinamMarketData,
+};
 use crate::{AuthTransport, Backoff, DataError, SecretStore};
 
 use finam_proto::marketdata::{
-    SubscribeBarsResponse, SubscribeLatestTradesResponse, SubscribeQuoteResponse,
+    SubscribeBarsResponse, SubscribeLatestTradesResponse, SubscribeOrderBookResponse,
+    SubscribeQuoteResponse,
 };
 
 /// Контроллер переподключения live-стрима.
@@ -106,6 +109,27 @@ impl TradeStream {
     }
 }
 
+/// Хэндл стрима стакана (`SubscribeOrderBook`).
+pub struct OrderBookStream {
+    inner: tonic::Streaming<SubscribeOrderBookResponse>,
+}
+
+impl OrderBookStream {
+    /// Следующая порция снимков стакана. `Ok(None)` — стрим завершён (нужно
+    /// переподключение). Одно сообщение стрима может нести несколько снимков
+    /// (`repeated StreamOrderBook`); каждый трактуется как самодостаточный
+    /// снимок сторон (см. [`map_stream_order_book`]) — потребитель обычно берёт
+    /// последний как актуальный стакан.
+    pub async fn next(&mut self) -> Result<Option<Vec<OrderBook>>, DataError> {
+        match self.inner.message().await.map_err(status_to_error)? {
+            Some(msg) => Ok(Some(
+                msg.order_book.iter().map(map_stream_order_book).collect(),
+            )),
+            None => Ok(None),
+        }
+    }
+}
+
 /// Хэндл стрима свечей (`SubscribeBars`).
 pub struct BarStream {
     inner: tonic::Streaming<SubscribeBarsResponse>,
@@ -162,6 +186,28 @@ where
             .map_err(status_to_error)?
             .into_inner();
         Ok(TradeStream { inner })
+    }
+
+    /// Подписаться на стакан (DOM) по инструменту.
+    pub async fn subscribe_order_book(
+        &self,
+        symbol: &str,
+    ) -> Result<OrderBookStream, DataError> {
+        use finam_proto::marketdata::market_data_service_client::MarketDataServiceClient;
+        use finam_proto::marketdata::SubscribeOrderBookRequest;
+
+        let token = self.auth.access_token().await?;
+        let mut client = MarketDataServiceClient::new(self.channel.clone());
+        let mut request = tonic::Request::new(SubscribeOrderBookRequest {
+            symbol: symbol.to_owned(),
+        });
+        crate::market::attach_auth(&mut request, &token)?;
+        let inner = client
+            .subscribe_order_book(request)
+            .await
+            .map_err(status_to_error)?
+            .into_inner();
+        Ok(OrderBookStream { inner })
     }
 
     /// Подписаться на агрегированные свечи по инструменту.

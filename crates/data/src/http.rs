@@ -15,8 +15,9 @@
 //! модуля не хранит заголовки дольше одного вызова.
 
 use std::future::Future;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use crate::backoff::jitter_fraction;
 use crate::{Backoff, DataError, Method, RateLimiter};
 
 /// Тайм-аут HTTP-запроса по умолчанию.
@@ -176,13 +177,6 @@ impl<T: HttpTransport> HttpClient<T> {
             tokio::time::sleep(delay).await;
         }
     }
-}
-
-/// Доля джиттера в `[0, 1)` из субнаносекунд монотонных часов. Размазывает
-/// повторы без внешнего `rand`; качество ГПСЧ здесь не критично.
-fn jitter_fraction() -> f64 {
-    let nanos = Instant::now().elapsed().subsec_nanos();
-    f64::from(nanos % 1_000) / 1_000.0
 }
 
 /// Маппинг HTTP-ответа в [`DataError`] с учётом ретраябельности
