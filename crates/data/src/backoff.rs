@@ -8,7 +8,8 @@
 //!
 //! Классификация ретраябельности ошибок — в [`DataError::is_retryable`].
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::DataError;
 
@@ -81,6 +82,30 @@ impl Default for Backoff {
     fn default() -> Self {
         Self::finam_default()
     }
+}
+
+/// Доля джиттера в `[0, 1)` для «полного джиттера» ([`Backoff::delay_with_jitter`]).
+///
+/// Единый источник размазывания повторов для всего транспортного слоя (`grpc`/
+/// `http`/`market`): раньше каждый модуль держал свою копию на
+/// `Instant::now().elapsed().subsec_nanos()`, но у свежесозданного `Instant`
+/// прошедшее время околонулевое (десятки нс) — джиттер вырождался в ~0 и
+/// backoff фактически не размазывался (R-5). Берём младшие наносекунды
+/// **системных** часов ([`SystemTime`]) и перемешиваем атомарным счётчиком,
+/// чтобы две выборки в пределах одной наносекунды всё же различались. Качество
+/// ГПСЧ здесь не критично — нужен лишь ненулевой разброс, чтобы одновременные
+/// повторы разных задач не били залпом.
+pub fn jitter_fraction() -> f64 {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let salt = COUNTER.fetch_add(1, Ordering::Relaxed);
+    // Кнутов мультипликативный хеш (2654435761 — 2^32/φ) разносит соседние
+    // значения счётчика по всему диапазону, а не сдвигает на единицу.
+    let mixed = nanos.wrapping_add(salt.wrapping_mul(2_654_435_761));
+    f64::from(mixed % 1_000_000) / 1_000_000.0
 }
 
 impl DataError {
@@ -156,6 +181,21 @@ mod tests {
     #[should_panic(expected = "множитель backoff должен быть ≥ 1.0")]
     fn factor_below_one_panics() {
         let _ = Backoff::new(Duration::from_millis(10), 0.5, Duration::from_secs(1), 3);
+    }
+
+    #[test]
+    fn jitter_fraction_is_not_degenerate() {
+        // Старый джиттер на `Instant::now().elapsed()` давал десятки нс и почти
+        // всегда ~0. Системные наносекунды дают полноценный разброс: максимум из
+        // сотни выборок гарантированно заметно больше нуля, а все значения — в
+        // полуинтервале `[0, 1)`.
+        let samples: Vec<f64> = (0..100).map(|_| jitter_fraction()).collect();
+        let max = samples.iter().copied().fold(0.0_f64, f64::max);
+        assert!(max > 0.3, "джиттер вырожден около нуля: max={max}");
+        assert!(
+            samples.iter().all(|&f| (0.0..1.0).contains(&f)),
+            "джиттер вышел за [0, 1): {samples:?}"
+        );
     }
 
     #[test]

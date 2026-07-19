@@ -11,12 +11,15 @@
 //! функции и покрыт тестами; сами сетевые вызовы интеграционно проверяются при
 //! наличии реального секрета (в CI выключено).
 
+use std::time::Duration;
+
 use domain::{AssetClass, Bar, BookLevel, Instrument, OrderBook, Quote, TimeFrame, Trade};
 use prost_types::Timestamp;
 
 use finam_proto::pb::google::r#type::{Decimal, Interval};
 use finam_proto::pb::grpc::tradeapi::v1::Side;
 
+use crate::backoff::jitter_fraction;
 use crate::grpc::AuthManager;
 use crate::{AuthTransport, Backoff, DataError, MarketData, Method, RateLimiter, SecretStore};
 
@@ -64,13 +67,22 @@ impl<T: AuthTransport, S: SecretStore> FinamMarketData<T, S> {
     }
 }
 
-/// Выполнить gRPC-вызов с учётом лимита метода и повторов транзиентных сбоев.
+/// Выполнить gRPC-вызов с учётом лимита метода, повторов транзиентных сбоев и
+/// однократного re-auth при отказе авторизации.
 ///
 /// `$body` — `async`-блок одной попытки; он берётся по месту (без замыкания),
 /// поэтому свободно заимствует `self` без проблем с лайфтаймами.
+///
+/// `DataError::Auth` сам по себе не ретраябелен ([`Backoff`]): обычно это
+/// «неверный секрет». Но сервер может инвалидировать выданный JWT до истечения
+/// skew-окна — тогда `access_token()` продолжает отдавать кэш, и без сброса
+/// вызовы отказывают до ~14 минут. Поэтому на первый `Auth` делаем форс-refresh
+/// токена и повторяем вызов ровно один раз (флаг `reauthed` исключает
+/// бесконечный цикл re-auth). Второй `Auth` подряд — реальный отказ, отдаём его.
 macro_rules! call_with_retry {
     ($self:expr, $method:expr, $body:expr) => {{
         let mut attempt = 0u32;
+        let mut reauthed = false;
         loop {
             if let Err(e) = $self.limiter.try_acquire($method) {
                 if $self.backoff.is_exhausted(attempt) {
@@ -82,6 +94,15 @@ macro_rules! call_with_retry {
             }
             match $body.await {
                 Ok(v) => break Ok(v),
+                // Однократный форс-refresh при отказе авторизации: сбрасываем
+                // кэш токена и повторяем без задержки и без расхода попыток
+                // backoff (это не транзиентный сбой, а протухший токен).
+                Err(DataError::Auth(_)) if !reauthed => {
+                    reauthed = true;
+                    if let Err(e) = $self.auth.force_refresh().await {
+                        break Err(e);
+                    }
+                }
                 Err(e) if e.is_retryable() && !$self.backoff.is_exhausted(attempt) => {
                     $self.sleep_for(attempt).await;
                     attempt += 1;
@@ -105,7 +126,7 @@ where
             let token = self.auth.access_token().await?;
             let mut client = AssetsServiceClient::new(self.channel.clone());
             let mut request = tonic::Request::new(AssetsRequest {});
-            attach_auth(&mut request, &token)?;
+            prepare_unary(&mut request, &token)?;
             let resp = client
                 .assets(request)
                 .await
@@ -142,7 +163,7 @@ where
                     end_time: Some(secs_to_ts(to_ts)),
                 }),
             });
-            attach_auth(&mut request, &token)?;
+            prepare_unary(&mut request, &token)?;
             let resp = client
                 .bars(request)
                 .await
@@ -162,7 +183,7 @@ where
             let mut request = tonic::Request::new(QuoteRequest {
                 symbol: symbol.to_owned(),
             });
-            attach_auth(&mut request, &token)?;
+            prepare_unary(&mut request, &token)?;
             let resp = client
                 .last_quote(request)
                 .await
@@ -185,7 +206,7 @@ where
             let mut request = tonic::Request::new(LatestTradesRequest {
                 symbol: symbol.to_owned(),
             });
-            attach_auth(&mut request, &token)?;
+            prepare_unary(&mut request, &token)?;
             let resp = client
                 .latest_trades(request)
                 .await
@@ -212,7 +233,7 @@ where
             let mut request = tonic::Request::new(OrderBookRequest {
                 symbol: symbol.to_owned(),
             });
-            attach_auth(&mut request, &token)?;
+            prepare_unary(&mut request, &token)?;
             let resp = client
                 .order_book(request)
                 .await
@@ -226,11 +247,28 @@ where
     }
 }
 
+/// Предел на установление TCP/TLS-соединения канала. Отсекает «висящий»
+/// коннект (в т.ч. полуоткрытый TCP) на этапе установления — иначе первый
+/// вызов по ленивому каналу мог ждать бесконечно.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Дедлайн одного unary-вызова (от отправки до ответа). Ставится per-request
+/// через [`tonic::Request::set_timeout`], а НЕ на весь канал: канал общий с
+/// server-streaming подписками (`stream.rs`), где таймаут на весь стрим убил бы
+/// долгоживущий поток. Полуоткрытое уже установленное соединение без этого
+/// дедлайна повесило бы `bars().await` навечно (ретраи backoff не срабатывают,
+/// пока будущее не завершилось).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Сконфигурировать gRPC-эндпоинт: для `https` включить TLS с системными
-/// корневыми сертификатами. Единый билдер для auth-транспорта и клиента данных.
+/// корневыми сертификатами, ограничить время установления соединения. Единый
+/// билдер для auth-транспорта и клиента данных.
 pub(crate) fn build_endpoint(url: &str) -> Result<tonic::transport::Endpoint, DataError> {
     let mut ep = tonic::transport::Channel::from_shared(url.to_owned())
-        .map_err(|e| DataError::Transport(format!("неверный эндпоинт: {e}")))?;
+        .map_err(|e| DataError::Transport(format!("неверный эндпоинт: {e}")))?
+        // Таймаут только на коннект — безопасен и для стримов (ограничивает
+        // установление, но не длительность самого стрима).
+        .connect_timeout(CONNECT_TIMEOUT);
     if url.starts_with("https") {
         let tls = tonic::transport::ClientTlsConfig::new().with_native_roots();
         ep = ep
@@ -252,6 +290,18 @@ pub(crate) fn attach_auth<M>(
     Ok(())
 }
 
+/// Подготовить unary-запрос: JWT в метаданные + per-request дедлайн
+/// ([`REQUEST_TIMEOUT`]). Для server-streaming подписок дедлайн НЕ ставится
+/// (там используется голый [`attach_auth`]).
+pub(crate) fn prepare_unary<M>(
+    request: &mut tonic::Request<M>,
+    token: &str,
+) -> Result<(), DataError> {
+    attach_auth(request, token)?;
+    request.set_timeout(REQUEST_TIMEOUT);
+    Ok(())
+}
+
 /// Маппинг `tonic::Status` в [`DataError`] с учётом ретраябельности.
 pub(crate) fn status_to_error(status: tonic::Status) -> DataError {
     use tonic::Code;
@@ -264,11 +314,6 @@ pub(crate) fn status_to_error(status: tonic::Status) -> DataError {
         }
         other => DataError::Other(format!("{}: {}", other, status.message())),
     }
-}
-
-fn jitter_fraction() -> f64 {
-    let nanos = std::time::Instant::now().elapsed().subsec_nanos();
-    f64::from(nanos % 1_000) / 1_000.0
 }
 
 // --- Чистые помощники маппинга (тестируются без сети) ---
@@ -409,6 +454,91 @@ pub(crate) fn map_order_book(ob: &finam_proto::marketdata::OrderBook) -> OrderBo
     bids.sort_by(|a, b| b.price.total_cmp(&a.price));
     asks.sort_by(|a, b| a.price.total_cmp(&b.price));
     OrderBook { ts, bids, asks }
+}
+
+/// proto `StreamOrderBook` (сообщение стрима `SubscribeOrderBook`) → доменный
+/// [`OrderBook`].
+///
+/// Тип `StreamOrderBook` структурно повторяет разовый `OrderBook`, но это
+/// отдельный сгенерированный тип, поэтому нужен свой маппер. Поле `action`
+/// (ADD/REMOVE/UPDATE) здесь **сознательно игнорируется**: каждое сообщение
+/// стрима трактуется как самодостаточный снимок сторон — ровно так же, как
+/// разовый [`map_order_book`] уже игнорирует `action`. Это сохраняет единый
+/// смысл «стакан = снимок» во всём коде; полноценная инкрементальная сборка
+/// книги по дельтам — предмет отдельной задачи, если Finam будет слать именно
+/// дельты, а не периодические снимки.
+/// Агрегатор дельтового стрима стакана (`SubscribeOrderBook`).
+///
+/// Строки `StreamOrderBook.Row` несут по-уровневые команды
+/// (`ACTION_ADD`/`ACTION_UPDATE`/`ACTION_REMOVE`), а не полный снимок:
+/// трактовка каждого сообщения как снимка теряла невключённые уровни и
+/// «воскрешала» удалённые. Агрегатор поддерживает книгу между сообщениями
+/// (первое сообщение после подписки — полный стакан командами ADD) и после
+/// каждого возвращает целый актуальный стакан.
+///
+/// Ключ уровня — битовое представление цены (`f64::to_bits`): у положительных
+/// f64 порядок битов совпадает с числовым, что даёт сортированный `BTreeMap`
+/// без Ord-обёртки (цены котировок неотрицательны). Живёт по одному на
+/// подписку (один символ), поэтому `symbol` сообщения не проверяется.
+pub(crate) struct OrderBookAggregator {
+    bids: std::collections::BTreeMap<u64, BookLevel>,
+    asks: std::collections::BTreeMap<u64, BookLevel>,
+    ts: i64,
+}
+
+impl OrderBookAggregator {
+    pub(crate) fn new() -> Self {
+        Self {
+            bids: std::collections::BTreeMap::new(),
+            asks: std::collections::BTreeMap::new(),
+            ts: 0,
+        }
+    }
+
+    /// Применить сообщение стрима и вернуть актуальный стакан целиком.
+    pub(crate) fn apply(&mut self, ob: &finam_proto::marketdata::StreamOrderBook) -> OrderBook {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side as RowSide};
+
+        for row in &ob.rows {
+            self.ts = self.ts.max(ts_to_secs(row.timestamp.as_ref()));
+            let price = decimal_to_f64(row.price.as_ref());
+            let key = price.to_bits();
+            let remove = row.action == Action::Remove as i32;
+            match row.side.as_ref() {
+                Some(RowSide::BuySize(_)) if remove => {
+                    self.bids.remove(&key);
+                }
+                Some(RowSide::SellSize(_)) if remove => {
+                    self.asks.remove(&key);
+                }
+                Some(RowSide::BuySize(size)) => {
+                    let size = decimal_to_f64(Some(size));
+                    self.bids.insert(key, BookLevel { price, size });
+                }
+                Some(RowSide::SellSize(size)) => {
+                    let size = decimal_to_f64(Some(size));
+                    self.asks.insert(key, BookLevel { price, size });
+                }
+                // REMOVE без стороны (oneof пуст) — теоретический случай:
+                // сторона неизвестна, чистим уровень с обеих.
+                None if remove => {
+                    self.bids.remove(&key);
+                    self.asks.remove(&key);
+                }
+                None => {}
+            }
+        }
+        self.snapshot()
+    }
+
+    fn snapshot(&self) -> OrderBook {
+        OrderBook {
+            ts: self.ts,
+            // Покупки — от лучшей (максимальной) цены, продажи — от минимальной.
+            bids: self.bids.values().rev().copied().collect(),
+            asks: self.asks.values().copied().collect(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -586,5 +716,220 @@ mod tests {
         );
         assert_eq!(dom.best_bid().unwrap().size, 5.0);
         assert_eq!(dom.spread(), Some(1.0)); // 101.0 - 100.0
+    }
+
+    /// Хелперы дельтового стакана: строка стрима с командой.
+    fn ob_row(
+        price: &str,
+        side: finam_proto::marketdata::stream_order_book::row::Side,
+        action: finam_proto::marketdata::stream_order_book::row::Action,
+        ts: i64,
+    ) -> finam_proto::marketdata::stream_order_book::Row {
+        finam_proto::marketdata::stream_order_book::Row {
+            price: dec(price),
+            side: Some(side),
+            action: action as i32,
+            mpid: String::new(),
+            timestamp: Some(secs_to_ts(ts)),
+        }
+    }
+
+    fn ob_msg(
+        rows: Vec<finam_proto::marketdata::stream_order_book::Row>,
+    ) -> finam_proto::marketdata::StreamOrderBook {
+        finam_proto::marketdata::StreamOrderBook {
+            symbol: "SBER@MISX".into(),
+            rows,
+        }
+    }
+
+    #[test]
+    fn order_book_aggregator_builds_sorted_book_from_adds() {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side};
+
+        let mut agg = OrderBookAggregator::new();
+        let book = agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "5".into() }), Action::Add, 10),
+            ob_row("101.0", Side::SellSize(Decimal { value: "7".into() }), Action::Add, 12),
+            ob_row("99.5", Side::BuySize(Decimal { value: "3".into() }), Action::Add, 11),
+        ]));
+        assert_eq!(book.ts, 12);
+        // Покупки — от лучшей (максимальной) цены, продажи — от минимальной.
+        assert_eq!(
+            book.bids.iter().map(|l| l.price).collect::<Vec<_>>(),
+            [100.0, 99.5]
+        );
+        assert_eq!(book.asks.iter().map(|l| l.price).collect::<Vec<_>>(), [101.0]);
+    }
+
+    #[test]
+    fn order_book_aggregator_applies_deltas_across_messages() {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side};
+
+        let mut agg = OrderBookAggregator::new();
+        // Первое сообщение — полный стакан командами ADD.
+        agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "5".into() }), Action::Add, 10),
+            ob_row("99.5", Side::BuySize(Decimal { value: "3".into() }), Action::Add, 10),
+            ob_row("101.0", Side::SellSize(Decimal { value: "7".into() }), Action::Add, 10),
+        ]));
+        // Дельта: обновить размер на 100.0, удалить 99.5 — книга должна
+        // сохранить невключённый уровень 101.0 (снимковая трактовка его теряла).
+        let book = agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "9".into() }), Action::Update, 20),
+            ob_row("99.5", Side::BuySize(Decimal { value: "0".into() }), Action::Remove, 20),
+        ]));
+        assert_eq!(book.ts, 20);
+        assert_eq!(book.bids.len(), 1);
+        assert_eq!(book.bids[0].price, 100.0);
+        assert_eq!(book.bids[0].size, 9.0);
+        // Уровень продаж пережил дельту, в которой не упоминался.
+        assert_eq!(book.asks.iter().map(|l| l.price).collect::<Vec<_>>(), [101.0]);
+    }
+
+    #[test]
+    fn order_book_aggregator_remove_only_touches_own_side() {
+        use finam_proto::marketdata::stream_order_book::row::{Action, Side};
+
+        let mut agg = OrderBookAggregator::new();
+        // Одинаковая цена на обеих сторонах (кросс в теории невозможен, но
+        // агрегатор не должен перепутать стороны при REMOVE).
+        agg.apply(&ob_msg(vec![
+            ob_row("100.0", Side::BuySize(Decimal { value: "5".into() }), Action::Add, 10),
+            ob_row("100.0", Side::SellSize(Decimal { value: "7".into() }), Action::Add, 10),
+        ]));
+        let book = agg.apply(&ob_msg(vec![ob_row(
+            "100.0",
+            Side::BuySize(Decimal { value: "0".into() }),
+            Action::Remove,
+            11,
+        )]));
+        assert!(book.bids.is_empty());
+        assert_eq!(book.asks.iter().map(|l| l.price).collect::<Vec<_>>(), [100.0]);
+    }
+
+    // --- R-1: таймауты канала/запроса ---
+
+    #[test]
+    fn endpoint_builds_with_sane_timeouts() {
+        // Константы дедлайнов заданы и не вырождены (иначе полуоткрытый TCP
+        // повесил бы вызов навечно). Значения самого Endpoint приватны у tonic,
+        // поэтому проверяем инварианты констант и что билдер строит канал.
+        assert!(!CONNECT_TIMEOUT.is_zero());
+        assert!(!REQUEST_TIMEOUT.is_zero());
+        assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(30));
+        // Билдер строит эндпоинт и для http, и для https (TLS-ветка).
+        assert!(build_endpoint("http://localhost:1").is_ok());
+        assert!(build_endpoint("https://localhost:1").is_ok());
+        assert!(build_endpoint("не-url").is_err());
+    }
+
+    // --- R-2: однократный re-auth при UNAUTHENTICATED ---
+
+    use crate::{AuthManager, AuthToken, MemSecretStore, TokenState};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    /// Фейковый auth-транспорт: по программе отдаёт токены (последний
+    /// повторяется, когда программа исчерпана), считая обмены через общий
+    /// счётчик (доступ к нему у теста — приватное поле `transport` у
+    /// `AuthManager` из другого модуля не видно).
+    struct ReauthTransport {
+        calls: Arc<AtomicU32>,
+        program: Vec<AuthToken>,
+    }
+
+    impl ReauthTransport {
+        fn new(calls: Arc<AtomicU32>, tokens: &[&str]) -> Self {
+            Self {
+                calls,
+                program: tokens
+                    .iter()
+                    .map(|t| AuthToken {
+                        token: (*t).to_owned(),
+                        ttl: Duration::from_secs(900),
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    impl crate::AuthTransport for ReauthTransport {
+        async fn authenticate(&self, _secret: &str) -> Result<AuthToken, DataError> {
+            let i = self.calls.fetch_add(1, Ordering::SeqCst) as usize;
+            Ok(self.program[i.min(self.program.len() - 1)].clone())
+        }
+    }
+
+    /// Клиент данных поверх фейкового auth-транспорта; канал ленивый и в тесте
+    /// не используется (тела вызовов подменены на локальный «сервер»). Возвращает
+    /// клиент и общий счётчик обменов токена.
+    fn fake_market(
+        tokens: &[&str],
+    ) -> (FinamMarketData<ReauthTransport, MemSecretStore>, Arc<AtomicU32>) {
+        let calls = Arc::new(AtomicU32::new(0));
+        // Backoff без задержек — тест не должен спать.
+        let no_sleep = Backoff::new(Duration::ZERO, 1.0, Duration::ZERO, 5);
+        let auth = AuthManager::with_policy(
+            ReauthTransport::new(Arc::clone(&calls), tokens),
+            MemSecretStore::with_secret("api-secret"),
+            TokenState::new(),
+            RateLimiter::finam_default(),
+            no_sleep,
+        );
+        let fmd = FinamMarketData {
+            auth,
+            channel: build_endpoint("http://localhost:1").unwrap().connect_lazy(),
+            limiter: RateLimiter::finam_default(),
+            backoff: no_sleep,
+        };
+        (fmd, calls)
+    }
+
+    #[tokio::test]
+    async fn reauth_retries_once_after_unauthenticated() {
+        // Первый выданный токен сервер «инвалидировал» → отдаёт UNAUTHENTICATED;
+        // после форс-refresh приходит новый токен и вызов проходит.
+        let (fmd, calls) = fake_market(&["jwt-stale", "jwt-fresh"]);
+        let hits = AtomicU32::new(0);
+
+        let out: Result<&str, DataError> = call_with_retry!(fmd, Method::Bars, async {
+            hits.fetch_add(1, Ordering::SeqCst);
+            let token = fmd.auth.access_token().await?;
+            if token == "jwt-stale" {
+                // Сервер отклонил протухший токен.
+                Err(DataError::Auth("сервер инвалидировал токен".to_owned()))
+            } else {
+                Ok::<_, DataError>("bars-ok")
+            }
+        });
+
+        assert_eq!(out.unwrap(), "bars-ok");
+        // Ровно два обмена токена: исходный + один форс-refresh.
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // Два прохода тела: отказ, затем успех с новым токеном.
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert!(fmd.auth.has_fresh_token());
+    }
+
+    #[tokio::test]
+    async fn reauth_happens_at_most_once_no_infinite_loop() {
+        // Сервер отвергает любой токен → после единственного форс-refresh
+        // повторный отказ отдаётся наружу (без бесконечного цикла re-auth).
+        let (fmd, calls) = fake_market(&["jwt-stale"]);
+        let hits = AtomicU32::new(0);
+
+        let out: Result<&str, DataError> = call_with_retry!(fmd, Method::Bars, async {
+            hits.fetch_add(1, Ordering::SeqCst);
+            let _token = fmd.auth.access_token().await?;
+            Err::<&str, DataError>(DataError::Auth("всегда отказ".to_owned()))
+        });
+
+        assert!(matches!(out, Err(DataError::Auth(_))));
+        // Один re-auth: исходный обмен + один форс-refresh.
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // Тело выполнено дважды: исходный вызов и один повтор после re-auth.
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
     }
 }

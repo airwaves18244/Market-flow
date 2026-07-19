@@ -57,24 +57,39 @@ pub fn plan_backfill(
 }
 
 /// Разбить диапазон на страницы не более `max_bars` баров каждая — под предел
-/// числа баров в одном ответе API. Страницы идут по возрастанию времени и не
-/// пересекаются.
+/// числа баров в одном ответе API. Страницы идут по возрастанию времени,
+/// смежны (без «мёртвой зоны» на стыках) и не пересекаются.
+///
+/// Границы страниц считаем в *секундах*, а не в барах: раньше страница
+/// заканчивалась на `start + span - step` (последний ожидаемый бар), а
+/// следующая начиналась с `end + step`. Если фактические `ts` баров не кратны
+/// шагу (Finam D1 ≈ 21:00 UTC), интервал `(end, end + step)` выпадал из обеих
+/// страниц — и бар на стыке терялся. Теперь страница покрывает `span` секунд
+/// подряд `[start, start + span - 1]`, а следующая продолжается ровно со
+/// следующей секунды `end + 1` — дыр между страницами нет. `MarketData::bars`
+/// включителен по обеим границам, поэтому бар ровно на `end + 1` попадёт только
+/// в следующую страницу (без дублей); дедуп по `ts` в `data::history` — второй
+/// рубеж защиты.
 pub fn chunk_range(range: FetchRange, tf: TimeFrame, max_bars: usize) -> Vec<FetchRange> {
     let step = tf.seconds();
     if step <= 0 || max_bars == 0 || range.to_ts < range.from_ts {
         return Vec::new();
     }
-    let span = step * (max_bars as i64); // длительность одной страницы
+    // Длительность страницы в секундах: окно `span` секунд вмещает не более
+    // `max_bars` баров, отстоящих друг от друга не менее чем на `step`.
+    let span = step * (max_bars as i64);
     let mut out = Vec::new();
     let mut start = range.from_ts;
     while start <= range.to_ts {
-        // последний бар страницы — не дальше границы диапазона
-        let end = (start + span - step).min(range.to_ts);
+        // Страница покрывает секунды подряд; верхняя граница — не дальше конца
+        // диапазона.
+        let end = (start + span - 1).min(range.to_ts);
         out.push(FetchRange {
             from_ts: start,
             to_ts: end,
         });
-        start = end + step;
+        // Смежная следующая страница: без разрыва между `end` и стартом.
+        start = end + 1;
     }
     out
 }
@@ -161,20 +176,23 @@ mod tests {
             to_ts: 9 * DAY,
         };
         let pages = chunk_range(range, TimeFrame::D1, 4);
-        // 10 баров по 4 на страницу → 4 + 4 + 2
+        // 10 баров по 4 на страницу → 4 + 4 + 2.
+        // Границы теперь в секундах: страница покрывает span = 4*DAY секунд
+        // подряд, следующая продолжается со следующей секунды (без «мёртвой
+        // зоны» на стыке).
         assert_eq!(pages.len(), 3);
         assert_eq!(
             pages[0],
             FetchRange {
                 from_ts: 0,
-                to_ts: 3 * DAY
+                to_ts: 4 * DAY - 1
             }
         );
         assert_eq!(
             pages[1],
             FetchRange {
                 from_ts: 4 * DAY,
-                to_ts: 7 * DAY
+                to_ts: 8 * DAY - 1
             }
         );
         assert_eq!(
@@ -184,9 +202,46 @@ mod tests {
                 to_ts: 9 * DAY
             }
         );
-        // суммарно покрыто ровно 10 баров, без пересечений
+        // Страницы смежны и не пересекаются: конец каждой + 1 = начало следующей.
+        for w in pages.windows(2) {
+            assert_eq!(w[0].to_ts + 1, w[1].from_ts);
+        }
+        // Суммарно покрыто ровно 10 баров (при барах, кратных шагу).
         let total: i64 = pages.iter().map(|p| p.bar_count(DAY)).sum();
         assert_eq!(total, 10);
+    }
+
+    #[test]
+    fn chunk_covers_offset_bars_without_gaps() {
+        // Регрессия: фактические `ts` баров НЕ кратны шагу (как Finam D1 ≈ 21:00
+        // UTC). Раньше страница заканчивалась на последнем ожидаемом баре, а
+        // следующая начиналась через `step` — интервал между ними выпадал, и бар
+        // на стыке терялся. Теперь страницы смежны в секундах и покрывают все
+        // бары. Пример из аудита: step=60, max_bars=3, бары со сдвигом +30.
+        const STEP: i64 = 60; // TimeFrame::M1
+        let bars = [30_i64, 90, 150, 210, 270, 330];
+        let range = FetchRange {
+            from_ts: 0,
+            to_ts: *bars.last().unwrap(),
+        };
+        let pages = chunk_range(range, TimeFrame::M1, 3);
+
+        // Каждый бар должен попасть ровно в одну страницу (границы включительны).
+        for &ts in &bars {
+            let hits = pages
+                .iter()
+                .filter(|p| p.from_ts <= ts && ts <= p.to_ts)
+                .count();
+            assert_eq!(hits, 1, "бар ts={ts} должен попасть ровно в одну страницу");
+        }
+        // Ни одна страница не содержит больше max_bars=3 баров реального шага.
+        for p in &pages {
+            assert!(p.bar_count(STEP) <= 3, "страница {p:?} превышает лимит баров");
+        }
+        // Страницы смежны — без разрывов на стыках.
+        for w in pages.windows(2) {
+            assert_eq!(w[0].to_ts + 1, w[1].from_ts);
+        }
     }
 
     #[test]

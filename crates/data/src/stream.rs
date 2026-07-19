@@ -12,13 +12,14 @@
 
 use std::time::Duration;
 
-use domain::{Bar, Quote, TimeFrame, Trade};
+use domain::{Bar, OrderBook, Quote, TimeFrame, Trade};
 
 use crate::market::{map_bar, map_quote, map_trade, status_to_error, FinamMarketData};
 use crate::{AuthTransport, Backoff, DataError, SecretStore};
 
 use finam_proto::marketdata::{
-    SubscribeBarsResponse, SubscribeLatestTradesResponse, SubscribeQuoteResponse,
+    SubscribeBarsResponse, SubscribeLatestTradesResponse, SubscribeOrderBookResponse,
+    SubscribeQuoteResponse,
 };
 
 /// Контроллер переподключения live-стрима.
@@ -106,6 +107,32 @@ impl TradeStream {
     }
 }
 
+/// Хэндл стрима стакана (`SubscribeOrderBook`).
+pub struct OrderBookStream {
+    inner: tonic::Streaming<SubscribeOrderBookResponse>,
+    /// Стрим стакана — дельтовый (по-уровневые команды ADD/UPDATE/REMOVE),
+    /// поэтому книга накапливается агрегатором между сообщениями. Новый стрим
+    /// после переподключения начинает с чистой книги — сервер шлёт полный
+    /// стакан первым сообщением.
+    agg: crate::market::OrderBookAggregator,
+}
+
+impl OrderBookStream {
+    /// Следующая порция состояний стакана. `Ok(None)` — стрим завершён (нужно
+    /// переподключение). Одно сообщение стрима может нести несколько пачек
+    /// дельт (`repeated StreamOrderBook`); каждая применяется к накопленной
+    /// книге, наружу отдаётся полный стакан после каждой — потребитель обычно
+    /// берёт последний как актуальный.
+    pub async fn next(&mut self) -> Result<Option<Vec<OrderBook>>, DataError> {
+        match self.inner.message().await.map_err(status_to_error)? {
+            Some(msg) => Ok(Some(
+                msg.order_book.iter().map(|ob| self.agg.apply(ob)).collect(),
+            )),
+            None => Ok(None),
+        }
+    }
+}
+
 /// Хэндл стрима свечей (`SubscribeBars`).
 pub struct BarStream {
     inner: tonic::Streaming<SubscribeBarsResponse>,
@@ -162,6 +189,31 @@ where
             .map_err(status_to_error)?
             .into_inner();
         Ok(TradeStream { inner })
+    }
+
+    /// Подписаться на стакан (DOM) по инструменту.
+    pub async fn subscribe_order_book(
+        &self,
+        symbol: &str,
+    ) -> Result<OrderBookStream, DataError> {
+        use finam_proto::marketdata::market_data_service_client::MarketDataServiceClient;
+        use finam_proto::marketdata::SubscribeOrderBookRequest;
+
+        let token = self.auth.access_token().await?;
+        let mut client = MarketDataServiceClient::new(self.channel.clone());
+        let mut request = tonic::Request::new(SubscribeOrderBookRequest {
+            symbol: symbol.to_owned(),
+        });
+        crate::market::attach_auth(&mut request, &token)?;
+        let inner = client
+            .subscribe_order_book(request)
+            .await
+            .map_err(status_to_error)?
+            .into_inner();
+        Ok(OrderBookStream {
+            inner,
+            agg: crate::market::OrderBookAggregator::new(),
+        })
     }
 
     /// Подписаться на агрегированные свечи по инструменту.

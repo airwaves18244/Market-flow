@@ -12,7 +12,8 @@
       "tauri",
       "live",
       "moex",
-      "keyring"
+      "keyring",
+      "duckdb"
     ]
   },
   "app": {

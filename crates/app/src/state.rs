@@ -4,6 +4,7 @@
 //! планировщик ингеста) безопасно обращались к хранилищу из разных потоков.
 //! Бэкенд абстрактный: в тестах — `MemStore`, в продакшене — `DuckStore`.
 
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -15,6 +16,7 @@ use domain::history::{Catalog, DataSource, DatasetMeta};
 #[cfg(feature = "ingest")]
 use domain::Bar;
 use domain::TimeFrame;
+use domain::{OrderBook, Trade};
 #[cfg(feature = "ingest")]
 use storage::ingest::snapshot_from_bars;
 use storage::{StorageError, Store};
@@ -28,10 +30,11 @@ use crate::dto::{
     FootprintBarDto, FutoiDto, FutureGroupDto, Hi2Dto, HistoryPlanInput, ImpliedVolDto,
     ImpliedVolInput, InstrumentDto, KeyActivityRowDto, KeyActivityRuleDto, KeyActivitySampleInput,
     KeyActivitySummaryDto, MegaAlertDto, MegaThresholdsInput, OptionPriceDto, OptionPriceInput,
-    OrderDto, OrderInput, PositionDto, RobotConfigInput, RobotSignalDto, RrgSectorDto,
-    SectorEntryDto, SectorRow, SettingsDto, SmileFitDto, SmileFitInput, SmileModelDto,
-    StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput, SubmitResultDto, TimeRangeDto,
-    TopMoverDto, TradestatsDto, TurnoverByClassPoint, TurnoverPoint, YieldCurvePoint,
+    FillEventDto, OrderBookDto, OrderDto, OrderInput, PositionDto, RobotConfigInput,
+    RobotSignalDto, RrgSectorDto, SectorEntryDto, SectorRow, SettingsDto, SmileFitDto,
+    SmileFitInput, SmileModelDto, StrategyDescriptorDto, StrategyEvalDto, StrategyEvalInput,
+    SubmitResultDto, TimeRangeDto, TopMoverDto, TradeDto, TradestatsDto, TurnoverByClassPoint,
+    TurnoverPoint, YieldCurvePoint,
 };
 use crate::settings::SettingsStore;
 use crate::trade::TradeSession;
@@ -41,6 +44,17 @@ pub struct AppState {
     store: Mutex<Box<dyn Store + Send>>,
     /// Сессия симулированной торговли (paper trading).
     trade: TradeSession,
+    /// Снимок стакана (DOM) на инструмент для первичного ответа команды
+    /// `order_book` (GAP-5): до прихода первого события `orderbook:tick` фронт
+    /// получает последнее известное состояние, а не пустышку. Наполняется
+    /// live-стримом стакана (`tauri`+`live`) и симулятором. Отдельный `Mutex`
+    /// от стора — короткий лок на горячем пути стрима, не пересекается с
+    /// чтениями баров.
+    books: Mutex<HashMap<String, OrderBook>>,
+    /// Кольцевой буфер ленты сделок (Time&Sales) на инструмент для первичного
+    /// ответа команды `latest_trades` (GAP-5). Хронологический порядок; ёмкость
+    /// ограничена [`AppState::TAPE_CAPACITY`] (старые вытесняются).
+    tape: Mutex<HashMap<String, VecDeque<Trade>>>,
     /// Каталог локальных датасетов истории (фаза 11). Пока в памяти; боевой
     /// загрузчик/DuckDB-хранилище наполняют его по мере загрузки.
     history: Mutex<Catalog>,
@@ -90,6 +104,8 @@ impl AppState {
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
+            books: Mutex::new(HashMap::new()),
+            tape: Mutex::new(HashMap::new()),
             history: Mutex::new(history),
             settings: Mutex::new(SettingsStore::from_env()),
             #[cfg(feature = "llm")]
@@ -111,6 +127,8 @@ impl AppState {
         Self {
             store: Mutex::new(Box::new(store)),
             trade: TradeSession::new(),
+            books: Mutex::new(HashMap::new()),
+            tape: Mutex::new(HashMap::new()),
             history: Mutex::new(history),
             settings: Mutex::new(SettingsStore::new(settings_dir)),
             #[cfg(feature = "llm")]
@@ -125,6 +143,118 @@ impl AppState {
     /// Доступ к сессии торговли (для live-эмиттеров `on_trade`/`on_book`).
     pub fn trade_session(&self) -> &TradeSession {
         &self.trade
+    }
+
+    // ── Снимки live-рынка (GAP-3/GAP-5) ──────────────────────────────────────
+    // Наполняются live-стримами и симулятором, читаются командами
+    // `latest_trades`/`order_book` (фича `tauri`). Без `tauri` их дёргают только
+    // тесты — поэтому вне тестовой сборки без UI глушим dead_code, как и у
+    // остального read-API AppState.
+
+    /// Ёмкость кольцевого буфера ленты сделок на инструмент.
+    ///
+    /// Настройка `tape_limit` (по умолчанию 50) — это лимит ОТОБРАЖЕНИЯ строк во
+    /// фронте, а не глубина истории. Буфер держим с запасом фиксированной
+    /// ёмкостью, чтобы (а) не терять недавние сделки между обновлениями и
+    /// (б) не брать лок настроек на каждом тике стрима. Команда `latest_trades`
+    /// сама режет вывод по запрошенному `limit`.
+    #[cfg_attr(not(feature = "tauri"), allow(dead_code))]
+    const TAPE_CAPACITY: usize = 1000;
+
+    /// Обработать пачку live-сделок инструмента (GAP-3): положить в кольцевой
+    /// буфер ленты и прокинуть каждую печать в симулятор исполнения. Возвращает
+    /// `(DTO сделок для события trade:tick — в хронологическом порядке; фронт
+    /// добавляет каждое событие в начало ленты, исполнения симулятора для
+    /// fill:tick)`. Относительно сети функция чистая — покрыта юнит-тестом без
+    /// стрима.
+    #[cfg_attr(not(feature = "tauri"), allow(dead_code))]
+    pub fn ingest_live_trades(
+        &self,
+        symbol: &str,
+        trades: &[Trade],
+    ) -> (Vec<TradeDto>, Vec<FillEventDto>) {
+        // 1) Буфер ленты: пишем в хронологическом порядке, вытесняя старые.
+        if let Ok(mut tape) = self.tape.lock() {
+            let buf = tape.entry(symbol.to_owned()).or_default();
+            for t in trades {
+                buf.push_back(*t);
+                while buf.len() > Self::TAPE_CAPACITY {
+                    buf.pop_front();
+                }
+            }
+        }
+        // 2) Симулятор: каждая печать может исполнить отдыхающие лимитки/стопы.
+        let mut fills = Vec::new();
+        for t in trades {
+            fills.extend(self.trade.on_trade(t));
+        }
+        // 3) DTO для фронта — в хронологическом порядке: событие `trade:tick`
+        //    фронт добавляет в начало ленты, поэтому эмит oldest→newest даёт
+        //    корректный порядок «свежие сверху».
+        let dtos = trades.iter().map(TradeDto::from).collect();
+        (dtos, fills)
+    }
+
+    /// Первичный снимок ленты сделок инструмента (команда `latest_trades`):
+    /// последние `limit` сделок, свежие — первыми (буфер хронологический, читаем
+    /// с конца). Пусто, если по инструменту ещё не было live-сделок.
+    #[cfg_attr(not(feature = "tauri"), allow(dead_code))]
+    pub fn latest_trades_snapshot(&self, symbol: &str, limit: Option<usize>) -> Vec<TradeDto> {
+        let tape = match self.tape.lock() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        let buf = match tape.get(symbol) {
+            Some(b) => b,
+            None => return Vec::new(),
+        };
+        let n = limit.unwrap_or(usize::MAX);
+        buf.iter().rev().take(n).map(TradeDto::from).collect()
+    }
+
+    /// Обработать live-снимок стакана инструмента (GAP-3): сохранить его как
+    /// последний известный и прокинуть в симулятор (исполнение ставших
+    /// маркетабельными лимиток). Возвращает `(DTO стакана для orderbook:tick,
+    /// исполнения для fill:tick)`. Относительно сети чистая — покрыта тестом.
+    #[cfg_attr(not(feature = "tauri"), allow(dead_code))]
+    pub fn ingest_live_book(
+        &self,
+        symbol: &str,
+        book: OrderBook,
+    ) -> (OrderBookDto, Vec<FillEventDto>) {
+        let fills = self.trade.on_book(&book);
+        let dto = OrderBookDto::from(&book);
+        if let Ok(mut books) = self.books.lock() {
+            books.insert(symbol.to_owned(), book);
+        }
+        (dto, fills)
+    }
+
+    /// Первичный снимок стакана инструмента (команда `order_book`): последний
+    /// известный стакан, усечённый до `depth` уровней на сторону. Пустой стакан,
+    /// если по инструменту ещё не было live-обновлений.
+    #[cfg_attr(not(feature = "tauri"), allow(dead_code))]
+    pub fn order_book_snapshot(&self, symbol: &str, depth: Option<usize>) -> OrderBookDto {
+        let empty = || OrderBookDto {
+            ts: 0,
+            bids: Vec::new(),
+            asks: Vec::new(),
+        };
+        let books = match self.books.lock() {
+            Ok(g) => g,
+            Err(_) => return empty(),
+        };
+        match books.get(symbol) {
+            Some(book) => {
+                let mut dto = OrderBookDto::from(book);
+                if let Some(d) = depth {
+                    dto.bids.truncate(d);
+                    dto.asks.truncate(d);
+                }
+                dto
+            }
+            None => empty(),
+        }
     }
 
     /// Выполнить чтение под блокировкой. Отравленный мьютекс → ошибка БД.
@@ -175,6 +305,19 @@ impl AppState {
             }
             Ok(())
         })
+    }
+
+    /// Наполнить справочник инструментов (`AssetsService.Assets`) в переданный
+    /// стор. Точка входа боевого запуска ([`crate::live`]): GUI- и headless-путь
+    /// пишут инструменты в тот же `Store`, из которого их читает команда
+    /// `instruments` (вкладка «Обзор»). Идемпотентно по ключу схемы (повторный
+    /// вызов не плодит дублей). Возвращает число обработанных строк.
+    #[cfg(feature = "ingest")]
+    pub fn ingest_instruments(
+        &self,
+        items: &[domain::Instrument],
+    ) -> Result<usize, StorageError> {
+        self.write(|s| s.upsert_instruments(items))
     }
 
     pub fn instruments(&self) -> Result<Vec<InstrumentDto>, StorageError> {
@@ -800,7 +943,129 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::BookLevel;
     use storage::MemStore;
+
+    fn migrated() -> AppState {
+        let mut store = MemStore::new();
+        store.migrate().unwrap();
+        AppState::new(store)
+    }
+
+    fn mk_trade(ts: i64, price: f64) -> Trade {
+        Trade {
+            ts,
+            price,
+            size: 1.0,
+            buyer_initiated: Some(true),
+        }
+    }
+
+    #[test]
+    fn live_tape_buffer_order_and_limit() {
+        let state = migrated();
+        // Пусто до первых сделок.
+        assert!(state.latest_trades_snapshot("SBER@MISX", None).is_empty());
+
+        let trades: Vec<Trade> = (0..5).map(|i| mk_trade(i, 100.0 + i as f64)).collect();
+        let (dtos, fills) = state.ingest_live_trades("SBER@MISX", &trades);
+        assert!(fills.is_empty(), "без заявок исполнений нет");
+        // DTO для эмита — в хронологическом порядке (oldest→newest).
+        assert_eq!(dtos.len(), 5);
+        assert_eq!(dtos.first().unwrap().ts, 0);
+        assert_eq!(dtos.last().unwrap().ts, 4);
+
+        // Снимок — свежие первыми.
+        let snap = state.latest_trades_snapshot("SBER@MISX", None);
+        assert_eq!(snap.len(), 5);
+        assert_eq!(snap[0].ts, 4);
+        assert_eq!(snap[4].ts, 0);
+
+        // limit усекает вывод, сохраняя «свежие первыми».
+        let snap2 = state.latest_trades_snapshot("SBER@MISX", Some(2));
+        assert_eq!(snap2.len(), 2);
+        assert_eq!(snap2[0].ts, 4);
+        assert_eq!(snap2[1].ts, 3);
+
+        // Разные символы не смешиваются.
+        assert!(state.latest_trades_snapshot("GAZP@MISX", None).is_empty());
+    }
+
+    #[test]
+    fn live_tape_respects_capacity() {
+        let state = migrated();
+        let n = (AppState::TAPE_CAPACITY + 50) as i64;
+        let trades: Vec<Trade> = (0..n).map(|i| mk_trade(i, 1.0)).collect();
+        state.ingest_live_trades("X@MISX", &trades);
+
+        let snap = state.latest_trades_snapshot("X@MISX", None);
+        assert_eq!(snap.len(), AppState::TAPE_CAPACITY, "буфер обрезан по ёмкости");
+        // Самая свежая сохранена, самые старые вытеснены (ts 0..49).
+        assert_eq!(snap[0].ts, n - 1);
+        assert_eq!(snap[AppState::TAPE_CAPACITY - 1].ts, 50);
+    }
+
+    #[test]
+    fn live_book_snapshot_roundtrip_and_depth() {
+        let state = migrated();
+        // Пустой стакан до обновлений.
+        let empty = state.order_book_snapshot("SBER@MISX", None);
+        assert_eq!(empty.ts, 0);
+        assert!(empty.bids.is_empty() && empty.asks.is_empty());
+
+        let book = OrderBook {
+            ts: 42,
+            bids: vec![
+                BookLevel { price: 99.0, size: 10.0 },
+                BookLevel { price: 98.0, size: 5.0 },
+                BookLevel { price: 97.0, size: 3.0 },
+            ],
+            asks: vec![
+                BookLevel { price: 100.0, size: 8.0 },
+                BookLevel { price: 101.0, size: 4.0 },
+            ],
+        };
+        let (dto, _fills) = state.ingest_live_book("SBER@MISX", book);
+        assert_eq!(dto.ts, 42);
+        assert_eq!(dto.bids.len(), 3);
+
+        // Снимок отдаёт сохранённое, усечение по depth на сторону.
+        let snap = state.order_book_snapshot("SBER@MISX", Some(2));
+        assert_eq!(snap.ts, 42);
+        assert_eq!(snap.bids.len(), 2);
+        assert_eq!(snap.asks.len(), 2);
+        assert_eq!(snap.bids[0].price, 99.0);
+
+        // Без depth — все уровни.
+        assert_eq!(state.order_book_snapshot("SBER@MISX", None).bids.len(), 3);
+    }
+
+    #[test]
+    fn live_book_feeds_simulator_and_emits_fill() {
+        use crate::dto::OrderInput;
+        let state = migrated();
+        // Отдыхающая лимитка на покупку по 101 (готова платить до 101).
+        let res = state
+            .submit_order(&OrderInput {
+                symbol: "SBER@MISX".into(),
+                side: "buy".into(),
+                qty: 1.0,
+                kind: "limit".into(),
+                price: Some(101.0),
+                tif: None,
+            })
+            .unwrap();
+        assert!(res.fills.is_empty(), "без стакана лимитка отдыхает");
+
+        // Приходит стакан с аском 100 — лимитка становится маркетабельной.
+        let book = OrderBook {
+            ts: 1,
+            bids: vec![BookLevel { price: 99.0, size: 10.0 }],
+            asks: vec![BookLevel { price: 100.0, size: 10.0 }],
+        };
+        let (_dto, fills) = state.ingest_live_book("SBER@MISX", book);
+        assert_eq!(fills.len(), 1, "стакан должен исполнить лимитку в симуляторе");
+    }
 
     #[test]
     fn app_state_reads_through_to_store() {

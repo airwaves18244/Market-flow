@@ -270,7 +270,7 @@ where
         if cancel.is_cancelled() {
             break;
         }
-        match source.load(ticker, tf, gap.from, gap.till).await {
+        match source.load(ticker, tf, gap.from, gap.till, &|| cancel.is_cancelled()).await {
             Ok(bars) => {
                 // Страхуемся: берём только бары нужного ключа (источник обязан
                 // это гарантировать, но фильтр дешевле дальнейшей путаницы).
@@ -278,26 +278,18 @@ where
                     .into_iter()
                     .filter(|b| b.secid == ticker && b.tf == tf)
                     .collect();
-                if bars.is_empty() {
-                    // Пустой ответ без ошибки: не помечаем диапазон покрытым
-                    // (иначе бы дыра «закрылась» без единого бара). Сообщаем
-                    // предупреждением в тот же канал, что и ошибки задач.
-                    emit(HistoryEvent::Error {
-                        task_id,
-                        ticker: Some(ticker.to_owned()),
-                        tf: Some(tf),
-                        message: format!(
-                            "пустой ответ для [{}, {}) — диапазон оставлен дырой",
-                            gap.from, gap.till
-                        ),
-                    });
-                } else {
+                if !bars.is_empty() {
                     written += state
                         .ingest_history_bars(&bars)
                         .map_err(|e| e.to_string())? as u64;
-                    // Помечаем покрытым только фактически загруженный диапазон.
-                    attempted.push(*gap);
                 }
+                // R-6: успешный ответ — даже законно пустой (выходные, делистинг,
+                // окно без торгов) — считается покрытием диапазона, а не дырой.
+                // Помечаем `gap` обработанным, чтобы каталог зарегистрировал его
+                // (при пустом ответе — с bars=0) и окно не перезапрашивалось
+                // вечно с ложной ошибкой. Ошибку эмитим только на реальный сбой
+                // источника (ветка `Err` ниже).
+                attempted.push(*gap);
                 let percent = (((i as u64) + 1) * 100 / total) as u8;
                 emit(HistoryEvent::Progress {
                     task_id,
@@ -605,8 +597,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_response_keeps_range_as_gap() {
-        // Источник без баров: ответ пуст, но без ошибки транспорта.
+    async fn empty_response_closes_range_without_error() {
+        // R-6: источник без баров — ответ пуст, но это УСПЕХ (законно пустое
+        // окно: выходные/делистинг). Такой ответ должен считаться покрытием, а
+        // не вечной дырой с ложной ошибкой.
         let st = state();
         let day = TimeFrame::D1.seconds();
         let src = FakeHistorySource::with_bars(Vec::new());
@@ -615,30 +609,27 @@ mod tests {
 
         let summary = run_load(&st, &src, &request, 1, &CancelFlag::new(), &|e| col.push(e)).await;
 
-        // Задача «пройдена» без ошибки источника, но баров нет и каталог пуст.
+        // Задача завершена успешно: баров нет, но и ошибки нет.
         assert_eq!(summary.bars, 0);
         assert_eq!(summary.completed, 1);
         assert_eq!(summary.errors, 0);
-        assert!(st.history_datasets().is_empty());
 
-        // Диапазон остался дырой: повторный план — весь запрос целиком.
-        let missing = st
-            .history_missing(
-                DataSource::Finam,
-                "SBER",
-                TimeFrame::D1,
-                TimeRange::new(0, 3 * day),
-            )
-            .unwrap();
-        assert_eq!(missing, vec![TimeRange::new(0, 3 * day)]);
+        // Диапазон зарегистрирован в каталоге как покрытие (bars=0) — окно
+        // больше не «висит» дырой в глазах пользователя.
+        let datasets = st.history_datasets();
+        assert_eq!(datasets.len(), 1);
+        assert_eq!(datasets[0].secid, "SBER");
+        assert_eq!(datasets[0].bars, 0);
 
-        // На пустой ответ эмитнуто предупреждение (канал `history:error`).
-        let warnings = col
+        // Ни одного события `history:error` на законно пустой ответ.
+        let errors = col
             .events()
             .into_iter()
             .filter(|e| matches!(e, HistoryEvent::Error { .. }))
             .count();
-        assert!(warnings >= 1, "ожидалось предупреждение о пустом ответе");
+        assert_eq!(errors, 0, "пустой успешный ответ не должен эмитить ошибку");
+        // Прогресс задачи всё равно доведён до 100%.
+        assert_eq!(col.progress("SBER", TimeFrame::D1).last(), Some(&100));
     }
 
     #[test]

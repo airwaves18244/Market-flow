@@ -62,7 +62,7 @@ pub use rate::RateLimiter;
 pub use secret::KeyringSecretStore;
 pub use secret::{MemSecretStore, SecretStore};
 #[cfg(feature = "grpc")]
-pub use stream::{BarStream, QuoteStream, StreamReconnect, TradeStream};
+pub use stream::{BarStream, OrderBookStream, QuoteStream, StreamReconnect, TradeStream};
 
 use domain::{Bar, Instrument, Quote, Trade};
 

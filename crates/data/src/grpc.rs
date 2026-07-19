@@ -15,6 +15,7 @@ use std::future::Future;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::backoff::jitter_fraction;
 use crate::{Backoff, DataError, Method, RateLimiter, SecretStore, TokenState};
 
 /// Свежевыданный access-token и его время жизни.
@@ -38,12 +39,19 @@ pub trait AuthTransport: Send + Sync {
 
 /// Менеджер авторизации: выдаёт действующий JWT, обновляя его при необходимости.
 ///
-/// Потокобезопасен: текущий [`TokenState`] под мьютексом, который не удерживается
-/// через `await`.
+/// Потокобезопасен: текущий [`TokenState`] под синхронным мьютексом, который
+/// **не** удерживается через `await`. Обмен секрета на токен сериализуется
+/// отдельным асинхронным `refresh_lock` (single-flight, R-7): при протухшем
+/// токене N параллельных вызовов не устраивают залп из N обменов `Auth` —
+/// обмен делает только первый взявший лок, остальные после ожидания
+/// перечитывают [`TokenState`] и переиспользуют уже свежий токен.
 pub struct AuthManager<T: AuthTransport, S: SecretStore> {
     transport: T,
     secret: S,
     state: Mutex<TokenState>,
+    /// Сериализует секцию обмена токена (single-flight). Асинхронный мьютекс —
+    /// его можно держать через `await` самого обмена, в отличие от `state`.
+    refresh_lock: tokio::sync::Mutex<()>,
     limiter: RateLimiter,
     backoff: Backoff,
 }
@@ -73,6 +81,7 @@ impl<T: AuthTransport, S: SecretStore> AuthManager<T, S> {
             transport,
             secret,
             state: Mutex::new(state),
+            refresh_lock: tokio::sync::Mutex::new(()),
             limiter,
             backoff,
         }
@@ -93,8 +102,39 @@ impl<T: AuthTransport, S: SecretStore> AuthManager<T, S> {
         self.refresh().await
     }
 
-    /// Принудительно обновить токен (например, после ответа `UNAUTHENTICATED`).
+    /// Обновить токен под single-flight (R-7): взять `refresh_lock`, затем ещё
+    /// раз проверить [`TokenState`] — пока ждали лок, обмен мог уже сделать
+    /// другой вызывающий, и тогда переиспользуем его свежий токен без нового
+    /// обмена `Auth`. Реальный обмен ([`do_refresh`]) выполняет лишь тот, кто
+    /// увидел кэш всё ещё протухшим.
+    ///
+    /// После [`invalidate`] кэш пуст, поэтому повторная проверка ничего не
+    /// вернёт и обмен гарантированно произойдёт — это опора [`force_refresh`].
+    ///
+    /// [`do_refresh`]: Self::do_refresh
+    /// [`invalidate`]: Self::invalidate
+    /// [`force_refresh`]: Self::force_refresh
     pub async fn refresh(&self) -> Result<String, DataError> {
+        let _guard = self.refresh_lock.lock().await;
+        // Повторная проверка под локом: возможно, обмен уже сделал сосед.
+        {
+            let now = Instant::now();
+            let st = self.state.lock().expect("token-state mutex отравлен");
+            if !st.needs_refresh(now) {
+                if let Some(tok) = st.valid_token(now) {
+                    return Ok(tok.to_owned());
+                }
+            }
+        }
+        self.do_refresh().await
+    }
+
+    /// Собственно обмен секрета на токен (внутри single-flight [`refresh`]):
+    /// уважает лимит метода `Auth`, повторяет транзиентные сбои с [`Backoff`],
+    /// на невосстановимой ошибке сбрасывает кэш токена.
+    ///
+    /// [`refresh`]: Self::refresh
+    async fn do_refresh(&self) -> Result<String, DataError> {
         let secret = self
             .secret
             .load()?
@@ -134,6 +174,34 @@ impl<T: AuthTransport, S: SecretStore> AuthManager<T, S> {
         }
     }
 
+    /// Сбросить закэшированный токен: следующий [`access_token`] сходит за новым.
+    ///
+    /// Нужен, когда сервер ответил `UNAUTHENTICATED` до истечения skew-окна
+    /// (например, токен инвалидирован на стороне Finam): формально «годный» по
+    /// сроку токен из [`TokenState`] больше нельзя переиспользовать.
+    ///
+    /// [`access_token`]: Self::access_token
+    pub fn invalidate(&self) {
+        self.state
+            .lock()
+            .expect("token-state mutex отравлен")
+            .clear();
+    }
+
+    /// Форсированно получить новый токен, минуя кэш: сброс [`TokenState`] +
+    /// один обмен через транспорт (по образцу [`refresh`]).
+    ///
+    /// Вызывается после отказа авторизации на боевом вызове — ровно один раз на
+    /// вызов (защита от бесконечного цикла re-auth — на стороне вызывающего).
+    ///
+    /// [`refresh`]: Self::refresh
+    pub async fn force_refresh(&self) -> Result<String, DataError> {
+        // Сбрасываем кэш до обмена: даже если refresh упадёт, протухший токен
+        // не отдастся как «действующий» из-под конкурентного access_token.
+        self.invalidate();
+        self.refresh().await
+    }
+
     /// Снимок: есть ли сейчас действующий (не требующий refresh) токен.
     pub fn has_fresh_token(&self) -> bool {
         let now = Instant::now();
@@ -147,13 +215,6 @@ impl<T: AuthTransport, S: SecretStore> AuthManager<T, S> {
             tokio::time::sleep(delay).await;
         }
     }
-}
-
-/// Доля джиттера в `[0, 1)` из субнаносекунд монотонных часов. Размазывает
-/// повторы без внешнего `rand`; качество ГПСЧ здесь не критично.
-fn jitter_fraction() -> f64 {
-    let nanos = Instant::now().elapsed().subsec_nanos();
-    f64::from(nanos % 1_000) / 1_000.0
 }
 
 /// Время жизни токена из меток `created_at`/`expires_at` (в секундах эпохи).
@@ -420,6 +481,50 @@ mod tests {
         for h in handles {
             assert_eq!(h.await.unwrap().unwrap(), "jwt-shared");
         }
+    }
+
+    /// R-7: при протухшем токене N параллельных `access_token` не должны
+    /// устраивать залп из N обменов `Auth` — single-flight сводит их к одному.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn refresh_is_single_flight_under_concurrency() {
+        // Транспорт с задержкой: пока первый взявший `refresh_lock` делает обмен,
+        // остальные девять успевают увидеть протухший кэш и встать в очередь на
+        // лок; после обмена они перечитают уже свежий токен и обмен не повторят.
+        struct SlowTransport {
+            calls: Arc<AtomicU32>,
+        }
+        impl AuthTransport for SlowTransport {
+            async fn authenticate(&self, _secret: &str) -> Result<AuthToken, DataError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Ok(AuthToken {
+                    token: "jwt-shared".to_owned(),
+                    ttl: Duration::from_secs(900),
+                })
+            }
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let m = Arc::new(AuthManager::with_policy(
+            SlowTransport {
+                calls: Arc::clone(&calls),
+            },
+            MemSecretStore::with_secret("api-secret"),
+            TokenState::new(), // токена ещё нет → все вызовы увидят needs_refresh
+            RateLimiter::finam_default(),
+            no_sleep_backoff(5),
+        ));
+
+        let mut handles = Vec::new();
+        for _ in 0..10 {
+            let m = Arc::clone(&m);
+            handles.push(tokio::spawn(async move { m.access_token().await }));
+        }
+        for h in handles {
+            assert_eq!(h.await.unwrap().unwrap(), "jwt-shared");
+        }
+        // Ровно один обмен Auth на десять конкурентных вызовов.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

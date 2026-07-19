@@ -16,6 +16,7 @@
 //! [`data::moex::FakeAlgoSource`], без сети. Боевой источник —
 //! `data::moex::MoexAlgo<ReqwestTransport>` (см. [`crate::live`]).
 
+use std::borrow::Borrow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,6 +27,36 @@ use storage::StorageError;
 
 use crate::cancel::CancelFlag;
 use crate::state::AppState;
+
+/// Переменная окружения с токеном MOEX ALGOPACK (`Authorization: Bearer`).
+pub const ALGO_TOKEN_ENV_VAR: &str = "MOEX_ALGOPACK_TOKEN";
+
+/// Достать токен ALGOPACK: переменная окружения [`ALGO_TOKEN_ENV_VAR`], затем
+/// файл `.env` (поиск вверх по дереву каталогов, ключи `MOEX_ALGOPACK_TOKEN`/
+/// `ALGOPACK_TOKEN`, без учёта регистра). Отдельный секрет от Finam API — разные
+/// хосты/авторизация (`Authorization: Bearer` на `apim.moex.com`).
+///
+/// Живёт здесь, а не в [`crate::live`] (R-8/GAP-6): модуль `live` собирается
+/// только под фичей `live`, а токен ALGOPACK нужен и в moex-сборке без live
+/// (команда `history_load` источника MOEX, боевой GUI-ингест).
+pub fn load_algo_token() -> Result<String, String> {
+    if let Ok(s) = std::env::var(ALGO_TOKEN_ENV_VAR) {
+        if !s.trim().is_empty() {
+            return Ok(s.trim().to_owned());
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let keys = ["MOEX_ALGOPACK_TOKEN", "ALGOPACK_TOKEN"];
+        if let Some(s) = data::dotenv::find_dotenv_value(&cwd, 4, &keys) {
+            return Ok(s.trim().to_owned());
+        }
+    }
+    Err(
+        "токен ALGOPACK не задан: установите переменную окружения MOEX_ALGOPACK_TOKEN \
+         или положите его в файл .env (MOEX_ALGOPACK_TOKEN=…)"
+            .to_owned(),
+    )
+}
 
 /// Ошибка такта ингеста ALGOPACK: сбой источника или хранилища.
 #[derive(Debug, thiserror::Error)]
@@ -61,22 +92,23 @@ impl Default for AlgoIngestConfig {
 }
 
 /// Планировщик батч-поллинга датасетов ALGOPACK в хранилище.
-pub struct AlgoIngestService<S: AlgoSource> {
+///
+/// Параметр `H` — держатель состояния. По умолчанию `Arc<AppState>` (владеющий
+/// headless-путь), но подойдёт и `&AppState` — так GUI-путь (Tauri-setup)
+/// наполняет тот же стор, которым владеет окно, не создавая собственного (см.
+/// [`run_algo_ingest_into`]). Оба варианта удовлетворяют `Borrow<AppState>` —
+/// тот же приём, что у [`crate::ingest::IngestService`].
+pub struct AlgoIngestService<S: AlgoSource, H = Arc<AppState>> {
     source: S,
-    state: Arc<AppState>,
+    state: H,
     cursor: BatchCursor,
     limiter: RateLimiter,
     config: AlgoIngestConfig,
 }
 
-impl<S: AlgoSource> AlgoIngestService<S> {
+impl<S: AlgoSource, H: Borrow<AppState>> AlgoIngestService<S, H> {
     /// Создать планировщик для заданного вотчлиста.
-    pub fn new(
-        source: S,
-        state: Arc<AppState>,
-        symbols: Vec<String>,
-        config: AlgoIngestConfig,
-    ) -> Self {
+    pub fn new(source: S, state: H, symbols: Vec<String>, config: AlgoIngestConfig) -> Self {
         let cursor = BatchCursor::new(symbols, config.batch);
         Self {
             source,
@@ -103,70 +135,124 @@ impl<S: AlgoSource> AlgoIngestService<S> {
     /// [`crate::ingest::IngestService::tick`].
     pub async fn tick(&mut self) -> Result<usize, AlgoIngestError> {
         let market_code = self.config.market.code();
+        let state = self.state.borrow();
         let mut written = 0usize;
 
+        // R-10: сбой одного датасета/тикера не рвёт весь такт — логируем
+        // предупреждение и продолжаем батч. Каждый успешный кусок пишется
+        // независимо; такт возвращает Ok с числом фактически записанных строк.
         if self.limiter.try_acquire(Method::MoexHi2).is_ok() {
-            let points = self
+            match self
                 .source
                 .hi2(self.config.market, self.config.range.clone())
-                .await?;
-            if !points.is_empty() {
-                written += self.state.ingest_algo_hi2(market_code, &points)?;
+                .await
+            {
+                Ok(points) if !points.is_empty() => match state.ingest_algo_hi2(market_code, &points)
+                {
+                    Ok(n) => written += n,
+                    Err(e) => tracing::warn!(error = %e, "ингест hi2: ошибка записи"),
+                },
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "ингест hi2: ошибка источника"),
             }
         }
 
         for symbol in self.cursor.next_batch() {
             if self.limiter.try_acquire(Method::MoexTradestats).is_ok() {
-                let candles = self
+                match self
                     .source
                     .tradestats(
                         self.config.market,
                         Some(symbol.clone()),
                         self.config.range.clone(),
                     )
-                    .await?;
-                if !candles.is_empty() {
-                    written += self.state.ingest_algo_tradestats(market_code, &candles)?;
+                    .await
+                {
+                    Ok(candles) if !candles.is_empty() => {
+                        match state.ingest_algo_tradestats(market_code, &candles) {
+                            Ok(n) => written += n,
+                            Err(e) => {
+                                tracing::warn!(symbol = %symbol, error = %e, "ингест tradestats: ошибка записи")
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(symbol = %symbol, error = %e, "ингест tradestats: ошибка источника")
+                    }
                 }
             }
 
             if self.limiter.try_acquire(Method::MoexObstats).is_ok() {
-                let points = self
+                match self
                     .source
                     .obstats(
                         self.config.market,
                         Some(symbol.clone()),
                         self.config.range.clone(),
                     )
-                    .await?;
-                if !points.is_empty() {
-                    written += self.state.ingest_algo_obstats(market_code, &points)?;
+                    .await
+                {
+                    Ok(points) if !points.is_empty() => {
+                        match state.ingest_algo_obstats(market_code, &points) {
+                            Ok(n) => written += n,
+                            Err(e) => {
+                                tracing::warn!(symbol = %symbol, error = %e, "ингест obstats: ошибка записи")
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(symbol = %symbol, error = %e, "ингест obstats: ошибка источника")
+                    }
                 }
             }
 
             if self.limiter.try_acquire(Method::MoexOrderstats).is_ok() {
-                let points = self
+                match self
                     .source
                     .orderstats(
                         self.config.market,
                         Some(symbol.clone()),
                         self.config.range.clone(),
                     )
-                    .await?;
-                if !points.is_empty() {
-                    written += self.state.ingest_algo_orderstats(market_code, &points)?;
+                    .await
+                {
+                    Ok(points) if !points.is_empty() => {
+                        match state.ingest_algo_orderstats(market_code, &points) {
+                            Ok(n) => written += n,
+                            Err(e) => {
+                                tracing::warn!(symbol = %symbol, error = %e, "ингест orderstats: ошибка записи")
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(symbol = %symbol, error = %e, "ингест orderstats: ошибка источника")
+                    }
                 }
             }
 
             if self.config.market == Market::Fo
                 && self.limiter.try_acquire(Method::MoexFutoi).is_ok()
             {
-                let points = self
+                match self
                     .source
                     .futoi(Some(symbol.clone()), self.config.range.clone())
-                    .await?;
-                if !points.is_empty() {
-                    written += self.state.ingest_algo_futoi(market_code, &points)?;
+                    .await
+                {
+                    Ok(points) if !points.is_empty() => {
+                        match state.ingest_algo_futoi(market_code, &points) {
+                            Ok(n) => written += n,
+                            Err(e) => {
+                                tracing::warn!(symbol = %symbol, error = %e, "ингест futoi: ошибка записи")
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(symbol = %symbol, error = %e, "ингест futoi: ошибка источника")
+                    }
                 }
             }
         }
@@ -194,6 +280,35 @@ impl<S: AlgoSource> AlgoIngestService<S> {
             }
         }
     }
+}
+
+/// Общее ядро боевого ALGOPACK-ингеста: резолв токена → построение источника
+/// (`MoexAlgo` поверх `reqwest`) → планировщик поверх ПЕРЕДАННОГО стора.
+///
+/// Держатель состояния `H` передаёт вызывающая сторона: GUI-путь (Tauri-setup)
+/// отдаёт `&AppState` окна (тот же стор, что читают команды/вкладки), headless —
+/// `Arc<AppState>`. Оба удовлетворяют `Borrow<AppState>` — тот же паттерн, что у
+/// [`crate::live::run_ingest_into`] (GAP-6).
+pub async fn run_algo_ingest_into<H>(
+    state: H,
+    symbols: Vec<String>,
+    config: AlgoIngestConfig,
+    cancel: CancelFlag,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    H: Borrow<AppState>,
+{
+    let token = load_algo_token()?;
+    let transport = data::ReqwestTransport::new()?;
+    let client = data::MoexAlgo::new(transport, token);
+    tracing::info!(
+        market = config.market.code(),
+        symbols = symbols.len(),
+        "live: запуск планировщика ингеста ALGOPACK в переданный стор"
+    );
+    let svc = AlgoIngestService::new(client, state, symbols, config);
+    svc.run(cancel).await;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -424,6 +539,71 @@ mod tests {
 
         let written = svc.tick().await.unwrap();
         assert_eq!(written, 2); // 1 obstats + 1 orderstats
+    }
+
+    #[tokio::test]
+    async fn one_symbol_error_does_not_abort_tick() {
+        // R-10: источник падает на tradestats первого тикера, но второй всё
+        // равно ингестится — ошибка одного символа не рвёт весь такт.
+        use domain::algo::{ObstatsPoint, OrderstatsPoint};
+
+        struct FlakyBySymbol;
+        impl AlgoSource for FlakyBySymbol {
+            async fn tradestats(
+                &self,
+                _m: Market,
+                ticker: Option<String>,
+                _r: DateRange,
+            ) -> Result<Vec<SuperCandle>, DataError> {
+                match ticker.as_deref() {
+                    Some("BAD") => Err(DataError::Transport("сбой сети".into())),
+                    other => Ok(vec![candle(other.unwrap_or("GOOD"), 1)]),
+                }
+            }
+            async fn orderstats(
+                &self,
+                _m: Market,
+                _t: Option<String>,
+                _r: DateRange,
+            ) -> Result<Vec<OrderstatsPoint>, DataError> {
+                Ok(Vec::new())
+            }
+            async fn obstats(
+                &self,
+                _m: Market,
+                _t: Option<String>,
+                _r: DateRange,
+            ) -> Result<Vec<ObstatsPoint>, DataError> {
+                Ok(Vec::new())
+            }
+            async fn hi2(
+                &self,
+                _m: Market,
+                _r: DateRange,
+            ) -> Result<Vec<Hi2Point>, DataError> {
+                Ok(Vec::new())
+            }
+            async fn futoi(
+                &self,
+                _t: Option<String>,
+                _r: DateRange,
+            ) -> Result<Vec<FutoiPoint>, DataError> {
+                Ok(Vec::new())
+            }
+        }
+
+        let state = state_with_migrated_store();
+        let mut svc = AlgoIngestService::new(
+            FlakyBySymbol,
+            Arc::clone(&state),
+            vec!["BAD".into(), "GOOD".into()],
+            cfg(Market::Eq, 10),
+        );
+
+        let written = svc.tick().await.unwrap();
+        assert_eq!(written, 1); // упал только BAD, GOOD записан
+        assert!(state.algo_tradestats("eq", "BAD", 0, 9).unwrap().is_empty());
+        assert_eq!(state.algo_tradestats("eq", "GOOD", 0, 9).unwrap().len(), 1);
     }
 
     #[tokio::test]

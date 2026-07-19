@@ -37,12 +37,21 @@ use crate::{DataError, MarketData};
 pub trait HistorySource {
     /// Загрузить историю инструмента `ticker` в тайм-фрейме `tf` за окно
     /// `[from, till)` (UNIX-секунды UTC, полуоткрыто: `till` исключается).
+    ///
+    /// `cancel` — кооперативный опрос отмены (R-3): реализации, которые тянут
+    /// диапазон несколькими страницами (`FinamHistory`), обязаны проверять его
+    /// между страницами, чтобы отмена загрузки прерывала уже начатый сетевой
+    /// разбор, а не ждала завершения всех страниц. Проверка передаётся
+    /// замыканием, чтобы контракт (`data`) не зависел от примитива отмены из
+    /// `app` (`CancelFlag`). Уже отправленный in-flight запрос прерывать не
+    /// требуется — его ограничивает per-request таймаут транспорта.
     fn load(
         &self,
         ticker: &str,
         tf: TimeFrame,
         from: i64,
         till: i64,
+        cancel: &(dyn Fn() -> bool + Sync),
     ) -> impl std::future::Future<Output = Result<Vec<HistoryBar>, DataError>> + Send;
 }
 
@@ -86,6 +95,7 @@ impl<M: MarketData + Sync> HistorySource for FinamHistory<M> {
         tf: TimeFrame,
         from: i64,
         till: i64,
+        cancel: &(dyn Fn() -> bool + Sync),
     ) -> Result<Vec<HistoryBar>, DataError> {
         if till < from {
             return Ok(Vec::new());
@@ -101,6 +111,11 @@ impl<M: MarketData + Sync> HistorySource for FinamHistory<M> {
         // BTreeMap по `ts` даёт склейку страниц, дедуп и порядок «за один проход».
         let mut merged: BTreeMap<i64, HistoryBar> = BTreeMap::new();
         for page in pages {
+            // Отмена между страницами (R-3): не начинаем следующий сетевой
+            // запрос, если загрузку уже отменили — отдаём то, что успели склеить.
+            if cancel() {
+                break;
+            }
             let bars = self
                 .market
                 .bars(ticker, tf, page.from_ts, page.to_ts)
@@ -151,8 +166,11 @@ impl<S: crate::moex::AlgoSource + Sync> HistorySource for MoexHistory<S> {
         tf: TimeFrame,
         from: i64,
         till: i64,
+        cancel: &(dyn Fn() -> bool + Sync),
     ) -> Result<Vec<HistoryBar>, DataError> {
-        if till < from {
+        // Одностраничный источник (один запрос `tradestats` на окно), но отмену
+        // всё равно уважаем до сетевого вызова (R-3).
+        if till < from || cancel() {
             return Ok(Vec::new());
         }
         let range = crate::moex::DateRange {
@@ -222,7 +240,11 @@ impl HistorySource for FakeHistorySource {
         tf: TimeFrame,
         from: i64,
         till: i64,
+        cancel: &(dyn Fn() -> bool + Sync),
     ) -> Result<Vec<HistoryBar>, DataError> {
+        if cancel() {
+            return Ok(Vec::new());
+        }
         if let Some(err) = &self.error {
             return Err(err.clone());
         }
@@ -336,7 +358,7 @@ mod tests {
         let day = TimeFrame::D1.seconds();
         let market = FakeMarket::new(day);
         let hist = FinamHistory::with_max_bars(market, 4);
-        let bars = block_on(hist.load("SBER", TimeFrame::D1, 0, 9 * day)).unwrap();
+        let bars = block_on(hist.load("SBER", TimeFrame::D1, 0, 9 * day, &|| false)).unwrap();
 
         // Склейка: по бару на сутки [0, 9*day) → 9 баров (без бара на границе).
         assert_eq!(bars.len(), 9);
@@ -346,11 +368,13 @@ mod tests {
         // порядок строго по возрастанию
         assert!(bars.windows(2).all(|w| w[0].ts < w[1].ts));
 
-        // Чанкинг диапазона не зависит от полуоткрытого пост-фильтра.
+        // Чанкинг диапазона не зависит от полуоткрытого пост-фильтра. Границы
+        // страниц считаются в секундах и смежны (без «мёртвой зоны» на стыке):
+        // страница покрывает span = 4*day секунд подряд.
         let calls = hist.market.calls.lock().unwrap().clone();
         assert_eq!(calls.len(), 3);
-        assert_eq!(calls[0], (0, 3 * day));
-        assert_eq!(calls[1], (4 * day, 7 * day));
+        assert_eq!(calls[0], (0, 4 * day - 1));
+        assert_eq!(calls[1], (4 * day, 8 * day - 1));
         assert_eq!(calls[2], (8 * day, 9 * day));
     }
 
@@ -360,7 +384,7 @@ mod tests {
         let day = TimeFrame::D1.seconds();
         let market = FakeMarket::new(day);
         let hist = FinamHistory::new(market);
-        let bars = block_on(hist.load("SBER", TimeFrame::D1, day, 3 * day)).unwrap();
+        let bars = block_on(hist.load("SBER", TimeFrame::D1, day, 3 * day, &|| false)).unwrap();
         assert_eq!(
             bars.iter().map(|b| b.ts).collect::<Vec<_>>(),
             vec![day, 2 * day]
@@ -374,7 +398,7 @@ mod tests {
         let day = TimeFrame::D1.seconds();
         let market = FakeMarket::new(day);
         let hist = FinamHistory::new(market);
-        let bars = block_on(hist.load("SBER", TimeFrame::D1, 0, 2 * day)).unwrap();
+        let bars = block_on(hist.load("SBER", TimeFrame::D1, 0, 2 * day, &|| false)).unwrap();
         assert_eq!(bars.iter().map(|b| b.ts).collect::<Vec<_>>(), vec![0, day]);
     }
 
@@ -382,7 +406,7 @@ mod tests {
     fn finam_history_empty_for_inverted_window() {
         let market = FakeMarket::new(60);
         let hist = FinamHistory::new(market);
-        let bars = block_on(hist.load("SBER", TimeFrame::M1, 100, 50)).unwrap();
+        let bars = block_on(hist.load("SBER", TimeFrame::M1, 100, 50, &|| false)).unwrap();
         assert!(bars.is_empty());
     }
 
@@ -434,7 +458,7 @@ mod tests {
                 1.0,
             ),
         ]);
-        let out = block_on(src.load("SBER", TimeFrame::M5, 0, 500)).unwrap();
+        let out = block_on(src.load("SBER", TimeFrame::M5, 0, 500, &|| false)).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].ts, 300);
     }
@@ -445,7 +469,7 @@ mod tests {
             bars: Vec::new(),
             error: Some(DataError::Transport("сбой".into())),
         };
-        let err = block_on(src.load("SBER", TimeFrame::M5, 0, 100)).unwrap_err();
+        let err = block_on(src.load("SBER", TimeFrame::M5, 0, 100, &|| false)).unwrap_err();
         assert!(matches!(err, DataError::Transport(_)));
     }
 
@@ -495,7 +519,7 @@ mod tests {
             ..FakeAlgoSource::default()
         };
         let hist = MoexHistory::new(fake, Market::Eq);
-        let out = block_on(hist.load("SBER", TimeFrame::M5, 0, 1000)).unwrap();
+        let out = block_on(hist.load("SBER", TimeFrame::M5, 0, 1000, &|| false)).unwrap();
         assert_eq!(out.len(), 1);
         let b = &out[0];
         assert_eq!(b.source, DataSource::MoexAlgo);

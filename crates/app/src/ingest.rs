@@ -10,6 +10,7 @@
 //! Боевой источник — `data::FinamMarketData` (фича `grpc`); планировщик от его
 //! конкретики не зависит.
 
+use std::borrow::Borrow;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -55,22 +56,23 @@ impl Default for IngestConfig {
 }
 
 /// Планировщик батч-поллинга рыночных данных в хранилище.
-pub struct IngestService<M: MarketData> {
+///
+/// Параметр `S` — держатель состояния. По умолчанию `Arc<AppState>` (владеющий
+/// headless-путь [`crate::live::run`]), но подойдёт и `&AppState` — так GUI-путь
+/// (Tauri-setup) наполняет тот же стор, которым владеет окно, не создавая
+/// собственного (см. [`crate::live::run_ingest_into`]). Оба варианта
+/// удовлетворяют `Borrow<AppState>`.
+pub struct IngestService<M: MarketData, S = Arc<AppState>> {
     source: M,
-    state: Arc<AppState>,
+    state: S,
     cursor: BatchCursor,
     limiter: RateLimiter,
     config: IngestConfig,
 }
 
-impl<M: MarketData> IngestService<M> {
+impl<M: MarketData, S: Borrow<AppState>> IngestService<M, S> {
     /// Создать планировщик для заданного вотчлиста.
-    pub fn new(
-        source: M,
-        state: Arc<AppState>,
-        symbols: Vec<String>,
-        config: IngestConfig,
-    ) -> Self {
+    pub fn new(source: M, state: S, symbols: Vec<String>, config: IngestConfig) -> Self {
         let cursor = BatchCursor::new(symbols, config.batch);
         Self {
             source,
@@ -101,15 +103,33 @@ impl<M: MarketData> IngestService<M> {
             if self.limiter.try_acquire(Method::Bars).is_err() {
                 continue;
             }
-            let bars = self
+            // R-10: сбой одного символа (сеть/хранилище) не должен ронять весь
+            // такт — логируем предупреждение и продолжаем батч. Такт возвращает
+            // Ok с числом фактически записанных баров.
+            let bars = match self
                 .source
                 .bars(&symbol, self.config.timeframe, from_ts, now_ts)
-                .await?;
+                .await
+            {
+                Ok(bars) => bars,
+                Err(e) => {
+                    tracing::warn!(symbol = %symbol, error = %e, "ингест баров: ошибка источника");
+                    continue;
+                }
+            };
             if let Some(last) = bars.last() {
                 let snapshot_ts = last.ts;
-                self.state
-                    .ingest_bars(&symbol, self.config.timeframe, &bars, snapshot_ts)?;
-                written += bars.len();
+                match self.state.borrow().ingest_bars(
+                    &symbol,
+                    self.config.timeframe,
+                    &bars,
+                    snapshot_ts,
+                ) {
+                    Ok(_) => written += bars.len(),
+                    Err(e) => {
+                        tracing::warn!(symbol = %symbol, error = %e, "ингест баров: ошибка записи")
+                    }
+                }
             }
         }
         Ok(written)
@@ -294,6 +314,65 @@ mod tests {
         let written = svc.tick(1_000_000).await.unwrap();
         assert_eq!(written, 2); // только один символ × 2 бара
         assert_eq!(svc.source.bars_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn one_symbol_error_does_not_abort_tick() {
+        // R-10: источник падает на первом символе, но второй всё равно
+        // ингестится — ошибка одного тикера не рвёт весь такт.
+        struct FlakyBySymbol;
+        impl MarketData for FlakyBySymbol {
+            async fn assets(&self, _mic: &str) -> Result<Vec<Instrument>, DataError> {
+                Ok(Vec::new())
+            }
+            async fn bars(
+                &self,
+                symbol: &str,
+                _tf: TimeFrame,
+                _from_ts: i64,
+                to_ts: i64,
+            ) -> Result<Vec<Bar>, DataError> {
+                if symbol == "BAD@MISX" {
+                    return Err(DataError::Transport("сбой сети".into()));
+                }
+                Ok(vec![Bar {
+                    ts: to_ts,
+                    open: 1.0,
+                    high: 1.0,
+                    low: 1.0,
+                    close: 1.0,
+                    volume: 1.0,
+                }])
+            }
+            async fn last_quote(&self, _symbol: &str) -> Result<Quote, DataError> {
+                Err(DataError::Other("не используется".into()))
+            }
+            async fn latest_trades(&self, _symbol: &str) -> Result<Vec<Trade>, DataError> {
+                Ok(Vec::new())
+            }
+        }
+
+        let state = state_with_migrated_store();
+        let mut svc = IngestService::new(
+            FlakyBySymbol,
+            Arc::clone(&state),
+            vec!["BAD@MISX".into(), "GOOD@MISX".into()],
+            cfg(10),
+        );
+
+        let written = svc.tick(1_000_000).await.unwrap();
+        assert_eq!(written, 1); // упал только BAD, GOOD записан
+        assert!(state
+            .bars("BAD@MISX", TimeFrame::D1, 0, i64::MAX)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            state
+                .bars("GOOD@MISX", TimeFrame::D1, 0, i64::MAX)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
